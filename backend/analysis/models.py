@@ -33,9 +33,18 @@ class AnalysisTask(models.Model):
         default=list, blank=True, verbose_name="Мови",
         help_text='Список кодів мов, напр. ["ru"]',
     )
-    channels_only = models.BooleanField(
-        default=True, verbose_name="Тільки канали",
-        help_text="Відкидати чати/коментарі, залишати лише канали",
+    search_posts = models.BooleanField(
+        default=True, verbose_name="Шукати по постах",
+        help_text="Включати пости каналів",
+    )
+    search_comments = models.BooleanField(
+        default=False, verbose_name="Шукати по коментарях",
+        help_text="Включати коментарі/повідомлення чатів",
+    )
+    collect_chunk_days = models.PositiveSmallIntegerField(
+        default=1, verbose_name="Розмір чанка збору (днів)",
+        help_text="Період дробиться на чанки для TeleZip (ліміт ~2 хв/запит). "
+                  "Не впливає на вікно дедупу — воно працює на весь період.",
     )
     telezip_unique = models.BooleanField(
         default=False, verbose_name="TeleZip unique (згортати репости)",

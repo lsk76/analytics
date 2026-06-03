@@ -63,7 +63,9 @@ class Command(BaseCommand):
                 "date_from": date(2025, 1, 1),
                 "date_to": date(2025, 12, 31),
                 "languages": ["ru"],
-                "channels_only": True,
+                "search_posts": True,
+                "search_comments": False,
+                "collect_chunk_days": 1,
                 "telezip_unique": False,   # збирати всі репости -> точне охоплення
                 "classify_system_prompt": CLASSIFY_PROMPT,
                 "relevance_field": "is_relevant",

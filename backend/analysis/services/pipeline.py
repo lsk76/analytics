@@ -53,13 +53,13 @@ def _norm(text):
     return " ".join(w for w in text.split() if len(w) > 3)
 
 
-def _day_chunks(dfrom, dto):
-    """Collect day-by-day: /Find returns ALL matches at once, so a wide window
-    times out. One day of the ethnic query is ~400 posts / ~45s — reliable."""
+def _date_chunks(dfrom, dto, chunk_days):
+    """Split [dfrom, dto) into chunks of `chunk_days` for TeleZip (~2 min/request).
+    Independent of the dedup window — dedup spans the whole collected period."""
     cur = dfrom
-    one = timedelta(days=1)
+    step = timedelta(days=max(1, chunk_days))
     while cur < dto:
-        nxt = min(cur + one, dto)
+        nxt = min(cur + step, dto)
         yield cur, nxt
         cur = nxt
 
@@ -74,7 +74,7 @@ def _set_status(run, status):
 async def _collect_async(task, dfrom, dto):
     out = []
     async with TelezipClient(settings.TELEZIP_API_KEY, settings.TELEZIP_BASE_URL) as tz:
-        for a, b in _day_chunks(dfrom, dto):
+        for a, b in _date_chunks(dfrom, dto, task.collect_chunk_days):
             posts = await tz.find_posts(task.telezip_query, a, b, task.languages or None,
                                         unique=task.telezip_unique)
             out.extend(posts)
@@ -232,8 +232,12 @@ def precluster(run):
     _set_status(run, "classifying")
     task = run.task
     qs = Post.objects.filter(run=run)
-    if task.channels_only:
-        qs = qs.exclude(channel__is_channel=False)   # drop chats early
+    # posts = channel messages (is_channel True/unknown); comments = chats (is_channel False)
+    if task.search_posts and not task.search_comments:
+        qs = qs.exclude(channel__is_channel=False)
+    elif task.search_comments and not task.search_posts:
+        qs = qs.filter(channel__is_channel=False)
+    # both (or neither) -> everything
     posts = [p for p in qs.order_by("posted_at") if p.posted_at]
     n = len(posts)
     if n == 0:
@@ -529,7 +533,9 @@ def run_pipeline(run: ResearchRun):
     run.params = {
         "telezip_query": run.task.telezip_query,
         "languages": run.task.languages,
-        "channels_only": run.task.channels_only,
+        "search_posts": run.task.search_posts,
+        "search_comments": run.task.search_comments,
+        "collect_chunk_days": run.task.collect_chunk_days,
         "relevance_field": run.task.relevance_field,
         "dedup_window_days": run.task.dedup_window_days,
         "dedup_pre_thresh": run.task.dedup_pre_thresh,
