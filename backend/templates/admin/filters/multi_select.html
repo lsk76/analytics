@@ -1,0 +1,47 @@
+{% load i18n %}
+<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+<ul>
+{% for choice in choices %}
+    <li{% if choice.selected %} class="selected"{% endif %}>
+    {% if choice.value == '__all__' %}
+        <a href="{{ choice.query_string|iriencode }}">{{ choice.display }}</a>
+    {% else %}
+        <input type="checkbox" 
+               id="filter_{{ spec.parameter_name }}_{{ choice.value }}"
+               data-filter-param="{{ spec.parameter_name }}"
+               data-filter-value="{{ choice.value }}"
+               {% if choice.selected %}checked{% endif %}
+               onchange="handleMultiSelectFilterChange(this)">
+        <label for="filter_{{ spec.parameter_name }}_{{ choice.value }}">{{ choice.display }}</label>
+    {% endif %}
+    </li>
+{% endfor %}
+</ul>
+
+<script>
+// Multi-select filter handler
+// Handles checkbox changes and updates URL parameters
+function handleMultiSelectFilterChange(checkbox) {
+    const param = checkbox.dataset.filterParam;
+    const value = checkbox.dataset.filterValue;
+    const url = new URL(window.location);
+    
+    if (checkbox.checked) {
+        // Add this value to the URL parameters
+        url.searchParams.append(param, value);
+    } else {
+        // Remove this specific value from URL parameters
+        const values = url.searchParams.getAll(param);
+        url.searchParams.delete(param);
+        values.forEach(v => {
+            if (v !== value) {
+                url.searchParams.append(param, v);
+            }
+        });
+    }
+    
+    // Navigate to the updated URL
+    window.location = url.toString();
+}
+</script>
+

@@ -1,0 +1,44 @@
+# --- Secrets / env ---
+.env
+*.env
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Virtualenv ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Django ---
+*.sqlite3
+*.sqlite3-journal
+db.sqlite3
+/backend/staticfiles/
+/backend/media/
+/backend/**/migrations/*.pyc
+
+# --- Telegram sessions ---
+*.session
+*.session-journal
+
+# --- Pipeline data / caches ---
+data/
+/tmp/
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log

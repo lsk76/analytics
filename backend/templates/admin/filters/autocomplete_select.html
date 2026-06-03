@@ -1,0 +1,298 @@
+{% load i18n static %}
+<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+
+<!-- Load Select2 CSS once -->
+<script>
+if (!document.getElementById('select2-css-loaded')) {
+    var link = document.createElement('link');
+    link.id = 'select2-css-loaded';
+    link.rel = 'stylesheet';
+    link.href = '{% static "vendor/select2/select2.min.css" %}';
+    document.head.appendChild(link);
+}
+</script>
+
+<style>
+#changelist-filter .autocomplete-filter-select-wrapper {
+    select {
+        width: 100%;
+        min-width: 150px;
+    }
+
+    .select2-container {
+        width: 100% !important;
+        margin: 5px 0;
+    }
+
+    .select2-container--default .select2-selection--multiple {
+        min-height: 32px;
+        background: var(--darkened-bg, #f8f8f8);
+        border: 1px solid var(--hairline-color, #ccc);
+        border-radius: 4px;
+        padding: 5px;
+        .select2-selection__rendered {
+            padding: 0!important;
+        }
+
+        .select2-selection__choice {
+            background: var(--primary, #417690);
+            color: var(--primary-fg, #fff);
+            border: none;
+            border-radius: 3px;
+            padding: 2px 8px;
+            margin: 3px;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .select2-selection__choice__display {
+            flex: 1;
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .select2-selection__choice__remove {
+            color: var(--primary-fg, #fff);
+            margin: 0;
+            order: 1;
+            font-weight: bold;
+            border: none;
+            padding: 0 4px;
+            position: absolute;
+            right: 0;
+            left: auto;
+            top: 0;
+            background: none;
+
+            &:hover, &:focus {
+                color: var(--delete-button-bg, #ba2121);
+                background: transparent;
+            }
+        }
+
+        .select2-search__field {
+            color: var(--body-fg, #333);
+            background: transparent;
+        }
+    }
+}
+
+/* Global dropdown styles (must be outside container for portal) */
+.select2-container--default {
+    .select2-dropdown {
+        background: var(--darkened-bg, #f8f8f8);
+        border: 1px solid var(--hairline-color, #ccc);
+    }
+
+    .select2-search--dropdown .select2-search__field {
+        background: var(--body-bg, #fff);
+        color: var(--body-fg, #333);
+        border: 1px solid var(--hairline-color, #ccc);
+        outline: none;
+    }
+
+    .select2-results__option {
+        color: var(--body-fg, #333);
+        padding: 8px 12px;
+        background: var(--darkened-bg, #f8f8f8);
+
+        &--highlighted.select2-results__option--selectable {
+            background: var(--primary, #417690);
+            color: var(--primary-fg, #fff);
+        }
+
+        &--selected {
+            background: var(--selected-bg, #e4e4e4);
+            color: var(--body-fg, #333);
+        }
+    }
+
+    .select2-results__message {
+        color: var(--body-quiet-color, #666);
+        background: var(--darkened-bg, #f8f8f8);
+    }
+
+    .select2-results > .select2-results__options {
+        background: var(--darkened-bg, #f8f8f8);
+    }
+}
+</style>
+
+<ul>
+    <li class="autocomplete-filter-select-wrapper">
+        <select id="autocomplete_filter_{{ spec.parameter_name }}" 
+                class="autocomplete-filter-select"
+                data-filter-param="{{ spec.parameter_name }}"
+                data-autocomplete-url="{{ spec.autocomplete_url }}"
+                multiple>
+            {% for choice in choices %}
+                {% if choice.value and choice.value != '__all__' and choice.selected %}
+                <option value="{{ choice.value }}" data-text="{{ choice.display|escapejs }}" selected>{{ choice.display }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+        <button type="button" id="apply_filter_{{ spec.parameter_name }}" class="button">
+            Пошук
+        </button>
+        <button type="button" id="clear_filter_{{ spec.parameter_name }}" class="button default">
+            {% trans "Clear" %}
+        </button>
+    </li>
+</ul>
+
+<script>
+(function() {
+    function loadSelect2AndInit() {
+        // Wait for django.jQuery first
+        if (typeof django === 'undefined' || typeof django.jQuery === 'undefined') {
+            setTimeout(loadSelect2AndInit, 100);
+            return;
+        }
+        
+        var $ = django.jQuery;
+        
+        // Check if Select2 is already loaded
+        if (typeof $.fn.select2 !== 'undefined') {
+            initFilter($);
+            return;
+        }
+        
+        // Check if we're already loading Select2
+        if (window._select2Loading) {
+            setTimeout(loadSelect2AndInit, 100);
+            return;
+        }
+        
+        window._select2Loading = true;
+        
+        // Temporarily set window.jQuery to django.jQuery so Select2 attaches to it
+        var origJQuery = window.jQuery;
+        var orig$ = window.$;
+        window.jQuery = $;
+        window.$ = $;
+        
+        // Load Select2 JS dynamically
+        var script = document.createElement('script');
+        script.src = '{% static "vendor/select2/select2.min.js" %}';
+        script.onload = function() {
+            // Restore original window.jQuery
+            window.jQuery = origJQuery;
+            window.$ = orig$;
+            window._select2Loading = false;
+            initFilter(django.jQuery);
+        };
+        script.onerror = function() {
+            window.jQuery = origJQuery;
+            window.$ = orig$;
+            window._select2Loading = false;
+            console.error('Failed to load Select2');
+        };
+        document.head.appendChild(script);
+    }
+    
+    function initFilter($) {
+        var $select = $('#autocomplete_filter_{{ spec.parameter_name }}');
+        
+        if ($select.length === 0) {
+            console.log('Select not found: autocomplete_filter_{{ spec.parameter_name }}');
+            return;
+        }
+        
+        if ($select.data('select2')) {
+            return;  // Already initialized
+        }
+        
+        var autocompleteUrl = $select.data('autocomplete-url');
+        var filterParam = $select.data('filter-param');
+        
+        console.log('Initializing autocomplete filter:', filterParam, autocompleteUrl);
+        
+        // Get pre-selected data from existing options (rendered by Django)
+        var preselectedData = [];
+        $select.find('option[selected]').each(function() {
+            var $opt = $(this);
+            preselectedData.push({
+                id: $opt.val(),
+                text: $opt.text()
+            });
+        });
+        
+        console.log('Preselected data:', preselectedData);
+        
+        // Clear options before init (Select2 will manage them)
+        $select.empty();
+        
+        $select.select2({
+            ajax: {
+                url: autocompleteUrl,
+                dataType: 'json',
+                delay: 250,
+                data: function(params) {
+                    return {
+                        term: params.term || '',
+                        page: params.page || 1
+                    };
+                },
+                processResults: function(data) {
+                    return {
+                        results: data.results,
+                        pagination: data.pagination
+                    };
+                },
+                cache: true
+            },
+            placeholder: '{{ spec.placeholder|default:"Пошук..."|escapejs }}',
+            allowClear: true,
+            minimumInputLength: 0,
+            width: '100%',
+            dropdownAutoWidth: true,
+            closeOnSelect: false
+        });
+        
+        // Restore pre-selected values after Select2 init
+        if (preselectedData.length > 0) {
+            preselectedData.forEach(function(item) {
+                var option = new Option(item.text, item.id, true, true);
+                $select.append(option);
+            });
+            $select.trigger('change');
+        }
+        
+        // Apply button - navigate with selected values
+        $('#apply_filter_{{ spec.parameter_name }}').on('click', function() {
+            var url = new URL(window.location);
+            var selectedValues = $select.val() || [];
+            
+            url.searchParams.delete(filterParam);
+            
+            selectedValues.forEach(function(val) {
+                if (val) {
+                    url.searchParams.append(filterParam, val);
+                }
+            });
+            
+            window.location = url.toString();
+        });
+        
+        // Clear button - clear selection and remove filter
+        $('#clear_filter_{{ spec.parameter_name }}').on('click', function() {
+            $select.val(null).trigger('change');
+            var url = new URL(window.location);
+            url.searchParams.delete(filterParam);
+            window.location = url.toString();
+        });
+    }
+    
+    // Start initialization after page is fully loaded
+    if (document.readyState === 'complete') {
+        setTimeout(loadSelect2AndInit, 100);
+    } else {
+        window.addEventListener('load', function() {
+            setTimeout(loadSelect2AndInit, 100);
+        });
+    }
+})();
+</script>
