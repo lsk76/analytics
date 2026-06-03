@@ -18,7 +18,7 @@ from django.conf import settings
 from openai import OpenAI
 
 from analysis.models import (
-    Nationality, NationalityAlias, ConflictType, ConflictTypeAlias,
+    Tag, TagAlias, ConflictType, ConflictTypeAlias,
     Region, RegionAlias,
 )
 
@@ -43,10 +43,9 @@ def _sync_llm(prompt: str) -> str:
         return ""
 
 
-_NAT_RULE = ('українською, в однині, для націй/етносів — чоловічий рід в називному відмінку '
-             '(напр. "таджик", "росіянин", "чеченець"); узагальнені групи лишай як є '
-             '(напр. "мігрант", "місцеві", "кавказець")')
 _TYPE_RULE = 'українською, узагальнено (напр. "напад", "бійка", "вбивство", "погроза", "погром")'
+
+_TAG_CATEGORIES = "nationality | status | religion | role | group | other"
 
 
 def _canonicalize(raw: str, model, alias_model, alias_fk: str, rule: str) -> Optional[object]:
@@ -76,12 +75,74 @@ def _canonicalize(raw: str, model, alias_model, alias_fk: str, rule: str) -> Opt
     return obj
 
 
-def resolve_nationality(raw: str) -> Optional[Nationality]:
-    return _canonicalize(raw, Nationality, NationalityAlias, "nationality", _NAT_RULE)
-
-
 def resolve_conflict_type(raw: str) -> Optional[ConflictType]:
     return _canonicalize(raw, ConflictType, ConflictTypeAlias, "conflict_type", _TYPE_RULE)
+
+
+def resolve_tag(raw: str) -> Optional[Tag]:
+    """
+    Free-text side/participant -> canonical Tag(name, category).
+      * nationality is a CLOSED seeded list — slang maps to a real nation
+        (хачик -> кавказець); roles/descriptors are NOT nationalities.
+      * other categories (status/religion/role/group) are canonicalized + categorized.
+    """
+    key = _key(raw)
+    if not key:
+        return None
+
+    hit = TagAlias.objects.filter(raw=key).select_related("tag").first()
+    if hit:
+        return hit.tag
+
+    nations = list(Tag.objects.filter(category="nationality").values_list("name", flat=True))
+    others = list(Tag.objects.exclude(category="nationality").values_list("name", flat=True))
+    prompt = (
+        'Класифікуй учасника/сторону конфлікту: визнач канонічну назву і категорію.\n'
+        f'Категорії: {_TAG_CATEGORIES}.\n'
+        f'Дозволені НАЦІЇ (для category=nationality обери ТОЧНО зі списку): {nations}\n'
+        f'Наявні інші теги (переюзай за змістом): {others or "(порожньо)"}\n'
+        f'Термін: "{raw}"\n'
+        'Правила:\n'
+        '- якщо це етнос/нація АБО сленг/образа для нації (хачик, абу-бандит, чурка) '
+        '-> category=nationality, name = нація зі списку;\n'
+        '- мігрант/приїжджий/нелегал/іноземець/місцеві -> category=status;\n'
+        '- мусульманин/християнин/ваххабіт/православний -> category=religion;\n'
+        '- підліток/школяр/водій/продавець/силовик/поліцейський/ветеран -> category=role;\n'
+        '- діаспора/ОПГ/банда/скінхеди/неонацисти/община -> category=group;\n'
+        '- name: українською, однина, для націй чол. рід.\n'
+        'Поверни СТРОГО JSON: {"name":"<канонічна>","category":"<одна з категорій>"}. Лише JSON.'
+    )
+    raw_ans = _sync_llm(prompt).strip()
+    if raw_ans.startswith("```"):
+        raw_ans = raw_ans.split("```", 2)[1]
+        if raw_ans.startswith("json"):
+            raw_ans = raw_ans[4:]
+    name, category = "", "other"
+    try:
+        a, b = raw_ans.find("{"), raw_ans.rfind("}")
+        data = json.loads(raw_ans[a:b + 1])
+        name = (data.get("name") or "").strip()[:80]
+        category = (data.get("category") or "other").strip().lower()
+    except Exception:  # noqa: BLE001
+        pass
+    if category not in {"nationality", "status", "religion", "role", "group", "other"}:
+        category = "other"
+    if not name:
+        name = raw.strip()[:80]
+
+    # nationality is closed: if LLM invented a non-seeded nation, demote to 'other'
+    if category == "nationality":
+        match = Tag.objects.filter(category="nationality", name__iexact=name).first()
+        if match:
+            obj = match
+        else:
+            obj = Tag.objects.create(name=name, category="nationality")
+    else:
+        obj = (Tag.objects.filter(category=category, name__iexact=name).first()
+               or Tag.objects.create(name=name, category=category))
+
+    TagAlias.objects.get_or_create(raw=key, defaults={"tag": obj})
+    return obj
 
 
 def resolve_region(raw: str) -> Tuple[Optional[Region], str]:

@@ -12,9 +12,7 @@ import json
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from analysis.models import (
-    Nationality, NationalityAlias, ConflictType, ConflictTypeAlias, Event,
-)
+from analysis.models import ConflictType, ConflictTypeAlias, Event
 from analysis.services.normalize import _sync_llm
 
 
@@ -84,9 +82,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         dry = opts["dry_run"]
-        self.stdout.write("== Національності ==")
-        self._process(Nationality, NationalityAlias, "nationality", True,
-                       'українською, однина, чол. рід (таджик, росіянин)', dry)
+        # Nationalities are now closed Tags (seed_nationalities + resolve_tag), so only
+        # ConflictType needs the old open-vocab merge.
         self.stdout.write("== Типи конфліктів ==")
         self._process(ConflictType, ConflictTypeAlias, "conflict_type", False,
                       'українською, узагальнено (напад, бійка, вбивство)', dry)

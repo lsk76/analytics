@@ -23,7 +23,7 @@ from rapidfuzz.fuzz import token_set_ratio
 from analysis.models import Post, Event, Channel, ResearchRun
 from .telezip import TelezipClient
 from . import llm
-from .normalize import resolve_nationality, resolve_conflict_type, resolve_region
+from .normalize import resolve_tag, resolve_conflict_type, resolve_region
 
 logger = logging.getLogger(__name__)
 
@@ -352,11 +352,58 @@ def _summary_of(post):
     return (post.classification or {}).get("summary") or post.text[:200]
 
 
+def _create_event(run, task, posts_in):
+    """Materialize one finalized cluster of posts into an Event (region/sides/type/reach)."""
+    posts_in = sorted(posts_in, key=lambda p: p.posted_at)
+    head = posts_in[0]
+    cls = head.classification or {}
+    region = (cls.get("region") or "").strip()
+    if not region and head.channel and head.channel.inferred_region:
+        region = head.channel.inferred_region  # channel-name/desc fallback
+    region_subject, settlement = resolve_region(region) if region else (None, "")
+    ev = Event.objects.create(
+        task=task, run=run,
+        event_date=head.posted_at.date(),
+        region=region, region_subject=region_subject, settlement=settlement,
+        conflict_type=resolve_conflict_type(cls.get("type") or "") if cls.get("type") else None,
+        summary=cls.get("summary") or head.text[:300],
+        post_count=len(posts_in),
+        is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
+    )
+    tag_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_tag(raw))]
+    if tag_objs:
+        ev.tags.set(tag_objs)
+    chans = {}
+    for p in posts_in:
+        p.event = ev
+        if p.channel:
+            chans[p.channel_id] = p.channel.subscribers or 0
+    Post.objects.bulk_update(posts_in, ["event"], batch_size=500)
+    ev.reach = sum(chans.values())
+    ev.save(update_fields=["reach"])
+    return ev
+
+
+def _cluster_of(posts):
+    """A working cluster: posts + representative (earliest) + fuzzy keys + date span."""
+    posts = sorted(posts, key=lambda p: p.posted_at)
+    rep = posts[0]
+    return {
+        "posts": posts, "rep": rep,
+        "text": _norm(rep.text), "sum": _norm(_summary_of(rep)),
+        "dmin": posts[0].posted_at, "dmax": posts[-1].posted_at,
+    }
+
+
 def dedup(run):
     """
-    AI dedup over PRECLUSTERED relevant groups (one representative each):
-    candidate group-pairs within the window (fuzzy text/summary) are judged by the
-    LLM ("ОДНА чи РІЗНІ?") and merged. Events are written only at the end.
+    Sliding micro-batch dedup (streaming):
+      * groups are processed chronologically, one DAY at a time;
+      * only 'open' events within the window stay in memory;
+      * the day's candidate pairs (new vs open + new vs new) are judged by the LLM
+        IN PARALLEL (micro-batch), merged via union-find;
+      * events whose newest post ages out of the window are finalized and written.
+    Combines batch parallelism (within a day) with streaming (across days).
     """
     _set_status(run, "deduplicating")
     task = run.task
@@ -372,80 +419,76 @@ def dedup(run):
     by_group = defaultdict(list)
     for p in rel:
         by_group[p.dedup_group].append(p)
-    # order groups by their earliest post; representative = earliest post in group
-    gids = sorted(by_group, key=lambda g: min(p.posted_at for p in by_group[g]))
-    rep = {g: min(by_group[g], key=lambda p: p.posted_at) for g in gids}
-    gdate = {g: rep[g].posted_at for g in gids}
-    gtext = {g: _norm(rep[g].text) for g in gids}
-    gsum = {g: _norm(_summary_of(rep[g])) for g in gids}
+    clusters = sorted((_cluster_of(g) for g in by_group.values()), key=lambda c: c["dmin"])
+
     win = timedelta(days=task.dedup_window_days)
 
-    parent = {g: g for g in gids}
+    def fuzzy(a, b):
+        return max(token_set_ratio(a["text"], b["text"]), token_set_ratio(a["sum"], b["sum"]))
 
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
+    active = []          # open clusters (events still within the window)
+    n_events = n_llm = 0
+    i, N = 0, len(clusters)
 
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
+    while i < N:
+        day = clusters[i]["dmin"].date()
+        day_new = []
+        while i < N and clusters[i]["dmin"].date() == day:
+            day_new.append(clusters[i])
+            i += 1
 
-    # candidate group-pairs within window (fuzzy on text or summary)
-    m = len(gids)
-    cand = []
-    for ai in range(m):
-        for bi in range(ai + 1, m):
-            ga, gb = gids[ai], gids[bi]
-            if gdate[gb] - gdate[ga] > win:
-                break
-            if max(token_set_ratio(gtext[ga], gtext[gb]),
-                   token_set_ratio(gsum[ga], gsum[gb])) >= task.dedup_cand_thresh:
-                cand.append((ga, gb))
-    logger.info("dedup: %d groups, %d candidate pairs -> LLM", m, len(cand))
-    if cand:
-        pairs_text = [(_summary_of(rep[ga]), _summary_of(rep[gb])) for ga, gb in cand]
-        same = asyncio.run(_judge_pairs(pairs_text))
-        for (ga, gb), s in zip(cand, same):
+        # finalize active clusters that can't get more reposts (aged out of window)
+        day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+        keep = []
+        for c in active:
+            if day_start - c["dmax"] > win:
+                _create_event(run, task, c["posts"])
+                n_events += 1
+            else:
+                keep.append(c)
+        active = keep
+
+        # candidate pairs: each NEW cluster vs (active + earlier new)
+        pool = active + day_new
+        base = len(active)
+        pairs = []
+        for b in range(base, len(pool)):       # b = a new cluster
+            for a in range(0, b):              # vs everything before it
+                if fuzzy(pool[a], pool[b]) >= task.dedup_cand_thresh:
+                    pairs.append((a, b))
+
+        same = []
+        if pairs:
+            n_llm += len(pairs)
+            pairs_text = [(_summary_of(pool[a]["rep"]), _summary_of(pool[b]["rep"])) for a, b in pairs]
+            same = asyncio.run(_judge_pairs(pairs_text))   # PARALLEL within the day
+
+        parent = list(range(len(pool)))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for (a, b), s in zip(pairs, same):
             if s:
-                union(ga, gb)
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    parent[max(ra, rb)] = min(ra, rb)
 
-    # final event clusters = merged groups -> all their posts
-    final = defaultdict(list)
-    for g in gids:
-        final[find(g)].extend(by_group[g])
+        merged = defaultdict(list)
+        for k in range(len(pool)):
+            merged[find(k)].extend(pool[k]["posts"])
+        active = [_cluster_of(posts) for posts in merged.values()]
 
-    for posts_in in final.values():
-        posts_in.sort(key=lambda p: p.posted_at)
-        head = posts_in[0]
-        cls = head.classification or {}
-        region = (cls.get("region") or "").strip()
-        if not region and head.channel and head.channel.inferred_region:
-            region = head.channel.inferred_region  # requirement #1 fallback
-        region_subject, settlement = resolve_region(region) if region else (None, "")
-        ev = Event.objects.create(
-            task=task, run=run,
-            event_date=head.posted_at.date(),
-            region=region, region_subject=region_subject, settlement=settlement,
-            conflict_type=resolve_conflict_type(cls.get("type") or "") if cls.get("type") else None,
-            summary=cls.get("summary") or head.text[:300],
-            post_count=len(posts_in),
-            is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
-        )
-        side_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_nationality(raw))]
-        if side_objs:
-            ev.sides.set(side_objs)
-        chans = {}
-        for p in posts_in:
-            p.event = ev
-            if p.channel:
-                chans[p.channel_id] = p.channel.subscribers or 0
-        Post.objects.bulk_update(posts_in, ["event"], batch_size=500)
-        ev.reach = sum(chans.values())
-        ev.save(update_fields=["reach"])
+    # finalize everything still open
+    for c in active:
+        _create_event(run, task, c["posts"])
+        n_events += 1
 
+    logger.info("dedup(streaming): %d groups -> %d events, %d LLM judgments",
+                len(clusters), n_events, n_llm)
     run.events_total = Event.objects.filter(run=run).count()
     run.events_corroborated = Event.objects.filter(run=run, is_corroborated=True).count()
     run.save(update_fields=["events_total", "events_corroborated"])
@@ -455,19 +498,24 @@ def dedup(run):
 
 def aggregate(run):
     events = (Event.objects.filter(run=run)
-              .prefetch_related("sides").select_related("conflict_type", "region_subject"))
-    by_month, by_region, by_type, by_side = Counter(), Counter(), Counter(), Counter()
+              .prefetch_related("tags").select_related("conflict_type", "region_subject"))
+    by_month, by_region, by_type = Counter(), Counter(), Counter()
+    by_cat = defaultdict(Counter)   # category -> Counter(tag name)
     for e in events:
         by_month[(e.event_date.strftime("%Y-%m") if e.event_date else "?")] += 1
         by_region[e.region_subject.name if e.region_subject else "?"] += 1
         by_type[e.conflict_type.name if e.conflict_type else "?"] += 1
-        for s in e.sides.all():
-            by_side[s.name] += 1
+        for t in e.tags.all():
+            by_cat[t.category][t.name] += 1
     run.stats = {
         "by_month": dict(sorted(by_month.items())),
         "by_region": dict(by_region.most_common(40)),
         "by_type": dict(by_type.most_common()),
-        "by_side": dict(by_side.most_common(40)),
+        "by_nationality": dict(by_cat["nationality"].most_common(40)),
+        "by_status": dict(by_cat["status"].most_common(20)),
+        "by_role": dict(by_cat["role"].most_common(20)),
+        "by_religion": dict(by_cat["religion"].most_common(20)),
+        "by_group": dict(by_cat["group"].most_common(20)),
     }
     run.status = "completed"
     run.finished_at = djtz.now()

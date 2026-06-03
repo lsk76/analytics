@@ -4,7 +4,7 @@ from django.utils.safestring import mark_safe
 from rangefilter.filters import DateRangeFilterBuilder
 
 from .models import (
-    AnalysisTask, Channel, Nationality, NationalityAlias,
+    AnalysisTask, Channel, Tag, TagAlias,
     ConflictType, ConflictTypeAlias, Post, Event, ResearchRun,
     Region, RegionAlias,
 )
@@ -16,11 +16,25 @@ RunFilter = multiselect_filter(
     ResearchRun, "Запуск", "run", ordering="-created_at", label_callback=str)
 TypeFilter = multiselect_filter(ConflictType, "Тип конфлікту", "conflict_type", ordering="name")
 
-SidesFilter = autocomplete_filter(
-    title="Сторони (нації)", parameter_name="side_id",
-    filter_field="sides__id__in",
-    selected_lookup=lambda req, ids: Nationality.objects.filter(id__in=ids),
-    admin_autocomplete_field="sides", placeholder="Пошук нації…")
+TagFilter = autocomplete_filter(
+    title="Сторони/теги", parameter_name="tag_id",
+    filter_field="tags__id__in",
+    selected_lookup=lambda req, ids: Tag.objects.filter(id__in=ids),
+    admin_autocomplete_field="tags", placeholder="Пошук тега…",
+    label_callback=lambda t: f"{t.name} ({t.get_category_display()})")
+
+
+class TagCategoryFilter(admin.SimpleListFilter):
+    title = "Категорія тега"
+    parameter_name = "tag_category"
+
+    def lookups(self, request, model_admin):
+        return Tag.CATEGORY_CHOICES
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(tags__category=self.value()).distinct()
+        return queryset
 
 SubjectFilter = autocomplete_filter(
     title="Суб'єкт РФ", parameter_name="region_id",
@@ -73,16 +87,17 @@ class ChannelAdmin(admin.ModelAdmin):
     list_filter = ("is_channel", "enriched")
 
 
-class NationalityAliasInline(admin.TabularInline):
-    model = NationalityAlias
+class TagAliasInline(admin.TabularInline):
+    model = TagAlias
     extra = 0
 
 
-@admin.register(Nationality)
-class NationalityAdmin(admin.ModelAdmin):
-    list_display = ("name", "family", "region_hint")
+@admin.register(Tag)
+class TagAdmin(admin.ModelAdmin):
+    list_display = ("name", "category")
+    list_filter = ("category",)
     search_fields = ("name", "aliases__raw")
-    inlines = [NationalityAliasInline]
+    inlines = [TagAliasInline]
 
 
 class ConflictTypeAliasInline(admin.TabularInline):
@@ -107,7 +122,7 @@ class PostAdmin(admin.ModelAdmin):
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
     list_display = ("event_date", "region_subject", "settlement", "conflict_type",
-                    "sides_list", "count_short", "reach_display", "posts_preview", "summary")
+                    "tags_list", "count_short", "reach_display", "posts_preview", "summary")
     readonly_fields = ("posts_all",)
     date_hierarchy = "event_date"
     list_filter = (
@@ -115,14 +130,15 @@ class EventAdmin(admin.ModelAdmin):
         TaskFilter,                        # за задачею
         RunFilter,                         # за запуском
         SubjectFilter,                     # за суб'єктом РФ
-        SidesFilter,                       # за національностями
+        TagFilter,                         # за тегами (нації/ролі/...)
+        TagCategoryFilter,                 # за категорією тега
         ChannelFilter,                     # за каналами
         TypeFilter,                        # за типом
         "is_corroborated",
     )
     search_fields = ("summary", "region", "settlement")
-    filter_horizontal = ("sides",)
-    autocomplete_fields = ("region_subject", "conflict_type", "sides", "run", "task")
+    filter_horizontal = ("tags",)
+    autocomplete_fields = ("region_subject", "conflict_type", "tags", "run", "task")
 
     class Media:
         # Load jQuery + Select2 in Django's order so `django.jQuery.fn.select2`
@@ -135,11 +151,11 @@ class EventAdmin(admin.ModelAdmin):
         ]
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related("posts__channel", "sides")
+        return super().get_queryset(request).prefetch_related("posts__channel", "tags")
 
-    @admin.display(description="Сторони")
-    def sides_list(self, obj):
-        return ", ".join(s.name for s in obj.sides.all())
+    @admin.display(description="Сторони/теги")
+    def tags_list(self, obj):
+        return ", ".join(t.name for t in obj.tags.all())
 
     @admin.display(description="к-сть", ordering="post_count")
     def count_short(self, obj):

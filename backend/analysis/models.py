@@ -123,36 +123,47 @@ class Channel(models.Model):
 # Керовані довідники (відкриті + авто-мапінг аліасів -> без дублів за сенсом)
 # ---------------------------------------------------------------------------
 
-class Nationality(models.Model):
-    """Канонічна група-учасник (нація/етнос/мігрант/...)."""
-    name = models.CharField(max_length=80, unique=True, verbose_name="Назва (канонічна)")
-    family = models.CharField(max_length=80, blank=True, verbose_name="Група/родина")
-    region_hint = models.CharField(max_length=128, blank=True, verbose_name="Підказка регіону")
+class Tag(models.Model):
+    """
+    Канонічна сторона/аспект конфлікту з категорією.
+    nationality — закритий сід-список; решта категорій канонізуються LLM.
+    """
+    CATEGORY_CHOICES = [
+        ("nationality", "Національність"),
+        ("status", "Статус (мігрант/місцеві)"),
+        ("religion", "Релігія"),
+        ("role", "Роль/професія/вік"),
+        ("group", "Організація/спільнота"),
+        ("other", "Інше"),
+    ]
+    name = models.CharField(max_length=80, verbose_name="Назва (канонічна)")
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES,
+                                default="other", db_index=True, verbose_name="Категорія")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:
-        verbose_name = "Національність"
-        verbose_name_plural = "Національності"
-        ordering = ["name"]
+        verbose_name = "Тег"
+        verbose_name_plural = "Теги"
+        ordering = ["category", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["name", "category"], name="uniq_tag_name_category"),
+        ]
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.get_category_display()})"
 
 
-class NationalityAlias(models.Model):
-    """Зіставляє будь-який варіант вільного тексту -> канонічну Nationality (ключ у нижньому регістрі)."""
+class TagAlias(models.Model):
+    """Зіставляє будь-який варіант вільного тексту -> канонічний Tag (ключ у нижньому регістрі)."""
     raw = models.CharField(max_length=120, unique=True, verbose_name="Варіант (аліас)")
-    nationality = models.ForeignKey(
-        Nationality, on_delete=models.CASCADE, related_name="aliases",
-        verbose_name="Національність",
-    )
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="aliases", verbose_name="Тег")
 
     class Meta:
-        verbose_name = "Аліас національності"
-        verbose_name_plural = "Аліаси національностей"
+        verbose_name = "Аліас тега"
+        verbose_name_plural = "Аліаси тегів"
 
     def __str__(self):
-        return f"{self.raw} -> {self.nationality_id}"
+        return f"{self.raw} -> {self.tag_id}"
 
 
 class ConflictType(models.Model):
@@ -334,7 +345,7 @@ class Event(models.Model):
         ConflictType, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="events", verbose_name="Тип конфлікту",
     )
-    sides = models.ManyToManyField(Nationality, blank=True, related_name="events", verbose_name="Сторони")
+    tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Сторони/теги")
     summary = models.TextField(blank=True, verbose_name="Опис")
     post_count = models.PositiveIntegerField(default=0, verbose_name="Кількість постів")
     reach = models.BigIntegerField(
