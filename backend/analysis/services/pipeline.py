@@ -392,11 +392,19 @@ def _cluster_of(posts):
     """A working cluster: posts + representative (earliest) + fuzzy keys + date span."""
     posts = sorted(posts, key=lambda p: p.posted_at)
     rep = posts[0]
+    cls = rep.classification or {}
     return {
         "posts": posts, "rep": rep,
         "text": _norm(rep.text), "sum": _norm(_summary_of(rep)),
+        "sides": [_norm(s) for s in (cls.get("sides") or []) if s],
+        "region": _norm(cls.get("region") or ""),
         "dmin": posts[0].posted_at, "dmax": posts[-1].posted_at,
     }
+
+
+def _shared_side(a, b):
+    """True if the two clusters mention the same participant group (fuzzy on side names)."""
+    return any(token_set_ratio(x, y) >= 80 for x in a["sides"] for y in b["sides"])
 
 
 def dedup(run):
@@ -452,13 +460,20 @@ def dedup(run):
                 keep.append(c)
         active = keep
 
-        # candidate pairs: each NEW cluster vs (active + earlier new)
+        # candidate pairs: each NEW cluster vs (active + earlier new).
+        # A pair is a candidate if the texts/summaries are similar enough, OR they
+        # share a participant group with a softer summary match (same incident,
+        # different wording — e.g. 3 framings of one bus attack).
         pool = active + day_new
         base = len(active)
+        soft = max(35, task.dedup_cand_thresh - 20)
         pairs = []
         for b in range(base, len(pool)):       # b = a new cluster
             for a in range(0, b):              # vs everything before it
                 if fuzzy(pool[a], pool[b]) >= task.dedup_cand_thresh:
+                    pairs.append((a, b))
+                elif _shared_side(pool[a], pool[b]) and \
+                        token_set_ratio(pool[a]["sum"], pool[b]["sum"]) >= soft:
                     pairs.append((a, b))
 
         same = []
