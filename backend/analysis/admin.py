@@ -1,6 +1,8 @@
 from django.contrib import admin
+from django.db.models import Count
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
+from django.utils.translation import gettext_lazy as _
 from rangefilter.filters import DateRangeFilterBuilder
 
 from .models import (
@@ -9,7 +11,7 @@ from .models import (
     Region, RegionAlias,
 )
 from .multiselect_filter import (
-    multiselect_filter, autocomplete_filter, create_multiselect_filter,
+    multiselect_filter, autocomplete_filter, MultiSelectFilter,
 )
 
 # --- reusable filter widgets (pso-style) -----------------------------------
@@ -18,19 +20,74 @@ RunFilter = multiselect_filter(
     ResearchRun, "Запуск", "run", ordering="-created_at", label_callback=str)
 
 
+class TagCategoryMultiSelectFilter(MultiSelectFilter):
+    """
+    Faceted multi-select for tags of ONE category:
+      * shows only tags PRESENT in the current selection (other filters applied);
+      * each option carries the number of events that would remain.
+    Within a category the selected tags are OR-ed; across categories — AND-ed.
+    """
+    category = None
+
+    def filter_queryset(self, queryset, values):
+        return queryset.filter(tags__id__in=values)
+
+    def lookups(self, request, model_admin):  # fallback; choices() does the real work
+        return [(str(t.id), t.name)
+                for t in Tag.objects.filter(category=self.category).order_by("name")]
+
+    def _facet_base(self, changelist):
+        """Queryset with every OTHER filter (and search) applied, but not this one."""
+        qs = changelist.root_queryset
+        for spec in getattr(changelist, "filter_specs", []) or []:
+            if spec is self:
+                continue
+            try:
+                res = spec.queryset(self.request, qs)
+                if res is not None:
+                    qs = res
+            except Exception:  # noqa: BLE001
+                pass
+        if getattr(changelist, "query", ""):
+            qs, _se = changelist.model_admin.get_search_results(
+                self.request, qs, changelist.query)
+        return qs
+
+    def choices(self, changelist):
+        selected = self.request.GET.getlist(self.parameter_name)
+        yield {
+            "selected": len(selected) == 0,
+            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+            "display": _("All"),
+            "value": "__all__",
+        }
+        base = self._facet_base(changelist)
+        rows = (base.filter(tags__category=self.category)
+                .values("tags__id", "tags__name")
+                .annotate(n=Count("pk", distinct=True)))
+        present = {str(r["tags__id"]): (r["tags__name"], r["n"]) for r in rows}
+        # keep currently-selected tags visible even if they yield 0 now
+        for tid in selected:
+            if tid not in present:
+                t = Tag.objects.filter(id=tid).first()
+                if t:
+                    present[tid] = (t.name, 0)
+        for tid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
+            yield {
+                "selected": tid in selected,
+                "query_string": "",
+                "display": f"{name} ({n})",
+                "value": tid,
+            }
+
+
 def tag_category_filter(category: str):
-    """A multi-select checkbox filter listing only the tags of ONE category.
-    Combining several (e.g. nationality + conflict) ANDs across categories,
-    ORs within a category — the dynamic 'category -> its tags' structure."""
+    """Dynamic 'category -> its tags' faceted multiselect (one per category)."""
     label = dict(Tag.CATEGORY_CHOICES).get(category, category)
-    return create_multiselect_filter(
-        model=Tag,
-        title=label,
-        parameter_name=f"tag_{category}",
-        filter_field="tags__id__in",
-        queryset_callback=lambda qs, c=category: qs.filter(category=c),
-        label_callback=lambda t: t.name,
-        ordering="name",
+    return type(
+        f"Tag{category.capitalize()}Filter",
+        (TagCategoryMultiSelectFilter,),
+        {"title": label, "parameter_name": f"tag_{category}", "category": category},
     )
 
 

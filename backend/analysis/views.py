@@ -18,7 +18,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["event_date", "post_count"]
 
     def get_queryset(self):
-        qs = Event.objects.prefetch_related("tags", "posts")
+        qs = Event.objects.prefetch_related("tags", "posts__channel")
         task = self.request.query_params.get("task")
         if task:
             qs = qs.filter(task__slug=task)
