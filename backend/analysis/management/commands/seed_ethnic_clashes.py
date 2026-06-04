@@ -50,6 +50,24 @@ CLASSIFY_PROMPT = (
     "Значення тегів пиши українською, узагальнено (напр. таджик, русский, чеченець, мігрант)."
 )
 
+# Dedup judge prompt (was the global PAIR_SYS) — now stored on the task.
+DEDUP_JUDGE_PROMPT = (
+    "Дано два новинні повідомлення (A і B). Визнач, чи описують вони ОДИН І ТОЙ САМИЙ "
+    "конкретний інцидент: те саме місце/населений пункт, ті самі учасники та ті самі дії.\n"
+    "ВАЖЛИВО: спільна тема (обидва про мігрантів, про етнічний конфлікт тощо) НЕ означає одну подію. "
+    "Якщо місце, жертви або суть події різні — це РІЗНІ події.\n"
+    "Відповідай одним словом: ОДНА або РІЗНІ."
+)
+
+# Generic umbrella sides (was the global GENERIC_SIDES) — not a shared-side signal.
+GENERIC_SIDES = [
+    "мігрант", "мигрант", "мігранти", "приїжджий", "приезжий", "нелегал", "гастарбайтер",
+    "місцевий", "местный", "житель", "іноземець", "иностранец", "чужинець",
+    "кавказець", "кавказец", "азіат", "азиат", "діаспора", "диаспора", "етнічний",
+    "росіянин", "русский", "росіянка", "українець", "українка", "слов янин",
+    "охорона", "охоронець", "поліція", "полиция", "силовик", "поліцейський", "коренной",
+]
+
 
 class Command(BaseCommand):
     help = "Seed the ethnic-clashes AnalysisTask"
@@ -74,10 +92,11 @@ class Command(BaseCommand):
                 "dedup_pre_thresh": 82,
                 "dedup_cand_thresh": 55,
                 "llm_model": "google/gemini-2.5-flash",
-                # domain config: nationalities are a closed seed list; geo on;
-                # dedup judge prompt + generic sides left blank => ethnic defaults
+                # domain config — everything explicit on the task (no global fallbacks)
                 "geo_enabled": True,
                 "closed_tag_categories": ["nationality"],
+                "dedup_judge_prompt": DEDUP_JUDGE_PROMPT,
+                "generic_sides": GENERIC_SIDES,
             },
         )
         # tag categories this task collects (schema built from these)
