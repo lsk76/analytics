@@ -1,0 +1,22 @@
+{% load i18n %}
+<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+<select class="facet-dropdown" style="max-width:100%"
+        data-filter-param="{{ spec.parameter_name }}"
+        onchange="handleDropdownFilterChange(this)">
+{% for choice in choices %}
+    <option value="{{ choice.value }}"{% if choice.selected %} selected{% endif %}>{{ choice.display }}</option>
+{% endfor %}
+</select>
+
+<script>
+function handleDropdownFilterChange(sel) {
+    const param = sel.dataset.filterParam;
+    const value = sel.value;
+    const url = new URL(window.location);
+    url.searchParams.delete(param);
+    if (value && value !== '__all__') {
+        url.searchParams.set(param, value);
+    }
+    window.location = url.toString();
+}
+</script>
