@@ -110,6 +110,8 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", os.getenv("TG_API_HASH", ""))
 
 TELEZIP_API_KEY = os.getenv("TELEZIP_API_KEY", "")
 TELEZIP_BASE_URL = os.getenv("TELEZIP_BASE_URL", "https://api.telezip.net/v3")
+# Max CONCURRENT TeleZip requests (API allows very few). Enforced in TelezipClient.
+TELEZIP_MAX_CONCURRENCY = int(os.getenv("TELEZIP_MAX_CONCURRENCY", "2"))
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_API_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")

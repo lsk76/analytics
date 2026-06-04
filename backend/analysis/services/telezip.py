@@ -7,14 +7,31 @@ Only the bits the pipeline needs:
 """
 import asyncio
 import logging
+import weakref
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
+
+# Global cap on CONCURRENT TeleZip requests (API allows very few — default 2).
+# Enforced at the client level so EVERY caller is throttled, no matter the worker.
+# asyncio.Semaphore is loop-bound, so we keep one per running loop.
+_sem_by_loop: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _gate() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _sem_by_loop.get(loop)
+    if sem is None:
+        n = max(1, int(getattr(settings, "TELEZIP_MAX_CONCURRENCY", 2) or 2))
+        sem = asyncio.Semaphore(n)
+        _sem_by_loop[loop] = sem
+    return sem
 
 
 class TelezipClient:
@@ -43,21 +60,24 @@ class TelezipClient:
     async def _request(self, method: str, endpoint: str, params=None, json_data=None):
         url = f"{self.base_url}{endpoint}"
         last_exc = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                async with self._session.request(method, url, params=params, json=json_data) as resp:
-                    if resp.status >= 500 or resp.status == 429:
-                        raise RuntimeError(f"TeleZip {resp.status}")
-                    if resp.status >= 400:
-                        text = await resp.text()
-                        raise RuntimeError(f"TeleZip {resp.status}: {text[:300]}")
-                    return await resp.json()
-            except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-                last_exc = e
-                wait = 2 ** attempt
-                logger.warning("TeleZip %s attempt %d/%d failed (%s), retrying in %ds",
-                               endpoint, attempt + 1, MAX_RETRIES, e, wait)
-                await asyncio.sleep(wait)
+        # one global slot held for the whole request (incl. retries) => never more
+        # than TELEZIP_MAX_CONCURRENCY connections in flight across all callers
+        async with _gate():
+            for attempt in range(MAX_RETRIES):
+                try:
+                    async with self._session.request(method, url, params=params, json=json_data) as resp:
+                        if resp.status >= 500 or resp.status == 429:
+                            raise RuntimeError(f"TeleZip {resp.status}")
+                        if resp.status >= 400:
+                            text = await resp.text()
+                            raise RuntimeError(f"TeleZip {resp.status}: {text[:300]}")
+                        return await resp.json()
+                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
+                    last_exc = e
+                    wait = 2 ** attempt
+                    logger.warning("TeleZip %s attempt %d/%d failed (%s), retrying in %ds",
+                                   endpoint, attempt + 1, MAX_RETRIES, e, wait)
+                    await asyncio.sleep(wait)
         raise RuntimeError(f"TeleZip {endpoint} failed after {MAX_RETRIES} attempts: {last_exc}")
 
     @staticmethod
