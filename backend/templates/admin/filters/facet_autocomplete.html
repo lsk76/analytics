@@ -1,0 +1,91 @@
+{% load i18n static %}
+<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+
+<script>
+if (!document.getElementById('select2-css-loaded')) {
+    var link = document.createElement('link');
+    link.id = 'select2-css-loaded';
+    link.rel = 'stylesheet';
+    link.href = '{% static "vendor/select2/select2.min.css" %}';
+    document.head.appendChild(link);
+}
+</script>
+
+<style>
+#changelist-filter .facet-autocomplete-wrapper { padding: 4px 8px; }
+#changelist-filter .facet-autocomplete-wrapper select { width: 100%; min-width: 150px; }
+#changelist-filter .facet-autocomplete-wrapper .select2-container { width: 100% !important; margin: 5px 0; }
+.select2-container--default .select2-selection--multiple {
+    background: var(--darkened-bg, #f8f8f8);
+    border: 1px solid var(--hairline-color, #ccc);
+    border-radius: 4px;
+}
+.select2-container--default .select2-selection--multiple .select2-selection__choice {
+    background: var(--primary, #417690); color: var(--primary-fg, #fff);
+    border: none; border-radius: 3px; padding: 2px 8px; margin: 3px;
+}
+.select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
+    background: var(--primary, #417690); color: var(--primary-fg, #fff);
+}
+</style>
+
+<ul>
+    <li class="facet-autocomplete-wrapper">
+        <select id="facet_ac_{{ spec.parameter_name }}"
+                class="facet-autocomplete-select"
+                data-filter-param="{{ spec.parameter_name }}"
+                multiple>
+            {% for choice in choices %}
+                {% if choice.value and choice.value != '__all__' %}
+                <option value="{{ choice.value }}"{% if choice.selected %} selected{% endif %}>{{ choice.display }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+        <button type="button" id="apply_{{ spec.parameter_name }}" class="button">{% trans "Search" %}</button>
+        <button type="button" id="clear_{{ spec.parameter_name }}" class="button default">{% trans "Clear" %}</button>
+    </li>
+</ul>
+
+<script>
+(function() {
+    function start() {
+        if (typeof django === 'undefined' || typeof django.jQuery === 'undefined') {
+            return setTimeout(start, 100);
+        }
+        var $ = django.jQuery;
+        if (typeof $.fn.select2 !== 'undefined') return init($);
+        if (window._select2Loading) return setTimeout(start, 100);
+        window._select2Loading = true;
+        var oJ = window.jQuery, oD = window.$;
+        window.jQuery = $; window.$ = $;
+        var s = document.createElement('script');
+        s.src = '{% static "vendor/select2/select2.min.js" %}';
+        s.onload = function() { window.jQuery = oJ; window.$ = oD; window._select2Loading = false; init(django.jQuery); };
+        s.onerror = function() { window.jQuery = oJ; window.$ = oD; window._select2Loading = false; };
+        document.head.appendChild(s);
+    }
+    function init($) {
+        var $sel = $('#facet_ac_{{ spec.parameter_name }}');
+        if ($sel.length === 0 || $sel.data('select2')) return;
+        var param = $sel.data('filter-param');
+        $sel.select2({
+            placeholder: '{{ spec.placeholder|default:"Пошук..."|escapejs }}',
+            allowClear: true, width: '100%', closeOnSelect: false
+        });
+        $('#apply_{{ spec.parameter_name }}').on('click', function() {
+            var url = new URL(window.location);
+            url.searchParams.delete(param);
+            ($sel.val() || []).forEach(function(v) { if (v) url.searchParams.append(param, v); });
+            window.location = url.toString();
+        });
+        $('#clear_{{ spec.parameter_name }}').on('click', function() {
+            $sel.val(null).trigger('change');
+            var url = new URL(window.location);
+            url.searchParams.delete(param);
+            window.location = url.toString();
+        });
+    }
+    if (document.readyState === 'complete') setTimeout(start, 100);
+    else window.addEventListener('load', function() { setTimeout(start, 100); });
+})();
+</script>

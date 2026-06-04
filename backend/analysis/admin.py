@@ -66,7 +66,10 @@ class TagCategoryMultiSelectFilter(MultiSelectFilter):
             "value": "__all__",
         }
         base = self._facet_base(changelist)
-        rows = (base.filter(tags__category=self.category)
+        # materialize event ids first — base may carry .distinct()/M2M joins that
+        # corrupt a grouped annotate; count on a clean queryset instead
+        ids = list(base.values_list("pk", flat=True).distinct())
+        rows = (Event.objects.filter(pk__in=ids, tags__category=self.category)
                 .values("tags__id", "tags__name")
                 .annotate(n=Count("pk", distinct=True)))
         present = {str(r["tags__id"]): (r["tags__name"], r["n"]) for r in rows}
@@ -98,54 +101,49 @@ def tag_category_filter(category: str):
 # one multiselect per tag category (dynamic structure)
 TAG_CATEGORY_FILTERS = [tag_category_filter(cat) for cat, _label in Tag.CATEGORY_CHOICES]
 
-class SubjectFilter(admin.SimpleListFilter):
-    """Faceted single-select dropdown for RF subject: only subjects present in the
-    current selection, each with its event count."""
+class SubjectFilter(MultiSelectFilter):
+    """Faceted select2 multi-select for RF subject: only subjects present in the
+    current selection (other filters applied), each with its event count.
+    Options are rendered server-side; select2 just adds search + multi-tag UI."""
     title = "Суб'єкт РФ"
     parameter_name = "region_id"
-    template = "admin/filters/dropdown_select.html"
+    template = "admin/filters/facet_autocomplete.html"
+    placeholder = "Пошук суб'єкта…"
 
-    def __init__(self, request, params, model, model_admin):
-        self.request = request
-        super().__init__(request, params, model, model_admin)
+    def filter_queryset(self, queryset, values):
+        return queryset.filter(region_subject_id__in=values)
 
-    def lookups(self, request, model_admin):
-        return []  # choices() builds the faceted options itself
-
-    def has_output(self):
-        return True  # lookups() is empty; choices() renders the faceted dropdown
+    def lookups(self, request, model_admin):  # only for has_output(); choices() facets
+        return [(str(r.id), r.name) for r in
+                Region.objects.filter(events__isnull=False).distinct().order_by("name")]
 
     def choices(self, changelist):
-        value = self.value()
+        selected = self.request.GET.getlist(self.parameter_name)
         yield {
-            "selected": not value,
+            "selected": len(selected) == 0,
             "query_string": changelist.get_query_string(remove=[self.parameter_name]),
             "display": _("All"),
             "value": "__all__",
         }
         base = facet_base(changelist, self.request, self)
-        rows = (base.filter(region_subject__isnull=False)
+        ids = list(base.values_list("pk", flat=True).distinct())
+        rows = (Event.objects.filter(pk__in=ids, region_subject__isnull=False)
                 .values("region_subject__id", "region_subject__name")
-                .annotate(n=Count("pk", distinct=True))
-                .order_by("region_subject__name"))
+                .annotate(n=Count("pk")))
         present = {str(r["region_subject__id"]): (r["region_subject__name"], r["n"])
                    for r in rows}
-        if value and value not in present:  # keep current pick visible even if 0
-            r = Region.objects.filter(id=value).first()
-            if r:
-                present[value] = (r.name, 0)
+        for rid in selected:  # keep current picks visible even if 0 now
+            if rid not in present:
+                r = Region.objects.filter(id=rid).first()
+                if r:
+                    present[rid] = (r.name, 0)
         for rid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
             yield {
-                "selected": value == rid,
+                "selected": rid in selected,
                 "query_string": "",
                 "display": f"{name} ({n})",
                 "value": rid,
             }
-
-    def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(region_subject_id=self.value())
-        return queryset
 
 ChannelFilter = autocomplete_filter(
     title="Канал", parameter_name="channel_id",
