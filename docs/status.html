@@ -31,7 +31,7 @@
 <div class="wrap">
 
 <h1>tg-event-analytics</h1>
-<div class="sub">Підрахунок міжетнічних інцидентів у РФ за даними Telegram — як <b>дедуплікованих подій</b>, а не постів. Вимоги та статус реалізації.</div>
+<div class="sub">Підрахунок міжетнічних інцидентів у РФ за даними Telegram — як <b>дедуплікованих подій</b>, а не постів. Вимоги та статус реалізації. <span class="note">Оновлено: 2026-06-04</span></div>
 
 <div class="legend">
   <span><span class="b ok">готово</span> реалізовано й перевірено</span>
@@ -40,73 +40,82 @@
 </div>
 
 <h2>Архітектура пайплайну</h2>
-<div class="flow">collect    TeleZip /Find (усі репости, unique=false)        → Post
-enrich     метадані каналів (кеш) + LLM-регіон каналу        → Channel
-precluster content_hash + fuzzy текст (вікно)  БЕЗ AI        → Post.dedup_group
-classify   LLM на ОДНОМУ представнику групи → копія на копії → is_relevant, поля
-dedup      ковзний мікро-батч: по днях, вікно, пари — LLM     → Event (стрімінг)
-aggregate  розбивки по місяцях/регіонах/типах/тегах          → ResearchRun.stats</div>
-<div class="note">Довідники (теги, тип, регіон) канонізуються LLM — без дублікатів за сенсом.</div>
+<div class="flow">collect    TeleZip /Find (усі репости, unique=false), чанки по днях   → Post
+enrich     метадані каналів (TeleZip /Channels, кеш) + LLM-регіон каналу → Channel
+precluster content_hash + fuzzy текст (вікно)  БЕЗ AI               → Post.dedup_group
+classify   LLM на ОДНОМУ представнику групи → копія на репости       → is_relevant, поля
+dedup      ковзний мікро-батч: по днях, вікно, пари — LLM-суддя       → Event (стрімінг)
+aggregate  розбивки по місяцях/регіонах/типах/категоріях тегів        → ResearchRun.stats</div>
+<div class="note">Довідники (теги, тип конфлікту, регіон) канонізуються/закриваються — без дублів за сенсом. Дедуп-суддя бачить ОРИГІНАЛЬНИЙ текст постів, а не summary (стійкість до помилок класифікатора).</div>
 
 <h2>Вимоги та статус</h2>
 <table>
 <tr><th style="width:42px">#</th><th>Вимога</th><th style="width:90px">Статус</th><th>Як реалізовано</th></tr>
 
-<tr><td>1</td><td>Пошук подій через TeleZip (швидко, широко)</td><td><span class="b ok">готово</span></td><td><code>services/telezip.py</code> — /Find з ретраями</td></tr>
+<tr><td>1</td><td>Пошук подій через TeleZip (швидко, широко)</td><td><span class="b ok">готово</span></td><td><code>services/telezip.py</code> — /Find з ретраями, чанкінг по днях</td></tr>
 
-<tr><td>2</td><td>Менеджер ТГ-акаунтів (Telethon) для збагачення/аналізу</td><td><span class="b ok">готово</span></td><td>app <code>accounts</code> (StringSession у БД, проксі) — переюз із llm-council; у пайплайн ще не підключено</td></tr>
+<tr><td>2</td><td>Менеджер ТГ-акаунтів (Telethon) для збагачення/аналізу</td><td><span class="b wip">в роботі</span></td><td>app <code>accounts</code> (StringSession у БД, проксі) — переюз із llm-council; у пайплайні метадані каналів беруться з TeleZip /Channels, Telethon ще не підключено</td></tr>
 
-<tr><td>3</td><td>Регіон → суб'єкт РФ; якщо невідомо — з назви/опису каналу; + населений пункт</td><td><span class="b ok">готово</span></td><td>модель <code>Region</code> (85 субʼєктів, сід), <code>resolve_region</code> (LLM-геолокація), fallback <code>Channel.inferred_region</code>; <code>Event.region_subject</code>+<code>settlement</code></td></tr>
+<tr><td>3</td><td>Регіон → суб'єкт РФ; якщо невідомо — з назви/опису каналу; + населений пункт</td><td><span class="b ok">готово</span></td><td><code>Region</code> (85 суб'єктів, сід) + <code>resolve_region</code> (LLM-геолокація, закритий список); місто витягується з класифікації, summary або тексту поста; санітизація плейсхолдерів («порожньо»); fallback <code>Channel.inferred_region</code></td></tr>
 
-<tr><td>4</td><td>Посилання на пости: у списку до 3, у деталях усі</td><td><span class="b ok">готово</span></td><td>колонка «Публікації» (хендли каналів, публічні першими), поле «Усі публікації»</td></tr>
+<tr><td>4</td><td>Посилання на пости: у списку до 3, у деталях усі; в API теж</td><td><span class="b ok">готово</span></td><td>усюди відсортовано за к-стю підписників каналу (спадання): список (3) + «+N», деталі (усі, з 👥), API <code>EventSerializer</code> (топ-3 + <code>subscribers</code>)</td></tr>
 
-<tr><td>5</td><td>Сторони конфлікту — уніфіковані, без дублів за сенсом</td><td><span class="b ok">готово</span></td><td>система <b>тегів</b>: <code>Tag(name, category)</code>; категорії: nationality / status / religion / role / group; нації — закритий сід-список; сленг→нація; LLM канонізує + категоризує</td></tr>
+<tr><td>5</td><td>Сторони конфлікту — уніфіковані, без дублів за сенсом</td><td><span class="b ok">готово</span></td><td>система <b>тегів</b>: <code>Tag(name, category)</code>; нації — ЗАКРИТИЙ сід-список (без вигаданих варіантів: росіянка→росіянин); сленг→нація; LLM канонізує + категоризує</td></tr>
 
-<tr><td>6</td><td>Тип конфлікту — уніфікований</td><td><span class="b ok">готово</span></td><td><code>ConflictType</code> + аліаси, LLM-канонікалізація</td></tr>
+<tr><td>6</td><td>Тип конфлікту — уніфікований</td><td><span class="b ok">готово</span></td><td>перенесено в теги: <code>Tag(category="conflict")</code>, ЗАКРИТИЙ список (12), <code>resolve_conflict_tag</code>; дублі злито (Погром/погром, похищення→викрадення)</td></tr>
 
-<tr><td>7</td><td>Усе зберігати в БД</td><td><span class="b ok">готово</span></td><td>Postgres/SQLite; моделі Post, Event, Channel, Tag, Region, ResearchRun</td></tr>
+<tr><td>7</td><td>Усе зберігати в БД</td><td><span class="b ok">готово</span></td><td><b>Postgres у Docker</b>; моделі Post, Event, Channel, Tag, Region, ResearchRun</td></tr>
 
-<tr><td>8</td><td>UI — адмінка з фільтрами (період, задача, запуск, субʼєкт РФ, теги, канал)</td><td><span class="b ok">готово</span></td><td>Django admin: date-range + multiselect + autocomplete фільтри (переюз із pso); фільтр по категорії тега</td></tr>
+<tr><td>8</td><td>UI — адмінка з фільтрами (період, задача, запуск, суб'єкт РФ, теги, канал)</td><td><span class="b ok">готово</span></td><td>Django admin: date-range + <b>фасетні</b> фільтри — мультиселект тегів по КОЖНІЙ категорії + дропдаун-select2 суб'єкта; показують лише наявні в поточній вибірці значення + <b>к-сть подій</b></td></tr>
 
 <tr><td>9</td><td>Охоплення (сума підписників унікальних каналів події)</td><td><span class="b ok">готово</span></td><td>поле <code>Event.reach</code>, колонка «Охоплення»</td></tr>
 
 <tr><td>10</td><td>Повне покриття каналів / точне охоплення (усі репости)</td><td><span class="b ok">готово</span></td><td><code>telezip_unique=false</code> — збираємо всі репости, дедуп зводить у подію</td></tr>
 
-<tr><td>11</td><td>Дедуп: точні (hash) → майже (fuzzy) → сенс (AI), з вікном</td><td><span class="b ok">готово</span></td><td>3 рівні; ковзний мікро-батч по днях (паралельний AI всередині дня, стрімінг між днями)</td></tr>
+<tr><td>11</td><td>Дедуп: точні (hash) → майже (fuzzy) → сенс (AI), з вікном</td><td><span class="b ok">готово</span></td><td>3 рівні; ковзний мікро-батч по днях; LLM-суддя на ОРИГІНАЛЬНОМУ тексті; генеричні теги (мігрант/русский) не тягнуть у злиття</td></tr>
 
 <tr><td>12</td><td>Не класифікувати AI кожен репост (дешевше)</td><td><span class="b ok">готово</span></td><td>precluster ДО classify → LLM раз на групу, копія на репости</td></tr>
 
 <tr><td>13</td><td>Кеш каналів (для аналізу й повторного використання)</td><td><span class="b ok">готово</span></td><td>модель <code>Channel</code> (title, опис, підписники, регіон, is_channel)</td></tr>
 
-<tr><td>14</td><td>Категорії тегів (нація / статус / роль / релігія / група)</td><td><span class="b ok">готово</span></td><td>
-  <span class="pill">nationality</span><span class="pill">status</span><span class="pill">religion</span><span class="pill">role</span><span class="pill">group</span><span class="pill">other</span>
+<tr><td>14</td><td>Категорії тегів (нація / статус / релігія / роль / група / тип конфлікту)</td><td><span class="b ok">готово</span></td><td>
+  <span class="pill">nationality</span><span class="pill">status</span><span class="pill">religion</span><span class="pill">role</span><span class="pill">group</span><span class="pill">conflict</span><span class="pill">other</span>
 </td></tr>
 
-<tr><td>15</td><td>Довгий період: чанкінг (ліміт TeleZip 2 хв/запит), вікно дедупу через межі чанків</td><td><span class="b wip">в роботі</span></td><td>збір по днях (<code>_day_chunks</code>, ~45с/день &lt; 2 хв); чанк-розмір зробити параметром; дедуп-вікно вже працює на весь період (стрімінг)</td></tr>
+<tr><td>15</td><td>Довгий період: чанкінг (ліміт TeleZip 2 хв/запит), вікно дедупу через межі чанків</td><td><span class="b ok">готово</span></td><td>збір по днях (<code>collect_chunk_days</code>, параметр задачі); дедуп-вікно працює на весь період (стрімінг)</td></tr>
 
-<tr><td>16</td><td>Галочки: шукати по постах / по коментарях</td><td><span class="b no">todo</span></td><td>зараз <code>channels_only</code> (відкидає чати/коментарі); розбити на <code>search_posts</code> + <code>search_comments</code></td></tr>
+<tr><td>16</td><td>Галочки: шукати по постах / по коментарях</td><td><span class="b ok">готово</span></td><td><code>search_posts</code> + <code>search_comments</code> (поля задачі); precluster фільтрує канали/чати за <code>is_channel</code></td></tr>
 
-<tr><td>17</td><td>Крос-прогінний дедуп (безперервний моніторинг)</td><td><span class="b no">todo</span></td><td>стрімінговий движок готовий; лишилось підвантажувати «відкриті» події з БД на старті</td></tr>
+<tr><td>17</td><td>Контейнеризація (Docker), ключі в .env</td><td><span class="b ok">готово</span></td><td><code>docker-compose.yml</code> (dev) + <code>.prod.yml</code> (gunicorn); <code>Makefile</code> (dev/prod/start/stop/restart/migrate/superuser/backup); порти 8001/5433</td></tr>
 
-<tr><td>18</td><td>Повний прогін 2025 (рік)</td><td><span class="b no">todo</span></td><td>залежить від #15 (чанкінг) і часу enrich</td></tr>
+<tr><td>18</td><td>Запуск прогону з адмінки (кнопка)</td><td><span class="b no">todo</span></td><td>зараз через <code>make run</code> / <code>manage.py run_analysis</code>; планується admin-action, що стартує <code>run_pipeline</code> у фоні</td></tr>
+
+<tr><td>19</td><td>Логи у файл + видимість стадій у ResearchRun</td><td><span class="b no">todo</span></td><td>логер <code>analysis</code> є; лишилось налаштувати file-handler і дописувати віхи стадій</td></tr>
+
+<tr><td>20</td><td>Крос-прогінний дедуп (безперервний моніторинг)</td><td><span class="b no">todo</span></td><td>стрімінговий движок готовий; лишилось підвантажувати «відкриті» події з БД на старті</td></tr>
+
+<tr><td>21</td><td>Повний прогін 2025 (рік)</td><td><span class="b no">todo</span></td><td>залежить від часу enrich; інфраструктура (Postgres, чанкінг) готова</td></tr>
 </table>
 
 <h2>Стек</h2>
 <p>
-<span class="pill">Django 5</span><span class="pill">DRF</span><span class="pill">Postgres / SQLite</span>
+<span class="pill">Django 5</span><span class="pill">DRF</span><span class="pill">Postgres (Docker)</span>
 <span class="pill">TeleZip API</span><span class="pill">OpenRouter (Gemini)</span><span class="pill">Telethon</span>
-<span class="pill">rapidfuzz</span>
+<span class="pill">rapidfuzz</span><span class="pill">gunicorn</span><span class="pill">select2</span>
 </p>
 <p class="note">Акаунт-менеджер ТГ переюзаний із <b>llm-council</b>; віджети фільтрів адмінки — з <b>pso</b>.</p>
 
-<h2>Як запустити</h2>
-<div class="flow">cd backend
-../.venv/bin/python manage.py migrate
-../.venv/bin/python manage.py seed_regions
-../.venv/bin/python manage.py seed_nationalities
-../.venv/bin/python manage.py seed_ethnic_clashes
-../.venv/bin/python manage.py run_analysis ethnic-clashes --from 2025-01-01 --to 2025-12-31
-../.venv/bin/python manage.py runserver        # /admin/analysis/event/</div>
+<h2>Як запустити (Docker)</h2>
+<div class="flow">make build                 # зібрати образ + підняти db(5433) + web(8001)
+make seed                  # регіони + нації + типи конфлікту + задача ethnic-clashes
+make run SLUG=ethnic-clashes FROM=2026-05-26 TO=2026-06-03
+make logs                  # стежити за прогресом
+# адмінка: http://localhost:8001/admin/analysis/event/
+
+# службове
+make superuser             # створити користувача
+make backup                # pg_dump -> backups/&lt;timestamp&gt;.dump
+make migrate / make shell / make dbshell</div>
 
 </div>
 </body>
