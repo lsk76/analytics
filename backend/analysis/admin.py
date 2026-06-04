@@ -5,36 +5,37 @@ from rangefilter.filters import DateRangeFilterBuilder
 
 from .models import (
     AnalysisTask, Channel, Tag, TagAlias,
-    ConflictType, ConflictTypeAlias, Post, Event, ResearchRun,
+    Post, Event, ResearchRun,
     Region, RegionAlias,
 )
-from .multiselect_filter import multiselect_filter, autocomplete_filter
+from .multiselect_filter import (
+    multiselect_filter, autocomplete_filter, create_multiselect_filter,
+)
 
 # --- reusable filter widgets (pso-style) -----------------------------------
 TaskFilter = multiselect_filter(AnalysisTask, "Задача", "task", ordering="name")
 RunFilter = multiselect_filter(
     ResearchRun, "Запуск", "run", ordering="-created_at", label_callback=str)
-TypeFilter = multiselect_filter(ConflictType, "Тип конфлікту", "conflict_type", ordering="name")
-
-TagFilter = autocomplete_filter(
-    title="Сторони/теги", parameter_name="tag_id",
-    filter_field="tags__id__in",
-    selected_lookup=lambda req, ids: Tag.objects.filter(id__in=ids),
-    admin_autocomplete_field="tags", placeholder="Пошук тега…",
-    label_callback=lambda t: f"{t.name} ({t.get_category_display()})")
 
 
-class TagCategoryFilter(admin.SimpleListFilter):
-    title = "Категорія тега"
-    parameter_name = "tag_category"
+def tag_category_filter(category: str):
+    """A multi-select checkbox filter listing only the tags of ONE category.
+    Combining several (e.g. nationality + conflict) ANDs across categories,
+    ORs within a category — the dynamic 'category -> its tags' structure."""
+    label = dict(Tag.CATEGORY_CHOICES).get(category, category)
+    return create_multiselect_filter(
+        model=Tag,
+        title=label,
+        parameter_name=f"tag_{category}",
+        filter_field="tags__id__in",
+        queryset_callback=lambda qs, c=category: qs.filter(category=c),
+        label_callback=lambda t: t.name,
+        ordering="name",
+    )
 
-    def lookups(self, request, model_admin):
-        return Tag.CATEGORY_CHOICES
 
-    def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(tags__category=self.value()).distinct()
-        return queryset
+# one multiselect per tag category (dynamic structure)
+TAG_CATEGORY_FILTERS = [tag_category_filter(cat) for cat, _label in Tag.CATEGORY_CHOICES]
 
 SubjectFilter = autocomplete_filter(
     title="Суб'єкт РФ", parameter_name="region_id",
@@ -100,18 +101,6 @@ class TagAdmin(admin.ModelAdmin):
     inlines = [TagAliasInline]
 
 
-class ConflictTypeAliasInline(admin.TabularInline):
-    model = ConflictTypeAlias
-    extra = 0
-
-
-@admin.register(ConflictType)
-class ConflictTypeAdmin(admin.ModelAdmin):
-    list_display = ("name",)
-    search_fields = ("name", "aliases__raw")
-    inlines = [ConflictTypeAliasInline]
-
-
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
     list_display = ("url", "channel_name", "posted_at", "is_classified", "is_relevant", "event")
@@ -121,7 +110,7 @@ class PostAdmin(admin.ModelAdmin):
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("event_date", "region_subject", "settlement", "conflict_type",
+    list_display = ("event_date", "region_subject", "settlement", "conflict_display",
                     "tags_list", "count_short", "reach_display", "posts_preview", "summary")
     readonly_fields = ("posts_all",)
     date_hierarchy = "event_date"
@@ -130,15 +119,13 @@ class EventAdmin(admin.ModelAdmin):
         TaskFilter,                        # за задачею
         RunFilter,                         # за запуском
         SubjectFilter,                     # за суб'єктом РФ
-        TagFilter,                         # за тегами (нації/ролі/...)
-        TagCategoryFilter,                 # за категорією тега
+        *TAG_CATEGORY_FILTERS,             # мультиселект тегів по КОЖНІЙ категорії
         ChannelFilter,                     # за каналами
-        TypeFilter,                        # за типом
         "is_corroborated",
     )
     search_fields = ("summary", "region", "settlement")
     filter_horizontal = ("tags",)
-    autocomplete_fields = ("region_subject", "conflict_type", "tags", "run", "task")
+    autocomplete_fields = ("region_subject", "tags", "run", "task")
 
     class Media:
         # Load jQuery + Select2 in Django's order so `django.jQuery.fn.select2`
@@ -153,9 +140,15 @@ class EventAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("posts__channel", "tags")
 
+    @admin.display(description="Тип конфлікту")
+    def conflict_display(self, obj):
+        names = [t.name for t in obj.tags.all() if t.category == "conflict"]
+        return ", ".join(names) or "—"
+
     @admin.display(description="Сторони/теги")
     def tags_list(self, obj):
-        return ", ".join(t.name for t in obj.tags.all())
+        # sides only — the conflict type has its own column
+        return ", ".join(t.name for t in obj.tags.all() if t.category != "conflict")
 
     @admin.display(description="к-сть", ordering="post_count")
     def count_short(self, obj):
@@ -165,12 +158,17 @@ class EventAdmin(admin.ModelAdmin):
     def reach_display(self, obj):
         return f"{obj.reach:,}".replace(",", " ")
 
+    @staticmethod
+    def _subs(post):
+        """Channel subscriber count for sorting (largest first)."""
+        return (post.channel.subscribers or 0) if post.channel_id else 0
+
     @admin.display(description="Публікації")
     def posts_preview(self, obj):
-        """Up to 3 post links (channel handle as label); public channels first."""
+        """Up to 3 post links (channel handle), sorted by subscribers (desc)."""
         ordered = sorted(
             obj.posts.all(),
-            key=lambda p: (not p.channel_name, p.posted_at or p.created_at),
+            key=lambda p: (-self._subs(p), not p.channel_name),
         )
         posts = ordered[:3]
         if not posts:
@@ -193,12 +191,17 @@ class EventAdmin(admin.ModelAdmin):
 
     @admin.display(description="Усі публікації")
     def posts_all(self, obj):
-        """All post links in the detail view."""
-        posts = list(obj.posts.all())
+        """All post links in the detail view, sorted by subscribers (desc)."""
+        posts = sorted(obj.posts.all(), key=lambda p: (-self._subs(p), not p.channel_name))
         if not posts:
             return "—"
+
+        def subs_label(p):
+            n = self._subs(p)
+            return f"{n:,}".replace(",", " ") if n else "—"
+
         return format_html_join(
             mark_safe("<br>"),
-            '<a href="{}" target="_blank" rel="noopener">{}</a> — {}',
-            ((p.url, p.url, p.channel_name or "") for p in posts),
+            '<a href="{}" target="_blank" rel="noopener">{}</a> — {} (👥 {})',
+            ((p.url, p.url, p.channel_name or "приватний", subs_label(p)) for p in posts),
         )

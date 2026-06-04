@@ -5,7 +5,7 @@
   collect (запит TeleZip) -> Post
   enrich (Telethon: надійна дата + метадані Channel)
   classify (LLM за схемою задачі) -> сирі поля
-  normalize (вільний текст -> канонічне через таблиці аліасів: Nationality, ConflictType)
+  normalize (вільний текст -> канонічне через таблиці аліасів: Tag, Region)
   dedup (попарно LLM у вікні) -> Event (M2M сторони, 1 подія <- N постів)
 
 «Етнічні сутички 2025» — це ОДИН рядок AnalysisTask; ніщо тут не захардкоджено під неї.
@@ -143,6 +143,7 @@ class Tag(models.Model):
         ("religion", "Релігія"),
         ("role", "Роль/професія/вік"),
         ("group", "Організація/спільнота"),
+        ("conflict", "Тип конфлікту"),
         ("other", "Інше"),
     ]
     name = models.CharField(max_length=80, verbose_name="Назва (канонічна)")
@@ -173,34 +174,6 @@ class TagAlias(models.Model):
 
     def __str__(self):
         return f"{self.raw} -> {self.tag_id}"
-
-
-class ConflictType(models.Model):
-    name = models.CharField(max_length=80, unique=True, verbose_name="Назва (канонічна)")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
-
-    class Meta:
-        verbose_name = "Тип конфлікту"
-        verbose_name_plural = "Типи конфліктів"
-        ordering = ["name"]
-
-    def __str__(self):
-        return self.name
-
-
-class ConflictTypeAlias(models.Model):
-    raw = models.CharField(max_length=120, unique=True, verbose_name="Варіант (аліас)")
-    conflict_type = models.ForeignKey(
-        ConflictType, on_delete=models.CASCADE, related_name="aliases",
-        verbose_name="Тип конфлікту",
-    )
-
-    class Meta:
-        verbose_name = "Аліас типу конфлікту"
-        verbose_name_plural = "Аліаси типів конфліктів"
-
-    def __str__(self):
-        return f"{self.raw} -> {self.conflict_type_id}"
 
 
 class Region(models.Model):
@@ -350,10 +323,6 @@ class Event(models.Model):
         related_name="events", verbose_name="Суб'єкт РФ",
     )
     settlement = models.CharField(max_length=160, blank=True, verbose_name="Населений пункт")
-    conflict_type = models.ForeignKey(
-        ConflictType, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="events", verbose_name="Тип конфлікту",
-    )
     tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Сторони/теги")
     summary = models.TextField(blank=True, verbose_name="Опис")
     post_count = models.PositiveIntegerField(default=0, verbose_name="Кількість постів")

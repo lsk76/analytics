@@ -17,10 +17,7 @@ from typing import List, Optional, Tuple
 from django.conf import settings
 from openai import OpenAI
 
-from analysis.models import (
-    Tag, TagAlias, ConflictType, ConflictTypeAlias,
-    Region, RegionAlias,
-)
+from analysis.models import Tag, TagAlias, Region, RegionAlias
 
 logger = logging.getLogger(__name__)
 
@@ -43,40 +40,40 @@ def _sync_llm(prompt: str) -> str:
         return ""
 
 
-_TYPE_RULE = 'українською, узагальнено (напр. "напад", "бійка", "вбивство", "погроза", "погром")'
-
-_TAG_CATEGORIES = "nationality | status | religion | role | group | other"
+_TAG_CATEGORIES = "nationality | status | religion | role | group | conflict | other"
 
 
-def _canonicalize(raw: str, model, alias_model, alias_fk: str, rule: str) -> Optional[object]:
+def resolve_conflict_tag(raw: str) -> Optional[Tag]:
+    """
+    Free-text incident type -> canonical Tag(category='conflict') from a CLOSED list.
+    The model must pick exactly one seeded conflict type; anything else falls back
+    to 'інше'. (No new conflict types are created.)
+    """
     key = _key(raw)
     if not key:
         return None
 
-    hit = alias_model.objects.filter(raw=key).select_related(alias_fk).first()
+    hit = TagAlias.objects.filter(raw=key, tag__category="conflict").select_related("tag").first()
     if hit:
-        return getattr(hit, alias_fk)
+        return hit.tag
 
-    existing: List[str] = list(model.objects.values_list("name", flat=True))
+    types = list(Tag.objects.filter(category="conflict").values_list("name", flat=True))
+    fallback = (Tag.objects.filter(category="conflict", name="інше").first()
+                or Tag.objects.filter(category="conflict").first())
+    if not types:
+        return fallback
+
     prompt = (
-        f'Канонізуй термін.\n'
-        f'Наявні канонічні назви: {existing or "(порожньо)"}\n'
-        f'Термін: "{raw}"\n'
-        f'Якщо термін за змістом = одна з наявних назв — поверни ТОЧНО цю назву.\n'
-        f'Інакше поверни нову нормалізовану назву: {rule}.\n'
-        f'Відповідь — лише назва, без лапок, пояснень чи крапки.'
+        "Визнач тип насильницького інциденту. Обери ТОЧНО один варіант зі списку "
+        f"(нічого не вигадуй): {types}\n"
+        f'Текст/опис: "{raw}"\n'
+        "Відповідь — лише назва зі списку, без лапок і пояснень."
     )
-    ans = _sync_llm(prompt).strip().strip('".').strip()
-    if not ans or len(ans) > 80:
-        ans = raw.strip()[:80]
-
-    obj = model.objects.filter(name__iexact=ans).first() or model.objects.create(name=ans)
-    alias_model.objects.get_or_create(raw=key, defaults={alias_fk: obj})
+    ans = _sync_llm(prompt).strip().strip('".').strip().lower()
+    obj = Tag.objects.filter(category="conflict", name__iexact=ans).first() or fallback
+    if obj:
+        TagAlias.objects.get_or_create(raw=key, defaults={"tag": obj})
     return obj
-
-
-def resolve_conflict_type(raw: str) -> Optional[ConflictType]:
-    return _canonicalize(raw, ConflictType, ConflictTypeAlias, "conflict_type", _TYPE_RULE)
 
 
 def resolve_tag(raw: str) -> Optional[Tag]:
@@ -145,6 +142,18 @@ def resolve_tag(raw: str) -> Optional[Tag]:
     return obj
 
 
+# Words a model may put in a field instead of leaving it empty.
+_PLACEHOLDERS = {
+    "порожньо", "порожнє", "пусто", "немає", "нема", "невідомо", "не визначено",
+    "не вказано", "відсутнє", "відсутній", "none", "null", "empty", "n/a", "na",
+    "-", "—", "?", "невідома", "невідомий",
+}
+
+
+def _blank_placeholder(s: str) -> str:
+    return "" if s.strip().lower().strip(".") in _PLACEHOLDERS else s
+
+
 def resolve_region(raw: str) -> Tuple[Optional[Region], str]:
     """
     Free-text region -> (canonical RF subject, settlement).
@@ -155,9 +164,11 @@ def resolve_region(raw: str) -> Tuple[Optional[Region], str]:
     if not key:
         return None, ""
 
-    hit = RegionAlias.objects.filter(raw=key).select_related("region").first()
-    if hit:
-        return hit.region, hit.settlement
+    cacheable = len(key) <= 200  # RegionAlias.raw is varchar(200); skip long free text
+    if cacheable:
+        hit = RegionAlias.objects.filter(raw=key).select_related("region").first()
+        if hit:
+            return hit.region, hit.settlement
 
     subjects: List[str] = list(Region.objects.values_list("name", flat=True))
     prompt = (
@@ -178,8 +189,8 @@ def resolve_region(raw: str) -> Tuple[Optional[Region], str]:
     try:
         a, b = raw_ans.find("{"), raw_ans.rfind("}")
         data = json.loads(raw_ans[a:b + 1])
-        subject = (data.get("subject") or "").strip()
-        settlement = (data.get("settlement") or "").strip()[:160]
+        subject = _blank_placeholder((data.get("subject") or "").strip())
+        settlement = _blank_placeholder((data.get("settlement") or "").strip())[:160]
     except Exception:  # noqa: BLE001
         pass
 
@@ -189,6 +200,7 @@ def resolve_region(raw: str) -> Tuple[Optional[Region], str]:
         if not region_obj:  # LLM proposed a subject not in the seed — keep it (open fallback)
             region_obj = Region.objects.create(name=subject)
 
-    RegionAlias.objects.get_or_create(
-        raw=key, defaults={"region": region_obj, "settlement": settlement})
+    if cacheable:
+        RegionAlias.objects.get_or_create(
+            raw=key, defaults={"region": region_obj, "settlement": settlement})
     return region_obj, settlement

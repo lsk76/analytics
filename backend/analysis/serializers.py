@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AnalysisTask, Channel, Tag, ConflictType, Post, Event
+from .models import AnalysisTask, Channel, Tag, Post, Event
 
 
 class AnalysisTaskSerializer(serializers.ModelSerializer):
@@ -21,12 +21,6 @@ class TagSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "category"]
 
 
-class ConflictTypeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ConflictType
-        fields = ["id", "name"]
-
-
 class PostLinkSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
@@ -35,11 +29,10 @@ class PostLinkSerializer(serializers.ModelSerializer):
 
 class EventSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, read_only=True)
-    conflict_type = ConflictTypeSerializer(read_only=True)
     region_subject = serializers.StringRelatedField()
     posts = PostLinkSerializer(many=True, read_only=True)   # requirement #2: post links
 
     class Meta:
         model = Event
         fields = ["id", "event_date", "region_subject", "settlement", "region",
-                  "conflict_type", "tags", "summary", "post_count", "is_corroborated", "posts"]
+                  "tags", "summary", "post_count", "is_corroborated", "posts"]

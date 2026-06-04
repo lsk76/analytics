@@ -23,11 +23,11 @@ from rapidfuzz.fuzz import token_set_ratio
 from analysis.models import Post, Event, Channel, ResearchRun
 from .telezip import TelezipClient
 from . import llm
-from .normalize import resolve_tag, resolve_conflict_type, resolve_region
+from .normalize import resolve_tag, resolve_conflict_tag, resolve_region
 
 logger = logging.getLogger(__name__)
 
-CLASSIFY_BATCH = 15
+CLASSIFY_BATCH = 8   # smaller batch => less cross-item summary contamination
 CONCURRENCY = 20
 
 
@@ -340,9 +340,11 @@ def classify(run):
 # --------------------------------------------------------------------------- dedup (pair-LLM)
 
 PAIR_SYS = (
-    "Два новинні повідомлення. Це ОДНА І ТА САМА реальна подія (той самий інцидент: "
-    "ті самі учасники, місце, обставини — навіть якщо слова та назва місця різні), "
-    "чи РІЗНІ події? Відповідай одним словом: ОДНА або РІЗНІ."
+    "Дано два новинні повідомлення (A і B). Визнач, чи описують вони ОДИН І ТОЙ САМИЙ "
+    "конкретний інцидент: те саме місце/населений пункт, ті самі учасники та ті самі дії.\n"
+    "ВАЖЛИВО: спільна тема (обидва про мігрантів, про етнічний конфлікт тощо) НЕ означає одну подію. "
+    "Якщо місце, жертви або суть події різні — це РІЗНІ події.\n"
+    "Відповідай одним словом: ОДНА або РІЗНІ."
 )
 
 
@@ -369,6 +371,17 @@ def _summary_of(post):
     return (post.classification or {}).get("summary") or post.text[:200]
 
 
+def _judge_text(post):
+    """What the pair-judge sees: the real post text (truncated), with the LLM
+    summary appended as a hint. Text is the source of truth; summary may be wrong."""
+    text = (post.text or "").strip()
+    summ = (post.classification or {}).get("summary") or ""
+    out = text[:360]
+    if summ and _norm(summ) not in _norm(out):
+        out = f"{out}\n(стисло: {summ[:160]})"
+    return out or summ
+
+
 def _create_event(run, task, posts_in):
     """Materialize one finalized cluster of posts into an Event (region/sides/type/reach)."""
     posts_in = sorted(posts_in, key=lambda p: p.posted_at)
@@ -387,12 +400,14 @@ def _create_event(run, task, posts_in):
         task=task, run=run,
         event_date=head.posted_at.date(),
         region=region, region_subject=region_subject, settlement=settlement,
-        conflict_type=resolve_conflict_type(cls.get("type") or "") if cls.get("type") else None,
         summary=cls.get("summary") or head.text[:300],
         post_count=len(posts_in),
         is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
     )
+    # sides + the conflict type are all stored as canonical Tags
     tag_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_tag(raw))]
+    if cls.get("type") and (ct := resolve_conflict_tag(cls["type"])):
+        tag_objs.append(ct)
     if tag_objs:
         ev.tags.set(tag_objs)
     chans = {}
@@ -420,9 +435,27 @@ def _cluster_of(posts):
     }
 
 
+# Umbrella terms that are too generic to indicate the SAME event on their own.
+# (almost every migrant story shares "мігрант"; almost every clash shares "русский".)
+GENERIC_SIDES = {
+    "мігрант", "мигрант", "мігранти", "приїжджий", "приезжий", "нелегал", "гастарбайтер",
+    "місцевий", "местный", "житель", "іноземець", "иностранец", "чужинець",
+    "кавказець", "кавказец", "азіат", "азиат", "діаспора", "диаспора", "етнічний",
+    "росіянин", "русский", "росіянка", "українець", "українка", "слов янин",
+    "охорона", "охоронець", "поліція", "полиция", "силовик", "поліцейський", "коренной",
+}
+
+
+def _is_generic(side):
+    return any(token_set_ratio(side, g) >= 88 for g in GENERIC_SIDES)
+
+
 def _shared_side(a, b):
-    """True if the two clusters mention the same participant group (fuzzy on side names)."""
-    return any(token_set_ratio(x, y) >= 80 for x in a["sides"] for y in b["sides"])
+    """True only if the clusters share a SPECIFIC participant group (a concrete
+    nationality), not just a generic umbrella term like 'мігрант' / 'русский'."""
+    sa = [s for s in a["sides"] if not _is_generic(s)]
+    sb = [s for s in b["sides"] if not _is_generic(s)]
+    return any(token_set_ratio(x, y) >= 80 for x in sa for y in sb)
 
 
 def dedup(run):
@@ -497,7 +530,9 @@ def dedup(run):
         same = []
         if pairs:
             n_llm += len(pairs)
-            pairs_text = [(_summary_of(pool[a]["rep"]), _summary_of(pool[b]["rep"])) for a, b in pairs]
+            # judge on the ORIGINAL post text (ground truth), not the LLM summary —
+            # a summary can be wrong/cross-contaminated, the raw text never lies.
+            pairs_text = [(_judge_text(pool[a]["rep"]), _judge_text(pool[b]["rep"])) for a, b in pairs]
             same = asyncio.run(_judge_pairs(pairs_text))   # PARALLEL within the day
 
         parent = list(range(len(pool)))
@@ -535,19 +570,18 @@ def dedup(run):
 
 def aggregate(run):
     events = (Event.objects.filter(run=run)
-              .prefetch_related("tags").select_related("conflict_type", "region_subject"))
-    by_month, by_region, by_type = Counter(), Counter(), Counter()
+              .prefetch_related("tags").select_related("region_subject"))
+    by_month, by_region = Counter(), Counter()
     by_cat = defaultdict(Counter)   # category -> Counter(tag name)
     for e in events:
         by_month[(e.event_date.strftime("%Y-%m") if e.event_date else "?")] += 1
         by_region[e.region_subject.name if e.region_subject else "?"] += 1
-        by_type[e.conflict_type.name if e.conflict_type else "?"] += 1
         for t in e.tags.all():
             by_cat[t.category][t.name] += 1
     run.stats = {
         "by_month": dict(sorted(by_month.items())),
         "by_region": dict(by_region.most_common(40)),
-        "by_type": dict(by_type.most_common()),
+        "by_type": dict(by_cat["conflict"].most_common()),
         "by_nationality": dict(by_cat["nationality"].most_common(40)),
         "by_status": dict(by_cat["status"].most_common(20)),
         "by_role": dict(by_cat["role"].most_common(20)),

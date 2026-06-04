@@ -1,9 +1,8 @@
 from rest_framework import viewsets, filters
 
-from .models import AnalysisTask, Channel, Tag, ConflictType, Event
+from .models import AnalysisTask, Channel, Tag, Event
 from .serializers import (
-    AnalysisTaskSerializer, ChannelSerializer, TagSerializer,
-    ConflictTypeSerializer, EventSerializer,
+    AnalysisTaskSerializer, ChannelSerializer, TagSerializer, EventSerializer,
 )
 
 
@@ -19,7 +18,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["event_date", "post_count"]
 
     def get_queryset(self):
-        qs = Event.objects.prefetch_related("tags", "posts").select_related("conflict_type")
+        qs = Event.objects.prefetch_related("tags", "posts")
         task = self.request.query_params.get("task")
         if task:
             qs = qs.filter(task__slug=task)
@@ -47,8 +46,3 @@ class TagViewSet(viewsets.ReadOnlyModelViewSet):
         qs = Tag.objects.all()
         cat = self.request.query_params.get("category")
         return qs.filter(category=cat) if cat else qs
-
-
-class ConflictTypeViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = ConflictType.objects.all()
-    serializer_class = ConflictTypeSerializer
