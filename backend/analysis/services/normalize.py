@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 
 from django.conf import settings
 from openai import OpenAI
+from rapidfuzz.fuzz import token_set_ratio
 
 from analysis.models import Tag, TagAlias, Region, RegionAlias
 
@@ -24,6 +25,15 @@ logger = logging.getLogger(__name__)
 
 def _key(text: str) -> str:
     return (text or "").strip().lower()
+
+
+def _common_prefix(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
 
 
 def _sync_llm(prompt: str) -> str:
@@ -127,13 +137,22 @@ def resolve_tag(raw: str) -> Optional[Tag]:
     if not name:
         name = raw.strip()[:80]
 
-    # nationality is closed: if LLM invented a non-seeded nation, demote to 'other'
+    # nationality is CLOSED: exact seed -> closest seed (gender/number variants
+    # like росіянка->росіянин share a long prefix) -> only then demote to 'other'.
+    # Never create a new nationality tag.
     if category == "nationality":
-        match = Tag.objects.filter(category="nationality", name__iexact=name).first()
-        if match:
-            obj = match
-        else:
-            obj = Tag.objects.create(name=name, category="nationality")
+        obj = Tag.objects.filter(category="nationality", name__iexact=name).first()
+        if not obj and nations:
+            nl = name.lower()
+            best = max(nations, key=lambda s: (_common_prefix(nl, s.lower()),
+                                               token_set_ratio(nl, s.lower())))
+            bl = best.lower()
+            if _common_prefix(nl, bl) >= 4 or token_set_ratio(nl, bl) >= 85:
+                obj = Tag.objects.filter(category="nationality", name__iexact=best).first()
+        if not obj:
+            category = "other"  # not a seeded nation -> demote, don't invent one
+            obj = (Tag.objects.filter(category="other", name__iexact=name).first()
+                   or Tag.objects.create(name=name, category="other"))
     else:
         obj = (Tag.objects.filter(category=category, name__iexact=name).first()
                or Tag.objects.create(name=name, category=category))
