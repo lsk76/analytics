@@ -9,7 +9,7 @@ from rangefilter.filters import DateRangeFilterBuilder
 from .services import stages
 
 from .models import (
-    AnalysisTask, Channel, Tag, TagAlias,
+    AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
     Region, RegionAlias,
 )
@@ -89,18 +89,13 @@ class TagCategoryMultiSelectFilter(MultiSelectFilter):
             }
 
 
-def tag_category_filter(category: str):
+def tag_category_filter(category: str, label: str):
     """Dynamic 'category -> its tags' faceted multiselect (one per category)."""
-    label = dict(Tag.CATEGORY_CHOICES).get(category, category)
     return type(
         f"Tag{category.capitalize()}Filter",
         (TagCategoryMultiSelectFilter,),
         {"title": label, "parameter_name": f"tag_{category}", "category": category},
     )
-
-
-# one multiselect per tag category (dynamic structure)
-TAG_CATEGORY_FILTERS = [tag_category_filter(cat) for cat, _label in Tag.CATEGORY_CHOICES]
 
 class SubjectFilter(MultiSelectFilter):
     """Faceted select2 multi-select for RF subject: only subjects present in the
@@ -222,11 +217,19 @@ def collect_task_period_action(modeladmin, request, queryset):
             f"Стеж за прогресом у «Збори (jobs)» та лічильниках стадій постів.")
 
 
+@admin.register(TagCategory)
+class TagCategoryAdmin(admin.ModelAdmin):
+    list_display = ("key", "label", "closed", "order")
+    list_editable = ("label", "closed", "order")
+    ordering = ("order", "key")
+
+
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "date_from", "date_to", "is_active")
+    list_display = ("name", "slug", "date_from", "date_to", "geo_enabled", "is_active")
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
+    filter_horizontal = ("tag_categories",)
     actions = [collect_task_period_action]
 
 
@@ -283,14 +286,19 @@ class EventAdmin(admin.ModelAdmin):
                     "tags_list", "count_short", "reach_display", "posts_preview", "summary")
     readonly_fields = ("posts_all",)
     date_hierarchy = "event_date"
-    list_filter = (
-        ("event_date", DateRangeFilterBuilder(title="Період")),   # період (from/to)
-        TaskFilter,                        # за задачею
-        SubjectFilter,                     # за суб'єктом РФ
-        *TAG_CATEGORY_FILTERS,             # мультиселект тегів по КОЖНІЙ категорії
-        ChannelFilter,                     # за каналами
-        "is_corroborated",
-    )
+    def get_list_filter(self, request):
+        # build one faceted multiselect per tag category, dynamically from the registry
+        cat_filters = [tag_category_filter(c.key, c.label)
+                       for c in TagCategory.objects.all()]
+        return (
+            ("event_date", DateRangeFilterBuilder(title="Період")),
+            TaskFilter,
+            SubjectFilter,
+            *cat_filters,
+            ChannelFilter,
+            "is_corroborated",
+        )
+
     search_fields = ("summary", "region", "settlement")
     filter_horizontal = ("tags",)
     autocomplete_fields = ("region_subject", "tags", "task")

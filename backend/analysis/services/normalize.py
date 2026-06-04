@@ -53,6 +53,52 @@ def _sync_llm(prompt: str) -> str:
 _TAG_CATEGORIES = "nationality | status | religion | role | group | conflict | other"
 
 
+def resolve_in_category(raw: str, category: str, closed: bool) -> Optional[Tag]:
+    """
+    Canonicalize a raw value WITHIN a known category.
+      closed=True  -> map to the closest seeded tag (gender/number variants); if no
+                      match, DROP (return None) — never invent a tag in a closed cat.
+      closed=False -> LLM-canonicalize against existing tags of this category (merge
+                      synonyms like русский/росіянин), else create a new normalized tag.
+    """
+    key = _key(raw)
+    if not key:
+        return None
+    hit = TagAlias.objects.filter(raw=key, tag__category=category).select_related("tag").first()
+    if hit:
+        return hit.tag
+
+    seeded = list(Tag.objects.filter(category=category).values_list("name", flat=True))
+
+    if closed:
+        name = raw.strip()[:80]
+        obj = Tag.objects.filter(category=category, name__iexact=name).first()
+        if not obj and seeded:
+            nl = name.lower()
+            best = max(seeded, key=lambda s: (_common_prefix(nl, s.lower()),
+                                              token_set_ratio(nl, s.lower())))
+            bl = best.lower()
+            if _common_prefix(nl, bl) >= 4 or token_set_ratio(nl, bl) >= 85:
+                obj = Tag.objects.filter(category=category, name__iexact=best).first()
+        if not obj:
+            return None
+    else:
+        prompt = (
+            f'Канонізуй значення категорії "{category}".\n'
+            f'Наявні канонічні: {seeded or "(порожньо)"}\n'
+            f'Значення: "{raw}"\n'
+            'Якщо за змістом = одне з наявних — поверни ТОЧНО його. Інакше — нову '
+            'нормалізовану назву (українською, узагальнено, однина). Лише назва.'
+        )
+        ans = _sync_llm(prompt).strip().strip('".').strip() or raw.strip()
+        name = ans[:80]
+        obj = (Tag.objects.filter(category=category, name__iexact=name).first()
+               or Tag.objects.create(name=name, category=category))
+
+    TagAlias.objects.get_or_create(raw=key, defaults={"tag": obj})
+    return obj
+
+
 def resolve_conflict_tag(raw: str) -> Optional[Tag]:
     """
     Free-text incident type -> canonical Tag(category='conflict') from a CLOSED list.

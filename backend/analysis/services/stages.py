@@ -28,7 +28,10 @@ from django.utils import timezone as djtz
 from analysis.models import Post, Event, Channel, CollectChunk
 from .telezip import TelezipClient
 from . import llm
-from .normalize import resolve_tag, resolve_conflict_tag, resolve_region
+from .normalize import (
+    resolve_tag, resolve_conflict_tag, resolve_region, resolve_in_category,
+)
+from analysis.models import Tag
 from . import pipeline as P  # reuse pure helpers
 from rapidfuzz.fuzz import token_set_ratio
 
@@ -355,6 +358,34 @@ def precluster_once(task):
 
 # --------------------------------------------------------------------------- classify
 
+def build_classify_prompt(task):
+    """Assemble the full classifier prompt: the task's DOMAIN rules + an auto JSON
+    schema built from the task's chosen tag categories (+ geo fields if enabled)."""
+    cats = list(task.tag_categories.all())
+    geo = ('"region":"<суб\'єкт або порожньо>","settlement":"<місто/селище або порожньо>",'
+           if task.geo_enabled else "")
+    tag_fields = ",".join(f'"{c.key}":["..."]' for c in cats)
+    schema = (
+        "Поверни СТРОГО JSON-масив, по одному об'єкту на кожне вхідне повідомлення, "
+        "у тому ж порядку:\n"
+        f'[{{"i":<індекс>,"is_relevant":<true|false>,{geo}'
+        f'"tags":{{{tag_fields}}},"summary":"<короткий опис інциденту, 1 речення>"}}]'
+    )
+    hints = ["Поля всередині tags — це СПИСКИ значень (0..N) для кожної категорії:"]
+    for c in cats:
+        if c.closed:
+            seeded = list(Tag.objects.filter(category=c.key).values_list("name", flat=True))
+            hints.append(f'- "{c.key}" ({c.label}): обери ТОЧНО зі списку {seeded}; '
+                         f'якщо відповідного нема — пропусти (не вигадуй).')
+        else:
+            hints.append(f'- "{c.key}" ({c.label}): вільні значення українською, узагальнено.')
+    geo_note = ("\nregion — суб'єкт (область/край/республіка) БЕЗ міста; "
+                "settlement — місто/селище окремо (напр. region='Хабаровський край', "
+                "settlement='Хабаровськ')." if task.geo_enabled else "")
+    return "\n".join([task.classify_system_prompt.strip(), "", schema, *hints,
+                      geo_note, "summary — лише про ЦЕ повідомлення. Лише валідний JSON, без markdown."])
+
+
 def classify_once(task):
     # classify ONE rep per group; claim preclustered posts that are the group root
     ids = _claim_posts(task, Post.STAGE_PRECLUSTERED, CLASSIFY_GROUP_BATCH * 4)
@@ -369,7 +400,7 @@ def classify_once(task):
     reps = [sorted(m, key=lambda x: (x.posted_at or djtz.now(), x.id))[0] for m in groups.values()]
     batches = [reps[i:i + P.CLASSIFY_BATCH] for i in range(0, len(reps), P.CLASSIFY_BATCH)]
     text_batches = [[p.text for p in b] for b in batches]
-    results = asyncio.run(P._classify_batches(task.classify_system_prompt, text_batches,
+    results = asyncio.run(P._classify_batches(build_classify_prompt(task), text_batches,
                                               task.llm_model or None))
     rep_cls = {}
     for bi, batch in enumerate(batches):
@@ -432,10 +463,22 @@ def _create_event(task, posts_in):
         post_count=len(posts_in),
         is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
     )
-    closed = task.closed_tag_categories      # [] -> all open; None never (JSONField default [])
-    tag_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_tag(raw, closed=closed))]
-    if cls.get("type") and (ct := resolve_conflict_tag(cls["type"])):
-        tag_objs.append(ct)
+    # resolve tags per the task's chosen categories (values are lists)
+    tag_objs = []
+    cls_tags = cls.get("tags") or {}
+    for c in task.tag_categories.all():
+        vals = cls_tags.get(c.key) or []
+        if isinstance(vals, str):
+            vals = [vals]
+        for v in vals:
+            if v and (o := resolve_in_category(str(v), c.key, c.closed)):
+                tag_objs.append(o)
+    # backward-compat: old sides/type contract
+    if not cls_tags:
+        tag_objs += [o for raw in (cls.get("sides") or [])
+                     if (o := resolve_tag(raw, closed=task.closed_tag_categories))]
+        if cls.get("type") and (ct := resolve_conflict_tag(cls["type"])):
+            tag_objs.append(ct)
     if tag_objs:
         ev.tags.set(tag_objs)
     _attach_posts(ev, posts_in)

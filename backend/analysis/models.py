@@ -85,6 +85,10 @@ class AnalysisTask(models.Model):
         default=True, verbose_name="Геолокація (суб'єкт+місто)",
         help_text="Чи визначати регіон/населений пункт події. Вимкни для не-географічних задач.",
     )
+    tag_categories = models.ManyToManyField(
+        "TagCategory", blank=True, related_name="tasks", verbose_name="Категорії тегів",
+        help_text="Які категорії тегів класифікатор збирає з поста (схема промпта будується з них).",
+    )
     closed_tag_categories = models.JSONField(
         default=list, blank=True, verbose_name="Закриті категорії тегів",
         help_text='Категорії, що канонізуються лише із сід-списку (інші — відкритий словник). '
@@ -152,23 +156,33 @@ class Channel(models.Model):
 # Керовані довідники (відкриті + авто-мапінг аліасів -> без дублів за сенсом)
 # ---------------------------------------------------------------------------
 
+class TagCategory(models.Model):
+    """
+    Реєстр категорій тегів (спільний для всіх задач). Задача обирає, які саме
+    категорії збирати з поста. `closed` = канонізувати лише з сід-списку.
+    """
+    key = models.SlugField(max_length=32, unique=True, verbose_name="Ключ")
+    label = models.CharField(max_length=80, verbose_name="Назва")
+    closed = models.BooleanField(
+        default=False, verbose_name="Закрита (лише сід-список)",
+        help_text="Якщо так — теги цієї категорії беруться лише з сід-списку, нові не створюються.",
+    )
+    order = models.PositiveSmallIntegerField(default=100, verbose_name="Порядок")
+
+    class Meta:
+        verbose_name = "Категорія тегів"
+        verbose_name_plural = "Категорії тегів"
+        ordering = ["order", "key"]
+
+    def __str__(self):
+        return self.label or self.key
+
+
 class Tag(models.Model):
-    """
-    Канонічна сторона/аспект конфлікту з категорією.
-    nationality — закритий сід-список; решта категорій канонізуються LLM.
-    """
-    CATEGORY_CHOICES = [
-        ("nationality", "Національність"),
-        ("status", "Статус (мігрант/місцеві)"),
-        ("religion", "Релігія"),
-        ("role", "Роль/професія/вік"),
-        ("group", "Організація/спільнота"),
-        ("conflict", "Тип конфлікту"),
-        ("other", "Інше"),
-    ]
+    """Канонічний тег (значення в межах категорії). Категорія — ключ TagCategory."""
     name = models.CharField(max_length=80, verbose_name="Назва (канонічна)")
-    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES,
-                                default="other", db_index=True, verbose_name="Категорія")
+    category = models.CharField(max_length=32, default="other", db_index=True,
+                                verbose_name="Категорія (key)")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:
@@ -180,7 +194,7 @@ class Tag(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.name} ({self.get_category_display()})"
+        return f"{self.name} ({self.category})"
 
 
 class TagAlias(models.Model):
