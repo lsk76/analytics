@@ -1,5 +1,21 @@
 name: tg-event-analytics
 
+# shared config for every stage worker (reuses the web image)
+x-worker: &worker
+  image: tg-event-analytics-web:latest
+  env_file: .env
+  environment:
+    POSTGRES_HOST: db
+    POSTGRES_PORT: 5432
+  volumes:
+    - ./backend:/app/backend
+  depends_on:
+    db:
+      condition: service_healthy
+    web:
+      condition: service_started
+  restart: unless-stopped
+
 services:
   db:
     image: postgres:16-alpine
@@ -19,6 +35,7 @@ services:
 
   web:
     build: .
+    image: tg-event-analytics-web:latest
     env_file: .env
     environment:
       POSTGRES_HOST: db
@@ -30,6 +47,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # --- stage workers (reuse the web image) ----------------------------------
+  worker-collect:    { <<: *worker, command: python manage.py run_worker --stage collect }
+  worker-enrich:     { <<: *worker, command: python manage.py run_worker --stage enrich }
+  worker-precluster: { <<: *worker, command: python manage.py run_worker --stage precluster }
+  worker-classify:   { <<: *worker, command: python manage.py run_worker --stage classify }
+  worker-dedup:      { <<: *worker, command: python manage.py run_worker --stage dedup }
 
 volumes:
   pgdata:

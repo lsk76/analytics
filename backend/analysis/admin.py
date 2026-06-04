@@ -1,9 +1,12 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Count
+from django.utils import timezone as djtz
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from rangefilter.filters import DateRangeFilterBuilder
+
+from .services import stages
 
 from .models import (
     AnalysisTask, Channel, Tag, TagAlias,
@@ -163,12 +166,26 @@ class RegionAdmin(admin.ModelAdmin):
     inlines = [RegionAliasInline]
 
 
+@admin.action(description="▶ Поставити збір у чергу (за період job'а)")
+def enqueue_job_action(modeladmin, request, queryset):
+    for run in queryset:
+        n = stages.enqueue_collection(run.task, run.date_from, run.date_to,
+                                      chunk_days=run.chunk_days, job=run)
+        run.status = "collecting"
+        run.save(update_fields=["status"])
+        messages.success(
+            request,
+            f"#{run.id} «{run.task.name}» {run.date_from}…{run.date_to}: +{n} чанків у черзі. "
+            f"Воркери самі доведуть до подій.")
+
+
 @admin.register(ResearchRun)
 class ResearchRunAdmin(admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
                     "chunk_progress", "posts_collected", "created_at")
     list_filter = ("task", "status")
     search_fields = ("title", "task__name")
+    actions = [enqueue_job_action]
     readonly_fields = ("started_at", "finished_at", "params", "stats",
                        "posts_collected", "posts_relevant", "events_total",
                        "events_corroborated", "created_at")
@@ -190,11 +207,27 @@ class CollectChunkAdmin(admin.ModelAdmin):
                        "created_at", "finished_at")
 
 
+@admin.action(description="▶ Зібрати за період задачі")
+def collect_task_period_action(modeladmin, request, queryset):
+    for task in queryset:
+        run = ResearchRun.objects.create(
+            task=task, title=f"admin {djtz.now():%Y-%m-%d %H:%M}",
+            date_from=task.date_from, date_to=task.date_to,
+            chunk_days=task.collect_chunk_days or 3, status="collecting")
+        n = stages.enqueue_collection(task, task.date_from, task.date_to,
+                                      chunk_days=run.chunk_days, job=run)
+        messages.success(
+            request,
+            f"«{task.name}» {task.date_from}…{task.date_to}: job #{run.id}, +{n} чанків. "
+            f"Стеж за прогресом у «Збори (jobs)» та лічильниках стадій постів.")
+
+
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "date_from", "date_to", "is_active")
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
+    actions = [collect_task_period_action]
 
 
 @admin.register(Channel)

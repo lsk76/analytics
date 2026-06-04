@@ -3,6 +3,20 @@ name: tg-event-analytics
 # Production: gunicorn + DEBUG=false + collectstatic, no source mount.
 # Shares the same db volume (pgdata) as dev via the shared project name.
 
+x-worker: &worker
+  image: tg-event-analytics-web:latest
+  env_file: .env
+  environment:
+    POSTGRES_HOST: db
+    POSTGRES_PORT: 5432
+    DJANGO_DEBUG: "false"
+  depends_on:
+    db:
+      condition: service_healthy
+    web:
+      condition: service_started
+  restart: unless-stopped
+
 services:
   db:
     image: postgres:16-alpine
@@ -23,6 +37,7 @@ services:
 
   web:
     build: .
+    image: tg-event-analytics-web:latest
     env_file: .env
     environment:
       POSTGRES_HOST: db
@@ -38,6 +53,12 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  worker-collect:    { <<: *worker, command: python manage.py run_worker --stage collect }
+  worker-enrich:     { <<: *worker, command: python manage.py run_worker --stage enrich }
+  worker-precluster: { <<: *worker, command: python manage.py run_worker --stage precluster }
+  worker-classify:   { <<: *worker, command: python manage.py run_worker --stage classify }
+  worker-dedup:      { <<: *worker, command: python manage.py run_worker --stage dedup }
 
 volumes:
   pgdata:

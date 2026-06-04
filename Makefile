@@ -5,7 +5,8 @@ DC_PROD = docker compose -f docker-compose.prod.yml
 
 .PHONY: help dev prod build start stop restart logs ps shell dbshell \
         migrate makemigrations superuser changepassword collectstatic \
-        seed run backup restore list-backups prod-build prod-logs prod-stop clean
+        seed run backup restore list-backups prod-build prod-logs prod-stop clean \
+        workers workers-logs workers-stop scale-workers worker
 
 # Default
 help:
@@ -65,6 +66,25 @@ logs:
 
 ps:
 	$(DC) ps
+
+# ---------- Workers (stage machine) ----------
+WORKERS = worker-collect worker-enrich worker-precluster worker-classify worker-dedup
+
+workers:                 # (re)start all stage workers (detached)
+	$(DC) up -d $(WORKERS)
+
+workers-logs:            # follow all worker logs
+	$(DC) logs -f $(WORKERS)
+
+workers-stop:
+	$(DC) stop $(WORKERS)
+
+scale-workers:           # e.g. make scale-workers ENRICH=2 CLASSIFY=2
+	$(DC) up -d --scale worker-enrich=$(or $(ENRICH),1) --scale worker-classify=$(or $(CLASSIFY),1)
+
+worker:                  # ad-hoc single pass: make worker STAGE=collect
+	@if [ -z "$(STAGE)" ]; then echo "Usage: make worker STAGE=collect|enrich|precluster|classify|dedup"; exit 1; fi
+	$(DC) exec web python manage.py run_worker --stage $(STAGE) --once
 
 # ---------- Prod ----------
 prod: prod-build
