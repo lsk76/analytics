@@ -7,7 +7,7 @@ from rangefilter.filters import DateRangeFilterBuilder
 
 from .models import (
     AnalysisTask, Channel, Tag, TagAlias,
-    Post, Event, ResearchRun,
+    Post, Event, ResearchRun, CollectChunk,
     Region, RegionAlias,
 )
 from .multiselect_filter import (
@@ -16,8 +16,6 @@ from .multiselect_filter import (
 
 # --- reusable filter widgets (pso-style) -----------------------------------
 TaskFilter = multiselect_filter(AnalysisTask, "Задача", "task", ordering="name")
-RunFilter = multiselect_filter(
-    ResearchRun, "Запуск", "run", ordering="-created_at", label_callback=str)
 
 
 def facet_base(changelist, request, exclude_spec):
@@ -168,12 +166,28 @@ class RegionAdmin(admin.ModelAdmin):
 @admin.register(ResearchRun)
 class ResearchRunAdmin(admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
-                    "events_total", "events_corroborated", "created_at")
+                    "chunk_progress", "posts_collected", "created_at")
     list_filter = ("task", "status")
     search_fields = ("title", "task__name")
     readonly_fields = ("started_at", "finished_at", "params", "stats",
                        "posts_collected", "posts_relevant", "events_total",
                        "events_corroborated", "created_at")
+
+    @admin.display(description="Чанки")
+    def chunk_progress(self, obj):
+        total = obj.chunks.count()
+        done = obj.chunks.filter(status="done").count()
+        return f"{done}/{total}" if total else "—"
+
+
+@admin.register(CollectChunk)
+class CollectChunkAdmin(admin.ModelAdmin):
+    list_display = ("task", "date_from", "date_to", "status", "attempts",
+                    "posts_collected", "finished_at")
+    list_filter = ("task", "status")
+    date_hierarchy = "date_from"
+    readonly_fields = ("locked_at", "attempts", "posts_collected", "error",
+                       "created_at", "finished_at")
 
 
 @admin.register(AnalysisTask)
@@ -205,9 +219,10 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
-    list_display = ("url", "channel_name", "posted_at", "is_classified", "is_relevant", "event")
-    list_filter = ("task", "is_classified", "is_relevant")
+    list_display = ("url", "channel_name", "posted_at", "stage", "is_relevant", "event")
+    list_filter = ("task", "stage", "is_relevant")
     search_fields = ("url", "text")
+    readonly_fields = ("stage_locked_at", "stage_attempts", "stage_error", "created_at")
 
 
 @admin.register(Event)
@@ -219,7 +234,6 @@ class EventAdmin(admin.ModelAdmin):
     list_filter = (
         ("event_date", DateRangeFilterBuilder(title="Період")),   # період (from/to)
         TaskFilter,                        # за задачею
-        RunFilter,                         # за запуском
         SubjectFilter,                     # за суб'єктом РФ
         *TAG_CATEGORY_FILTERS,             # мультиселект тегів по КОЖНІЙ категорії
         ChannelFilter,                     # за каналами
@@ -227,7 +241,7 @@ class EventAdmin(admin.ModelAdmin):
     )
     search_fields = ("summary", "region", "settlement")
     filter_horizontal = ("tags",)
-    autocomplete_fields = ("region_subject", "tags", "run", "task")
+    autocomplete_fields = ("region_subject", "tags", "task")
 
     class Media:
         # Load jQuery + Select2 in Django's order so `django.jQuery.fn.select2`

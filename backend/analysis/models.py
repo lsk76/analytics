@@ -215,22 +215,31 @@ class RegionAlias(models.Model):
 # ---------------------------------------------------------------------------
 
 class ResearchRun(models.Model):
-    """Один запуск задачі за період — зберігає параметри, статус і агреговані результати."""
+    """
+    Запит на збір за період («job»). Створює CollectChunk-и; воркери далі
+    самі доводять пости до подій. Сама подія/пост належать ЗАДАЧІ (не job'у).
+    """
 
     STATUS_CHOICES = [
         ("pending", "Очікує"),
-        ("collecting", "Збір"),
-        ("enriching", "Збагачення"),
-        ("classifying", "Класифікація"),
-        ("deduplicating", "Дедуплікація"),
-        ("completed", "Завершено"),
+        ("collecting", "Збір триває"),
+        ("collected", "Збір завершено"),
+        ("done", "Готово"),
         ("failed", "Помилка"),
+        ("cancelled", "Скасовано"),
     ]
 
     task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE, related_name="runs", verbose_name="Задача")
-    title = models.CharField(max_length=200, blank=True, verbose_name="Назва дослідження")
+    title = models.CharField(max_length=200, blank=True, verbose_name="Назва")
     date_from = models.DateField(verbose_name="Період від")
     date_to = models.DateField(verbose_name="Період до")
+
+    chunk_days = models.PositiveSmallIntegerField(
+        default=3, verbose_name="Розмір чанку (днів)",
+        help_text="Скільки днів за один запит TeleZip (адаптивно зменшується при падіннях)",
+    )
+    min_chunk_days = models.PositiveSmallIntegerField(
+        default=1, verbose_name="Мін. розмір чанку (днів)")
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", verbose_name="Статус")
     started_at = models.DateTimeField(null=True, blank=True, verbose_name="Початок")
@@ -251,12 +260,51 @@ class ResearchRun(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:
-        verbose_name = "Дослідження (запуск)"
-        verbose_name_plural = "Дослідження (запуски)"
+        verbose_name = "Збір (job)"
+        verbose_name_plural = "Збори (jobs)"
         ordering = ["-created_at"]
 
     def __str__(self):
         return self.title or f"{self.task.slug} {self.date_from}…{self.date_to}"
+
+
+class CollectChunk(models.Model):
+    """Відрізок збору TeleZip (резюмабельність + адаптивний розмір)."""
+    STATUS_CHOICES = [
+        ("pending", "Очікує"),
+        ("running", "Збирається"),
+        ("done", "Зібрано"),
+        ("failed", "Помилка"),
+        ("split", "Розбито на менші"),
+    ]
+
+    task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,
+                             related_name="collect_chunks", verbose_name="Задача")
+    job = models.ForeignKey(ResearchRun, on_delete=models.SET_NULL, null=True, blank=True,
+                            related_name="chunks", verbose_name="Job")
+    date_from = models.DateField(verbose_name="Від")
+    date_to = models.DateField(verbose_name="До")
+
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="pending",
+                              db_index=True, verbose_name="Статус")
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="Спроб")
+    posts_collected = models.PositiveIntegerField(default=0, verbose_name="Зібрано постів")
+    locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Захоплено")
+    error = models.TextField(blank=True, verbose_name="Помилка")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Завершено")
+
+    class Meta:
+        verbose_name = "Чанк збору"
+        verbose_name_plural = "Чанки збору"
+        ordering = ["date_from"]
+        indexes = [
+            models.Index(fields=["task", "status"]),
+            models.Index(fields=["task", "date_from", "date_to"]),
+        ]
+
+    def __str__(self):
+        return f"{self.task.slug} {self.date_from}…{self.date_to} [{self.status}]"
 
 
 # ---------------------------------------------------------------------------
@@ -264,9 +312,36 @@ class ResearchRun(models.Model):
 # ---------------------------------------------------------------------------
 
 class Post(models.Model):
+    # конвеєр стадій (claim-based черга, кожен воркер дивиться «свій» статус)
+    STAGE_COLLECTED = "collected"
+    STAGE_ENRICHED = "enriched"
+    STAGE_PRECLUSTERED = "preclustered"
+    STAGE_CLASSIFIED = "classified"
+    STAGE_DEDUPED = "deduped"
+    STAGE_DONE = "done"
+    STAGE_FAILED = "failed"
+    STAGE_CHOICES = [
+        (STAGE_COLLECTED, "Зібрано"),
+        (STAGE_ENRICHED, "Збагачено"),
+        (STAGE_PRECLUSTERED, "Прекластеризовано"),
+        (STAGE_CLASSIFIED, "Класифіковано"),
+        (STAGE_DEDUPED, "Дедупльовано"),
+        (STAGE_DONE, "Готово"),
+        (STAGE_FAILED, "Помилка"),
+    ]
+
     task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE, related_name="posts", verbose_name="Задача")
-    run = models.ForeignKey(ResearchRun, on_delete=models.SET_NULL, null=True, blank=True,
-                            related_name="posts", verbose_name="Запуск")
+    stage = models.CharField(
+        max_length=16, choices=STAGE_CHOICES, default=STAGE_COLLECTED, db_index=True,
+        verbose_name="Стадія конвеєра",
+    )
+    stage_locked_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Захоплено воркером",
+        help_text="Час claim'у; звільняється після успіху або таймауту",
+    )
+    stage_attempts = models.PositiveIntegerField(default=0, verbose_name="Спроб стадії")
+    stage_error = models.TextField(blank=True, verbose_name="Помилка стадії")
+
     url = models.URLField(max_length=500, verbose_name="Посилання")
     channel = models.ForeignKey(
         Channel, on_delete=models.SET_NULL, null=True, blank=True,
@@ -302,7 +377,10 @@ class Post(models.Model):
         verbose_name_plural = "Пости"
         unique_together = [["task", "url"]]
         ordering = ["posted_at"]
-        indexes = [models.Index(fields=["task", "is_classified"])]
+        indexes = [
+            models.Index(fields=["task", "stage"]),
+            models.Index(fields=["task", "stage", "posted_at"]),
+        ]
 
     def __str__(self):
         return self.url
@@ -311,8 +389,6 @@ class Post(models.Model):
 class Event(models.Model):
     """Дедуплікований реальний інцидент (1 подія <- N постів)."""
     task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE, related_name="events", verbose_name="Задача")
-    run = models.ForeignKey(ResearchRun, on_delete=models.CASCADE, null=True, blank=True,
-                            related_name="events", verbose_name="Запуск")
     event_date = models.DateField(
         null=True, blank=True, verbose_name="Дата події",
         help_text="З найранішого посту (дата публікації)",
