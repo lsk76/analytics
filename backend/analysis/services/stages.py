@@ -263,15 +263,20 @@ def precluster_once(task):
     # day D is settled for precluster when D + win <= ready (neighbours up to D+win enriched)
     settle_to = (ready - win) if ready else None
 
-    # in-scope filter: posts-only keeps real channels AND unknown (is_channel NULL),
-    # drops only confirmed chats; comments-only is the inverse
-    posts_scope = Q(channel__is_channel=True) | Q(channel__is_channel__isnull=True) | Q(channel__isnull=True)
-    if task.search_posts and not task.search_comments:
-        scope, antiscope = posts_scope, Q(channel__is_channel=False)
-    elif task.search_comments and not task.search_posts:
-        scope, antiscope = Q(channel__is_channel=False), posts_scope
-    else:
+    # in-scope filter: posts-only keeps ONLY confirmed channels (is_channel=True) —
+    # chats and unknown/unlinked-channel posts are dropped (no reach, low signal);
+    # comments-only is the inverse. antiscope is the exact complement so out-of-scope
+    # posts are finalized and never clog the watermark.
+    both = (task.search_posts and task.search_comments) or \
+           (not task.search_posts and not task.search_comments)
+    if both:
         scope, antiscope = Q(), None
+    elif task.search_posts:
+        scope = Q(channel__is_channel=True)
+        antiscope = ~scope                       # is_channel False OR NULL OR no channel
+    else:  # comments only
+        scope = Q(channel__is_channel=False)
+        antiscope = ~scope
 
     # finalize OUT-OF-SCOPE enriched posts so they never clog the dedup watermark
     finalized = 0
@@ -397,6 +402,12 @@ def classify_once(task):
 
 # --------------------------------------------------------------------------- dedup (windowed)
 
+def _same_region(a, b):
+    """Clusters report the same place (normalized region string)."""
+    ra, rb = a.get("region", ""), b.get("region", "")
+    return bool(ra) and bool(rb) and token_set_ratio(ra, rb) >= 85
+
+
 def _create_event(task, posts_in):
     """Materialize one finalized cluster of posts into a task Event."""
     posts_in = sorted(posts_in, key=lambda p: p.posted_at)
@@ -480,23 +491,28 @@ def dedup_once(task):
             c["event"] = ev
             active.append(c)
 
-    def fuzzy(a, b):
-        return max(token_set_ratio(a["text"], b["text"]),
-                   token_set_ratio(a["sum"], b["sum"]))
-
     soft = max(35, task.dedup_cand_thresh - 20)
     pool = active + new_clusters
     base = len(active)
-    pairs = []
+    pairs = []      # candidate pairs the LLM judge decides
+    forced = []     # near-identical -> merge without (or despite) the judge
     for b in range(base, len(pool)):
         for a in range(0, b):
             if pool[b]["dmin"] - pool[a]["dmax"] > win and pool[a]["dmin"] - pool[b]["dmax"] > win:
                 continue
-            if fuzzy(pool[a], pool[b]) >= task.dedup_cand_thresh:
+            sf = token_set_ratio(pool[a]["sum"], pool[b]["sum"])
+            tf = token_set_ratio(pool[a]["text"], pool[b]["text"])
+            shared = P._shared_side(pool[a], pool[b])
+            # near-identical summary + same concrete nationality => same event
+            # (overrides occasional judge errors, e.g. two reports of one court case)
+            if sf >= 90 and shared:
+                forced.append((a, b))
+            elif max(tf, sf) >= task.dedup_cand_thresh:
                 pairs.append((a, b))
-            elif P._shared_side(pool[a], pool[b]) and \
-                    token_set_ratio(pool[a]["sum"], pool[b]["sum"]) >= soft:
+            elif shared and sf >= soft:
                 pairs.append((a, b))
+            elif _same_region(pool[a], pool[b]) and sf >= max(45, soft):
+                pairs.append((a, b))          # same place + moderate similarity
 
     same = []
     if pairs:
@@ -512,11 +528,16 @@ def dedup_once(task):
             x = parent[x]
         return x
 
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    for a, b in forced:
+        union(a, b)
     for (a, b), s in zip(pairs, same):
         if s:
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[max(ra, rb)] = min(ra, rb)
+            union(a, b)
 
     merged = defaultdict(list)
     for k in range(len(pool)):
