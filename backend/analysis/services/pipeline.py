@@ -348,14 +348,15 @@ PAIR_SYS = (
 )
 
 
-async def _judge_pairs(pairs_text):
+async def _judge_pairs(pairs_text, system=None):
+    system = system or PAIR_SYS
     sem = asyncio.Semaphore(CONCURRENCY)
     same = [False] * len(pairs_text)
     client = llm.make_client()
 
     async def one(k, a, b):
         async with sem:
-            r = await llm.query([{"role": "system", "content": PAIR_SYS},
+            r = await llm.query([{"role": "system", "content": system},
                                  {"role": "user", "content": f"A: {a[:280]}\nB: {b[:280]}"}],
                                 client=client)
             same[k] = (r or "").strip().lower().startswith(("одна", "одно", "так", "да", "yes"))
@@ -446,15 +447,15 @@ GENERIC_SIDES = {
 }
 
 
-def _is_generic(side):
-    return any(token_set_ratio(side, g) >= 88 for g in GENERIC_SIDES)
+def _is_generic(side, generic=None):
+    return any(token_set_ratio(side, g) >= 88 for g in (generic or GENERIC_SIDES))
 
 
-def _shared_side(a, b):
-    """True only if the clusters share a SPECIFIC participant group (a concrete
-    nationality), not just a generic umbrella term like 'мігрант' / 'русский'."""
-    sa = [s for s in a["sides"] if not _is_generic(s)]
-    sb = [s for s in b["sides"] if not _is_generic(s)]
+def _shared_side(a, b, generic=None):
+    """True only if the clusters share a SPECIFIC participant group, not just a
+    generic umbrella term (per-task `generic`, defaults to GENERIC_SIDES)."""
+    sa = [s for s in a["sides"] if not _is_generic(s, generic)]
+    sb = [s for s in b["sides"] if not _is_generic(s, generic)]
     return any(token_set_ratio(x, y) >= 80 for x in sa for y in sb)
 
 

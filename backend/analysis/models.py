@@ -80,6 +80,26 @@ class AnalysisTask(models.Model):
         help_text="Перевизначає модель за замовчуванням",
     )
 
+    # --- доменна конфігурація (робить пайплайн переюзабельним під інші задачі) ---
+    geo_enabled = models.BooleanField(
+        default=True, verbose_name="Геолокація (суб'єкт+місто)",
+        help_text="Чи визначати регіон/населений пункт події. Вимкни для не-географічних задач.",
+    )
+    closed_tag_categories = models.JSONField(
+        default=list, blank=True, verbose_name="Закриті категорії тегів",
+        help_text='Категорії, що канонізуються лише із сід-списку (інші — відкритий словник). '
+                  'Для етнічної задачі: ["nationality","conflict"]. Порожньо — усі відкриті.',
+    )
+    dedup_judge_prompt = models.TextField(
+        blank=True, verbose_name="Промпт дедуп-судді",
+        help_text="Системний промпт LLM-судді «одна подія чи різні». Порожньо — дефолтний.",
+    )
+    generic_sides = models.JSONField(
+        default=list, blank=True, verbose_name="Генеричні сторони",
+        help_text="«Парасолькові» сторони, що НЕ вважаються спільним сигналом у дедупі "
+                  '(напр. мігрант/місцевий). Порожньо — дефолтний набір.',
+    )
+
     is_active = models.BooleanField(default=True, verbose_name="Активна")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")

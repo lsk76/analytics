@@ -86,13 +86,14 @@ def resolve_conflict_tag(raw: str) -> Optional[Tag]:
     return obj
 
 
-def resolve_tag(raw: str) -> Optional[Tag]:
+def resolve_tag(raw: str, closed=None) -> Optional[Tag]:
     """
     Free-text side/participant -> canonical Tag(name, category).
       * nationality is a CLOSED seeded list — slang maps to a real nation
         (хачик -> кавказець); roles/descriptors are NOT nationalities.
       * other categories (status/religion/role/group) are canonicalized + categorized.
     """
+    closed = set(closed if closed is not None else ("nationality",))
     key = _key(raw)
     if not key:
         return None
@@ -137,20 +138,21 @@ def resolve_tag(raw: str) -> Optional[Tag]:
     if not name:
         name = raw.strip()[:80]
 
-    # nationality is CLOSED: exact seed -> closest seed (gender/number variants
-    # like росіянка->росіянин share a long prefix) -> only then demote to 'other'.
-    # Never create a new nationality tag.
-    if category == "nationality":
-        obj = Tag.objects.filter(category="nationality", name__iexact=name).first()
-        if not obj and nations:
+    # CLOSED categories: exact seed -> closest seed (gender/number variants like
+    # росіянка->росіянин share a long prefix) -> only then demote to 'other'.
+    # Never invent a new tag in a closed category. Open categories create freely.
+    if category in closed:
+        seeded = list(Tag.objects.filter(category=category).values_list("name", flat=True))
+        obj = Tag.objects.filter(category=category, name__iexact=name).first()
+        if not obj and seeded:
             nl = name.lower()
-            best = max(nations, key=lambda s: (_common_prefix(nl, s.lower()),
-                                               token_set_ratio(nl, s.lower())))
+            best = max(seeded, key=lambda s: (_common_prefix(nl, s.lower()),
+                                              token_set_ratio(nl, s.lower())))
             bl = best.lower()
             if _common_prefix(nl, bl) >= 4 or token_set_ratio(nl, bl) >= 85:
-                obj = Tag.objects.filter(category="nationality", name__iexact=best).first()
+                obj = Tag.objects.filter(category=category, name__iexact=best).first()
         if not obj:
-            category = "other"  # not a seeded nation -> demote, don't invent one
+            category = "other"  # not in the closed seed -> demote, don't invent one
             obj = (Tag.objects.filter(category="other", name__iexact=name).first()
                    or Tag.objects.create(name=name, category="other"))
     else:

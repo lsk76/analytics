@@ -208,8 +208,9 @@ def enrich_once(task):
 
     chan_by_cid = {c.tg_id: c for c in Channel.objects.filter(tg_id__in=unique_cids)}
 
-    to_infer = [(cid, ch.title, ch.description) for cid, ch in chan_by_cid.items()
-                if not ch.inferred_region and (ch.title or ch.description)]
+    to_infer = ([(cid, ch.title, ch.description) for cid, ch in chan_by_cid.items()
+                 if not ch.inferred_region and (ch.title or ch.description)]
+                if task.geo_enabled else [])
     if to_infer:
         for cid, region in (asyncio.run(P._infer_regions(to_infer)) or {}).items():
             ch = chan_by_cid.get(cid)
@@ -413,14 +414,16 @@ def _create_event(task, posts_in):
     posts_in = sorted(posts_in, key=lambda p: p.posted_at)
     head = posts_in[0]
     cls = head.classification or {}
-    region = (cls.get("region") or "").strip()
-    sett_hint = (cls.get("settlement") or "").strip()
-    if not region and head.channel and head.channel.inferred_region:
-        region = head.channel.inferred_region
-    loc = ", ".join(x for x in (sett_hint, region) if x)
-    region_subject, settlement = resolve_region(loc) if loc else (None, "")
-    if not settlement and sett_hint:
-        settlement = sett_hint
+    region, region_subject, settlement = "", None, ""
+    if task.geo_enabled:                       # geolocation is per-task (off for non-geo tasks)
+        region = (cls.get("region") or "").strip()
+        sett_hint = (cls.get("settlement") or "").strip()
+        if not region and head.channel and head.channel.inferred_region:
+            region = head.channel.inferred_region
+        loc = ", ".join(x for x in (sett_hint, region) if x)
+        region_subject, settlement = resolve_region(loc) if loc else (None, "")
+        if not settlement and sett_hint:
+            settlement = sett_hint
     ev = Event.objects.create(
         task=task,
         event_date=head.posted_at.date(),
@@ -429,7 +432,8 @@ def _create_event(task, posts_in):
         post_count=len(posts_in),
         is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
     )
-    tag_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_tag(raw))]
+    closed = task.closed_tag_categories      # [] -> all open; None never (JSONField default [])
+    tag_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_tag(raw, closed=closed))]
     if cls.get("type") and (ct := resolve_conflict_tag(cls["type"])):
         tag_objs.append(ct)
     if tag_objs:
@@ -492,6 +496,7 @@ def dedup_once(task):
             active.append(c)
 
     soft = max(35, task.dedup_cand_thresh - 20)
+    generic = task.generic_sides or None        # per-task umbrella terms
     pool = active + new_clusters
     base = len(active)
     pairs = []      # candidate pairs the LLM judge decides
@@ -502,7 +507,7 @@ def dedup_once(task):
                 continue
             sf = token_set_ratio(pool[a]["sum"], pool[b]["sum"])
             tf = token_set_ratio(pool[a]["text"], pool[b]["text"])
-            shared = P._shared_side(pool[a], pool[b])
+            shared = P._shared_side(pool[a], pool[b], generic)
             # near-identical summary + same concrete nationality => same event
             # (overrides occasional judge errors, e.g. two reports of one court case)
             if sf >= 90 and shared:
@@ -518,7 +523,7 @@ def dedup_once(task):
     if pairs:
         pairs_text = [(P._judge_text(pool[a]["rep"]), P._judge_text(pool[b]["rep"]))
                       for a, b in pairs]
-        same = asyncio.run(P._judge_pairs(pairs_text))
+        same = asyncio.run(P._judge_pairs(pairs_text, system=task.dedup_judge_prompt or None))
 
     parent = list(range(len(pool)))
 

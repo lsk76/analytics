@@ -88,6 +88,10 @@ class Command(BaseCommand):
                 "dedup_pre_thresh": 82,
                 "dedup_cand_thresh": 55,
                 "llm_model": "google/gemini-2.5-flash",
+                # domain config: nationalities are a closed seed list; geo on;
+                # dedup judge prompt + generic sides left blank => ethnic defaults
+                "geo_enabled": True,
+                "closed_tag_categories": ["nationality"],
             },
         )
         self.stdout.write(self.style.SUCCESS(
