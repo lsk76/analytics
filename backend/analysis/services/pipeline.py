@@ -375,9 +375,14 @@ def _create_event(run, task, posts_in):
     head = posts_in[0]
     cls = head.classification or {}
     region = (cls.get("region") or "").strip()
+    sett_hint = (cls.get("settlement") or "").strip()
     if not region and head.channel and head.channel.inferred_region:
         region = head.channel.inferred_region  # channel-name/desc fallback
-    region_subject, settlement = resolve_region(region) if region else (None, "")
+    # feed city + subject so the resolver can geolocate the settlement too
+    loc = ", ".join(x for x in (sett_hint, region) if x)
+    region_subject, settlement = resolve_region(loc) if loc else (None, "")
+    if not settlement and sett_hint:
+        settlement = sett_hint  # keep classifier's city even if resolver missed it
     ev = Event.objects.create(
         task=task, run=run,
         event_date=head.posted_at.date(),

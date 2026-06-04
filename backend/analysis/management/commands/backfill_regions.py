@@ -29,6 +29,14 @@ class Command(BaseCommand):
             if raw not in cache:
                 cache[raw] = resolve_region(raw)
             region, settlement = cache[raw]
+            # the raw region is usually just the subject (no city) -> dig the
+            # settlement out of the summary, which names the place of the event
+            if not settlement and ev.summary:
+                s_region, s_settlement = resolve_region(ev.summary.strip())
+                if s_settlement:
+                    settlement = s_settlement
+                if region is None and s_region is not None:
+                    region = s_region
             ev.region_subject = region
             ev.settlement = settlement
             ev.save(update_fields=["region_subject", "settlement"])
