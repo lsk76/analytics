@@ -250,10 +250,29 @@ class TagAdmin(admin.ModelAdmin):
     inlines = [TagAliasInline]
 
 
+class JobPeriodFilter(admin.SimpleListFilter):
+    """Filter posts by a collect job — posts of that job's task within its period."""
+    title = "Збір (job)"
+    parameter_name = "job"
+
+    def lookups(self, request, model_admin):
+        return [(r.id, f"#{r.id} {r.task.slug} {r.date_from}…{r.date_to}")
+                for r in ResearchRun.objects.select_related("task").order_by("-created_at")[:50]]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            r = ResearchRun.objects.filter(id=self.value()).first()
+            if r:
+                return queryset.filter(task=r.task,
+                                       posted_at__date__gte=r.date_from,
+                                       posted_at__date__lte=r.date_to)
+        return queryset
+
+
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
     list_display = ("url", "channel_name", "posted_at", "stage", "is_relevant", "event")
-    list_filter = ("task", "stage", "is_relevant")
+    list_filter = ("task", JobPeriodFilter, "stage", "is_relevant")
     search_fields = ("url", "text")
     readonly_fields = ("stage_locked_at", "stage_attempts", "stage_error", "created_at")
 

@@ -263,16 +263,30 @@ def precluster_once(task):
     # day D is settled for precluster when D + win <= ready (neighbours up to D+win enriched)
     settle_to = (ready - win) if ready else None
 
-    base = Post.objects.filter(task=task, stage=Post.STAGE_ENRICHED, posted_at__isnull=False)
+    # in-scope filter: posts-only keeps real channels AND unknown (is_channel NULL),
+    # drops only confirmed chats; comments-only is the inverse
+    posts_scope = Q(channel__is_channel=True) | Q(channel__is_channel__isnull=True) | Q(channel__isnull=True)
     if task.search_posts and not task.search_comments:
-        base = base.exclude(channel__is_channel=False)
+        scope, antiscope = posts_scope, Q(channel__is_channel=False)
     elif task.search_comments and not task.search_posts:
-        base = base.filter(channel__is_channel=False)
+        scope, antiscope = Q(channel__is_channel=False), posts_scope
+    else:
+        scope, antiscope = Q(), None
 
+    # finalize OUT-OF-SCOPE enriched posts so they never clog the dedup watermark
+    finalized = 0
+    if antiscope is not None:
+        out = Post.objects.filter(task=task, stage=Post.STAGE_ENRICHED).filter(antiscope)
+        if settle_to is not None:
+            out = out.filter(posted_at__date__lte=settle_to)
+        finalized = out.update(stage=Post.STAGE_DONE, stage_locked_at=None)
+
+    base = Post.objects.filter(task=task, stage=Post.STAGE_ENRICHED,
+                               posted_at__isnull=False).filter(scope)
     newq = base if settle_to is None else base.filter(posted_at__date__lte=settle_to)
     newp = list(newq.order_by("posted_at", "id"))
     if not newp:
-        return False
+        return finalized > 0
 
     # back-buffer: already-preclustered (or later) neighbours within `win` for cross-day merges
     oldest = newp[0].posted_at - win
