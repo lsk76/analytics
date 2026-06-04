@@ -130,15 +130,19 @@ async def _infer_regions(channels):
     """channels: list of (cid, title, about) -> {cid: region}."""
     sem = asyncio.Semaphore(CONCURRENCY)
     out = {}
+    client = llm.make_client()
 
     async def one(cid, title, about):
         async with sem:
             txt = f"Назва: {title}\nОпис: {about[:400]}"
             r = await llm.query([{"role": "system", "content": REGION_SYS},
-                                 {"role": "user", "content": txt}])
+                                 {"role": "user", "content": txt}], client=client)
             out[cid] = (r or "").strip().strip('"')[:128]
 
-    await asyncio.gather(*[one(c, t, a) for c, t, a in channels])
+    try:
+        await asyncio.gather(*[one(c, t, a) for c, t, a in channels])
+    finally:
+        await client.close()
     return out
 
 
@@ -209,16 +213,20 @@ def enrich(run):
 async def _classify_batches(system_prompt, batches, model):
     sem = asyncio.Semaphore(CONCURRENCY)
     results = {}
+    client = llm.make_client()
 
     async def one(bi, texts):
         async with sem:
             user = "\n".join(f"[{i}] {t[:700]}" for i, t in enumerate(texts))
             raw = await llm.query(
                 [{"role": "system", "content": system_prompt}, {"role": "user", "content": user}],
-                model=model)
+                model=model, client=client)
             results[bi] = llm.extract_json(raw) or []
 
-    await asyncio.gather(*[one(bi, texts) for bi, texts in enumerate(batches)])
+    try:
+        await asyncio.gather(*[one(bi, texts) for bi, texts in enumerate(batches)])
+    finally:
+        await client.close()
     return results
 
 
@@ -341,14 +349,19 @@ PAIR_SYS = (
 async def _judge_pairs(pairs_text):
     sem = asyncio.Semaphore(CONCURRENCY)
     same = [False] * len(pairs_text)
+    client = llm.make_client()
 
     async def one(k, a, b):
         async with sem:
             r = await llm.query([{"role": "system", "content": PAIR_SYS},
-                                 {"role": "user", "content": f"A: {a[:280]}\nB: {b[:280]}"}])
+                                 {"role": "user", "content": f"A: {a[:280]}\nB: {b[:280]}"}],
+                                client=client)
             same[k] = (r or "").strip().lower().startswith(("одна", "одно", "так", "да", "yes"))
 
-    await asyncio.gather(*[one(k, a, b) for k, (a, b) in enumerate(pairs_text)])
+    try:
+        await asyncio.gather(*[one(k, a, b) for k, (a, b) in enumerate(pairs_text)])
+    finally:
+        await client.close()
     return same
 
 

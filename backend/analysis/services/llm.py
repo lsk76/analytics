@@ -9,23 +9,34 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 
-def _client() -> AsyncOpenAI:
+def make_client() -> AsyncOpenAI:
+    """One client per asyncio.run — pass it to many query() calls, then close it."""
     return AsyncOpenAI(
         api_key=settings.OPENROUTER_API_KEY,
         base_url=settings.OPENROUTER_API_BASE_URL,
     )
 
 
-async def query(messages: List[dict], model: Optional[str] = None, timeout: float = 120.0) -> str:
+async def query(messages: List[dict], model: Optional[str] = None, timeout: float = 120.0,
+                client: Optional[AsyncOpenAI] = None) -> str:
     model = model or settings.LLM_MODEL
+    own = client is None
+    if own:
+        client = make_client()
     try:
-        resp = await _client().chat.completions.create(
+        resp = await client.chat.completions.create(
             model=model, messages=messages, timeout=timeout,
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM error (%s): %s", model, e)
         return ""
+    finally:
+        if own:
+            try:
+                await client.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def extract_json(text: str) -> Any:
