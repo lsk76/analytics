@@ -45,3 +45,4 @@ data/
 
 # DB backups
 backups/
+events_validation.json
