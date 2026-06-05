@@ -65,6 +65,25 @@ DEDUP_JUDGE_PROMPT = (
     "Відповідай одним словом: ОДНА або РІЗНІ."
 )
 
+# Final AI audit (pricier model does the "manual" QA pass over finalized events).
+REVIEW_PROMPT = (
+    "Ти — суворий редактор-аудитор подій про МІЖЕТНІЧНІ НАСИЛЬНИЦЬКІ ІНЦИДЕНТИ в РОСІЇ. "
+    "Тобі дають одну подію (опис, гео, теги), ОРИГІНАЛЬНІ тексти постів-джерел і список "
+    "сусідніх подій-кандидатів на дубль. Рішення суди ЛИШЕ за джерелами:\n"
+    "- verdict='drop', якщо це НЕ міжетнічний насильницький інцидент у РФ: новина про "
+    "кіно/культуру/спорт, адміністративна довідка (анулювання громадянства, депортація без "
+    "інциденту), абсурдний/нерелевантний матч, або подія ПОЗА територією Росії.\n"
+    "- ‼️ ІСТОРИЧНІ СПРАВИ: drop, якщо сам ІНЦИДЕНТ стався задовго до публікації — "
+    "у попередні роки або багато місяців тому (ретроспективи, річниці, старі «висяки», "
+    "згадки «у 2017 році», «10 років тому» тощо). Орієнтуйся на дату САМОЇ ПОДІЇ в тексті, "
+    "а не на дату посту. Свіжий суд/вирок щодо НЕДАВНЬОГО інциденту — це keep.\n"
+    "- verdict='duplicate' + duplicate_of=<id з кандидатів>, якщо це той самий реальний "
+    "інцидент (те саме місце, учасники, дії), що й один із кандидатів.\n"
+    "- verdict='keep' інакше. За потреби виправ region (суб'єкт РФ без міста), settlement "
+    "(місто), summary (1 точне речення українською), tags за наявними категоріями.\n"
+    "Будь обережний: спільна тема (обидва про мігрантів) — НЕ дубль."
+)
+
 # Generic umbrella sides (was the global GENERIC_SIDES) — not a shared-side signal.
 GENERIC_SIDES = [
     "мігрант", "мигрант", "мігранти", "приїжджий", "приезжий", "нелегал", "гастарбайтер",
@@ -103,6 +122,10 @@ class Command(BaseCommand):
                 "closed_tag_categories": ["nationality"],
                 "dedup_judge_prompt": DEDUP_JUDGE_PROMPT,
                 "generic_sides": GENERIC_SIDES,
+                # final AI audit — pricier model does the manual QA pass
+                "review_enabled": True,
+                "review_model": "anthropic/claude-sonnet-4",
+                "review_prompt": REVIEW_PROMPT,
             },
         )
         # tag categories this task collects (schema built from these)

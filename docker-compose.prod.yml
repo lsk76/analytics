@@ -59,6 +59,7 @@ services:
   worker-precluster: { <<: *worker, command: python manage.py run_worker --stage precluster }
   worker-classify:   { <<: *worker, command: python manage.py run_worker --stage classify }
   worker-dedup:      { <<: *worker, command: python manage.py run_worker --stage dedup }
+  worker-review:     { <<: *worker, command: python manage.py run_worker --stage review }
 
 volumes:
   pgdata:

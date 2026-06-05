@@ -174,22 +174,80 @@ def enqueue_job_action(modeladmin, request, queryset):
             f"Воркери самі доведуть до подій.")
 
 
+@admin.action(description="↻ Перепрогнати пайплайн (без TeleZip)")
+def reprocess_period_action(modeladmin, request, queryset):
+    for run in queryset:
+        n_ev, n_posts = stages.reprocess_period(run.task, run.date_from, run.date_to)
+        messages.success(
+            request,
+            f"#{run.id} «{run.task.name}» {run.date_from}…{run.date_to}: -{n_ev} подій, "
+            f"скинуто {n_posts} постів → collected. Воркери доведуть назад до подій.")
+
+
+@admin.action(description="⟳ Перезібрати з нуля (TeleZip)")
+def recollect_fresh_action(modeladmin, request, queryset):
+    for run in queryset:
+        n_ev, n_posts, n_chunks = stages.recollect_fresh(
+            run.task, run.date_from, run.date_to, job=run)
+        run.status = "collecting"
+        run.save(update_fields=["status"])
+        messages.success(
+            request,
+            f"#{run.id} «{run.task.name}» {run.date_from}…{run.date_to}: -{n_ev} подій, "
+            f"-{n_posts} постів, +{n_chunks} чанків у черзі.")
+
+
 @admin.register(ResearchRun)
 class ResearchRunAdmin(admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
-                    "chunk_progress", "posts_collected", "created_at")
+                    "chunk_progress", "stage_progress", "posts_collected", "created_at")
     list_filter = ("task", "status")
     search_fields = ("title", "task__name")
-    actions = [enqueue_job_action]
-    readonly_fields = ("started_at", "finished_at", "params", "stats",
+    actions = [enqueue_job_action, reprocess_period_action, recollect_fresh_action]
+    readonly_fields = ("started_at", "finished_at", "stage_progress", "params", "stats",
                        "posts_collected", "posts_relevant", "events_total",
                        "events_corroborated", "created_at")
+
+    # пайплайн-стадії в порядку проходження (термінальні: done/failed)
+    _STAGE_SEQ = [
+        (Post.STAGE_COLLECTED, "збір"),
+        (Post.STAGE_ENRICHED, "збагач."),
+        (Post.STAGE_PRECLUSTERED, "преклас."),
+        (Post.STAGE_CLASSIFIED, "класиф."),
+        (Post.STAGE_DEDUPED, "дедуп"),
+        (Post.STAGE_DONE, "готово"),
+    ]
 
     @admin.display(description="Чанки")
     def chunk_progress(self, obj):
         total = obj.chunks.count()
         done = obj.chunks.filter(status="done").count()
-        return f"{done}/{total}" if total else "—"
+        pct = round(100 * done / total) if total else 0
+        return format_html("{}/{} <small>({}%)</small>", done, total, pct) if total else "—"
+
+    @admin.display(description="Стадії постів")
+    def stage_progress(self, obj):
+        """Розподіл постів задачі за період job'а по стадіях + % завершення.
+        Пости не належать job'у напряму — рахуємо за task і period [date_from, date_to]."""
+        counts = dict(
+            Post.objects.filter(task=obj.task,
+                                 posted_at__date__gte=obj.date_from,
+                                 posted_at__date__lte=obj.date_to)
+            .values_list("stage").annotate(n=Count("id"))
+        )
+        total = sum(counts.values())
+        if not total:
+            return "—"
+        terminal = counts.get(Post.STAGE_DONE, 0) + counts.get(Post.STAGE_FAILED, 0)
+        pct = round(100 * terminal / total)
+        parts = [f"{lbl} {counts[st]}" for st, lbl in self._STAGE_SEQ if counts.get(st)]
+        if counts.get(Post.STAGE_FAILED):
+            parts.append(f"помилка {counts[Post.STAGE_FAILED]}")
+        fill = pct // 10
+        bar = "█" * fill + "░" * (10 - fill)
+        return format_html("<b>{}%</b> <span style='font-family:monospace'>{}</span>"
+                           "<br><small>{} / всього {}</small>",
+                           pct, bar, " · ".join(parts), total)
 
 
 @admin.register(CollectChunk)
@@ -282,9 +340,10 @@ class PostAdmin(admin.ModelAdmin):
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("event_date", "region_subject", "settlement", "conflict_display",
-                    "tags_list", "count_short", "reach_display", "posts_preview", "summary")
-    readonly_fields = ("posts_all",)
+    list_display = ("event_date", "review_badge", "region_subject", "settlement",
+                    "conflict_display", "tags_list", "count_short", "reach_display",
+                    "posts_preview", "summary")
+    readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at")
     date_hierarchy = "event_date"
     def get_list_filter(self, request):
         # build one faceted multiselect per tag category, dynamically from the registry
@@ -293,11 +352,17 @@ class EventAdmin(admin.ModelAdmin):
         return (
             ("event_date", DateRangeFilterBuilder(title="Період")),
             TaskFilter,
+            "review_status",
             SubjectFilter,
             *cat_filters,
             ChannelFilter,
             "is_corroborated",
         )
+
+    @admin.display(description="Аудит")
+    def review_badge(self, obj):
+        icon = {"approved": "✅", "pending": "⏳", "rejected": "🚫"}.get(obj.review_status, "•")
+        return format_html('<span title="{}">{}</span>', obj.review_notes or "", icon)
 
     search_fields = ("summary", "region", "settlement")
     filter_horizontal = ("tags",)
@@ -364,6 +429,26 @@ class EventAdmin(admin.ModelAdmin):
         if post.channel and post.channel.title:
             return post.channel.title[:24]
         return "приватний"
+
+    @admin.display(description="Текст джерела (макс. аудиторія)")
+    def source_text(self, obj):
+        """Full TeleZip text of the event's post from the largest-audience channel."""
+        posts = sorted(obj.posts.all(), key=lambda p: (-self._subs(p), not p.channel_name))
+        if not posts:
+            return "—"
+        p = posts[0]
+        subs = self._subs(p)
+        subs_lbl = f"{subs:,}".replace(",", " ") if subs else "—"
+        head = format_html(
+            '<a href="{}" target="_blank" rel="noopener">{}</a> · 👥 {}',
+            p.url, p.channel_name or "приватний", subs_lbl)
+        body = (p.text or "").strip() or "(порожній текст)"
+        return format_html(
+            '<div>{}</div>'
+            '<div style="white-space:pre-wrap;max-width:900px;margin-top:6px;'
+            'padding:10px;background:var(--darkened-bg);color:var(--body-fg);'
+            'border:1px solid var(--border-color);border-radius:6px">{}</div>',
+            head, body)
 
     @admin.display(description="Усі публікації")
     def posts_all(self, obj):

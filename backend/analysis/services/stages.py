@@ -156,6 +156,8 @@ def collect_once(task):
             chunk.locked_at = None
             chunk.error = str(e)[:1000]
             chunk.save(update_fields=["status", "locked_at", "error"])
+            if chunk.status == "failed":      # terminal chunk -> job may now be done
+                _maybe_finish_job(chunk.job)
         return True
 
     n = 0
@@ -193,7 +195,23 @@ def collect_once(task):
     chunk.finished_at = djtz.now()
     chunk.save(update_fields=["status", "posts_collected", "locked_at", "finished_at"])
     logger.info("collect %s..%s: +%d posts", chunk.date_from, chunk.date_to, n)
+    _maybe_finish_job(chunk.job)
     return True
+
+
+def _maybe_finish_job(job):
+    """Flip a collect job to 'collected' once none of its chunks are still pending/running.
+    The collector only owns the collection phase; downstream stages run on the task."""
+    if not job or job.status in ("collected", "done", "cancelled"):
+        return
+    chunks = CollectChunk.objects.filter(job=job)
+    if not chunks.filter(status__in=["pending", "running"]).exists():
+        from django.db.models import Sum
+        job.status = "collected"
+        job.posts_collected = chunks.aggregate(s=Sum("posts_collected"))["s"] or 0
+        job.finished_at = djtz.now()
+        job.save(update_fields=["status", "posts_collected", "finished_at"])
+        logger.info("collect job #%s -> collected (%d posts)", job.id, job.posts_collected)
 
 
 # --------------------------------------------------------------------------- enrich
@@ -481,7 +499,10 @@ def _create_event(task, posts_in):
 
 
 def _attach_posts(ev, posts_in):
-    """Link posts to event, advance them to done, recompute count/reach."""
+    """Link posts to event, advance them to done, recompute count/reach. Posts that
+    dedup attaches are already judged the SAME incident (corroborating reposts), so an
+    already-audited event is NOT sent back to review — that would just burn the pricier
+    model for no new signal."""
     Post.objects.filter(id__in=[p.id for p in posts_in]).update(
         event=ev, stage=Post.STAGE_DONE, stage_locked_at=None)
     members = list(Post.objects.filter(event=ev).select_related("channel"))
@@ -625,7 +646,46 @@ def enqueue_collection(task, date_from, date_to, chunk_days=None, job=None):
     return made
 
 
+def reprocess_period(task, date_from, date_to):
+    """Re-run the pipeline on ALREADY-collected posts (no TeleZip): delete the period's
+    events and reset its posts back to 'collected'. Workers redo enrich→…→dedup.
+    `classification` is kept (it carries the cached TeleZip channel id; it's overwritten
+    at classify anyway). Returns (events_deleted, posts_reset)."""
+    ev = Event.objects.filter(task=task, event_date__gte=date_from, event_date__lte=date_to)
+    n_ev = ev.count()
+    ev.delete()
+    n_posts = (Post.objects.filter(task=task, posted_at__date__gte=date_from,
+                                   posted_at__date__lte=date_to)
+               .update(stage=Post.STAGE_COLLECTED, stage_locked_at=None, stage_attempts=0,
+                       stage_error="", event=None, dedup_group=None,
+                       is_classified=False, is_relevant=None))
+    logger.info("reprocess %s..%s: -%d events, reset %d posts", date_from, date_to, n_ev, n_posts)
+    return n_ev, n_posts
+
+
+def recollect_fresh(task, date_from, date_to, job=None):
+    """Wipe the period entirely (events + posts + chunks) and re-enqueue collection from
+    TeleZip. Returns (events_deleted, posts_deleted, chunks_added)."""
+    ev = Event.objects.filter(task=task, event_date__gte=date_from, event_date__lte=date_to)
+    n_ev = ev.count(); ev.delete()
+    posts = Post.objects.filter(task=task, posted_at__date__gte=date_from,
+                                posted_at__date__lte=date_to)
+    n_posts = posts.count(); posts.delete()
+    CollectChunk.objects.filter(task=task, date_from__gte=date_from,
+                                date_to__lte=date_to).delete()
+    n_chunks = enqueue_collection(task, date_from, date_to, job=job)
+    logger.info("recollect %s..%s: -%d events, -%d posts, +%d chunks",
+                date_from, date_to, n_ev, n_posts, n_chunks)
+    return n_ev, n_posts, n_chunks
+
+
 # --------------------------------------------------------------------------- registry
+
+def review_once(task):
+    # imported lazily: review.py imports helpers from this module (avoid import cycle)
+    from analysis.services.review import review_once as _r
+    return _r(task)
+
 
 STAGE_RUNNERS = {
     "collect": collect_once,
@@ -633,4 +693,5 @@ STAGE_RUNNERS = {
     "precluster": precluster_once,
     "classify": classify_once,
     "dedup": dedup_once,
+    "review": review_once,
 }

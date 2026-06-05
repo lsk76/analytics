@@ -104,6 +104,22 @@ class AnalysisTask(models.Model):
                   '(напр. мігрант/місцевий). Порожньо — дефолтний набір.',
     )
 
+    # --- фінальний AI-аудит (дорожча модель робить «ручну» перевірку подій) ---
+    review_enabled = models.BooleanField(
+        default=False, verbose_name="Фінальний AI-аудит",
+        help_text="Доганяти готові події дорожчою моделлю: відсів хибнопозитивів, "
+                  "злиття дублів, фікс гео/полів.",
+    )
+    review_model = models.CharField(
+        max_length=100, blank=True, default="anthropic/claude-sonnet-4",
+        verbose_name="Модель аудиту",
+        help_text="Дорожча LLM для фінального аудиту (OpenRouter).",
+    )
+    review_prompt = models.TextField(
+        blank=True, verbose_name="Промпт аудиту",
+        help_text="Системний промпт аудитора. Порожньо — дефолтний.",
+    )
+
     is_active = models.BooleanField(default=True, verbose_name="Активна")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
@@ -450,11 +466,29 @@ class Event(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
+    # --- фінальний AI-аудит (дорожча модель) ---
+    REVIEW_PENDING = "pending"
+    REVIEW_APPROVED = "approved"
+    REVIEW_REJECTED = "rejected"
+    REVIEW_CHOICES = [
+        (REVIEW_PENDING, "Очікує аудиту"),
+        (REVIEW_APPROVED, "Схвалено"),
+        (REVIEW_REJECTED, "Відхилено (буде видалено)"),
+    ]
+    review_status = models.CharField(
+        max_length=12, choices=REVIEW_CHOICES, default=REVIEW_PENDING, db_index=True,
+        verbose_name="Статус аудиту",
+    )
+    review_notes = models.TextField(blank=True, verbose_name="Нотатки аудиту")
+    review_locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Заблоковано аудитом о")
+    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="Проаудитовано о")
+
     class Meta:
         verbose_name = "Подія"
         verbose_name_plural = "Події"
         ordering = ["event_date"]
-        indexes = [models.Index(fields=["task", "event_date"])]
+        indexes = [models.Index(fields=["task", "event_date"]),
+                   models.Index(fields=["task", "review_status"])]
 
     def __str__(self):
         return f"{self.event_date} {self.region}: {self.summary[:60]}"
