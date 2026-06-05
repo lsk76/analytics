@@ -28,9 +28,7 @@ from django.utils import timezone as djtz
 from analysis.models import Post, Event, Channel, CollectChunk
 from .telezip import TelezipClient
 from . import llm
-from .normalize import (
-    resolve_tag, resolve_conflict_tag, resolve_region, resolve_in_category,
-)
+from .normalize import resolve_region, resolve_in_category
 from analysis.models import Tag
 from . import pipeline as P  # reuse pure helpers
 from rapidfuzz.fuzz import token_set_ratio
@@ -380,7 +378,8 @@ def build_classify_prompt(task):
             hints.append(f'- "{c.key}" ({c.label}): обери ТОЧНО зі списку {seeded}; '
                          f'якщо відповідного нема — пропусти (не вигадуй).')
         else:
-            hints.append(f'- "{c.key}" ({c.label}): вільні значення українською, узагальнено.')
+            guide = c.hint or "вільні значення українською, узагальнено"
+            hints.append(f'- "{c.key}" ({c.label}): {guide}.')
     geo_note = ("\nregion — суб'єкт (область/край/республіка) БЕЗ міста; "
                 "settlement — місто/селище окремо (напр. region='Хабаровський край', "
                 "settlement='Хабаровськ')." if task.geo_enabled else "")
@@ -475,12 +474,6 @@ def _create_event(task, posts_in):
         for v in vals:
             if v and (o := resolve_in_category(str(v), c.key, c.closed)):
                 tag_objs.append(o)
-    # backward-compat: old sides/type contract
-    if not cls_tags:
-        tag_objs += [o for raw in (cls.get("sides") or [])
-                     if (o := resolve_tag(raw, closed=task.closed_tag_categories))]
-        if cls.get("type") and (ct := resolve_conflict_tag(cls["type"])):
-            tag_objs.append(ct)
     if tag_objs:
         ev.tags.set(tag_objs)
     _attach_posts(ev, posts_in)

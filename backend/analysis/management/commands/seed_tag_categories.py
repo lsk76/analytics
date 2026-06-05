@@ -4,13 +4,17 @@ from django.core.management.base import BaseCommand
 from analysis.models import TagCategory
 
 CATEGORIES = [
-    ("nationality", "Національність", True, 10),
-    ("status", "Статус (мігрант/місцеві)", False, 20),
-    ("religion", "Релігія", False, 30),
-    ("role", "Роль/професія/вік", False, 40),
-    ("group", "Організація/спільнота", False, 50),
-    ("conflict", "Тип конфлікту", True, 60),
-    ("other", "Інше", False, 100),
+    # key, label, closed, order, hint
+    ("nationality", "Національність", True, 10, ""),
+    ("status", "Статус (мігрант/місцеві)", False, 20,
+     "лише: мігрант / місцевий житель / приїжджий / іноземець"),
+    ("religion", "Релігія", False, 30, ""),
+    ("role", "Роль/професія/вік", False, 40,
+     "професія/посада/вік учасника (напр. водій, поліцейський, продавець, підліток); "
+     "НЕ описи жертви на кшталт «жертва», «нащадок», «потерпілий»"),
+    ("group", "Організація/спільнота", False, 50, ""),
+    ("conflict", "Тип конфлікту", True, 60, ""),
+    ("other", "Інше", False, 100, ""),
 ]
 
 
@@ -19,9 +23,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         n = 0
-        for key, label, closed, order in CATEGORIES:
+        for key, label, closed, order, hint in CATEGORIES:
             _, created = TagCategory.objects.update_or_create(
-                key=key, defaults={"label": label, "closed": closed, "order": order})
+                key=key, defaults={"label": label, "closed": closed,
+                                   "order": order, "hint": hint})
             n += int(created)
         self.stdout.write(self.style.SUCCESS(
             f"Категорії тегів: всього {TagCategory.objects.count()} (нових {n})"))

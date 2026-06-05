@@ -50,9 +50,6 @@ def _sync_llm(prompt: str) -> str:
         return ""
 
 
-_TAG_CATEGORIES = "nationality | status | religion | role | group | conflict | other"
-
-
 def resolve_in_category(raw: str, category: str, closed: bool) -> Optional[Tag]:
     """
     Canonicalize a raw value WITHIN a known category.
@@ -91,117 +88,7 @@ def resolve_in_category(raw: str, category: str, closed: bool) -> Optional[Tag]:
             'нормалізовану назву (українською, узагальнено, однина). Лише назва.'
         )
         ans = _sync_llm(prompt).strip().strip('".').strip() or raw.strip()
-        name = ans[:80]
-        obj = (Tag.objects.filter(category=category, name__iexact=name).first()
-               or Tag.objects.create(name=name, category=category))
-
-    TagAlias.objects.get_or_create(raw=key, defaults={"tag": obj})
-    return obj
-
-
-def resolve_conflict_tag(raw: str) -> Optional[Tag]:
-    """
-    Free-text incident type -> canonical Tag(category='conflict') from a CLOSED list.
-    The model must pick exactly one seeded conflict type; anything else falls back
-    to 'інше'. (No new conflict types are created.)
-    """
-    key = _key(raw)
-    if not key:
-        return None
-
-    hit = TagAlias.objects.filter(raw=key, tag__category="conflict").select_related("tag").first()
-    if hit:
-        return hit.tag
-
-    types = list(Tag.objects.filter(category="conflict").values_list("name", flat=True))
-    fallback = (Tag.objects.filter(category="conflict", name="інше").first()
-                or Tag.objects.filter(category="conflict").first())
-    if not types:
-        return fallback
-
-    prompt = (
-        "Визнач тип насильницького інциденту. Обери ТОЧНО один варіант зі списку "
-        f"(нічого не вигадуй): {types}\n"
-        f'Текст/опис: "{raw}"\n'
-        "Відповідь — лише назва зі списку, без лапок і пояснень."
-    )
-    ans = _sync_llm(prompt).strip().strip('".').strip().lower()
-    obj = Tag.objects.filter(category="conflict", name__iexact=ans).first() or fallback
-    if obj:
-        TagAlias.objects.get_or_create(raw=key, defaults={"tag": obj})
-    return obj
-
-
-def resolve_tag(raw: str, closed=None) -> Optional[Tag]:
-    """
-    Free-text side/participant -> canonical Tag(name, category).
-      * nationality is a CLOSED seeded list — slang maps to a real nation
-        (хачик -> кавказець); roles/descriptors are NOT nationalities.
-      * other categories (status/religion/role/group) are canonicalized + categorized.
-    """
-    closed = set(closed if closed is not None else ("nationality",))
-    key = _key(raw)
-    if not key:
-        return None
-
-    hit = TagAlias.objects.filter(raw=key).select_related("tag").first()
-    if hit:
-        return hit.tag
-
-    nations = list(Tag.objects.filter(category="nationality").values_list("name", flat=True))
-    others = list(Tag.objects.exclude(category="nationality").values_list("name", flat=True))
-    prompt = (
-        'Класифікуй учасника/сторону конфлікту: визнач канонічну назву і категорію.\n'
-        f'Категорії: {_TAG_CATEGORIES}.\n'
-        f'Дозволені НАЦІЇ (для category=nationality обери ТОЧНО зі списку): {nations}\n'
-        f'Наявні інші теги (переюзай за змістом): {others or "(порожньо)"}\n'
-        f'Термін: "{raw}"\n'
-        'Правила:\n'
-        '- якщо це етнос/нація АБО сленг/образа для нації (хачик, абу-бандит, чурка) '
-        '-> category=nationality, name = нація зі списку;\n'
-        '- мігрант/приїжджий/нелегал/іноземець/місцеві -> category=status;\n'
-        '- мусульманин/християнин/ваххабіт/православний -> category=religion;\n'
-        '- підліток/школяр/водій/продавець/силовик/поліцейський/ветеран -> category=role;\n'
-        '- діаспора/ОПГ/банда/скінхеди/неонацисти/община -> category=group;\n'
-        '- name: українською, однина, для націй чол. рід.\n'
-        'Поверни СТРОГО JSON: {"name":"<канонічна>","category":"<одна з категорій>"}. Лише JSON.'
-    )
-    raw_ans = _sync_llm(prompt).strip()
-    if raw_ans.startswith("```"):
-        raw_ans = raw_ans.split("```", 2)[1]
-        if raw_ans.startswith("json"):
-            raw_ans = raw_ans[4:]
-    name, category = "", "other"
-    try:
-        a, b = raw_ans.find("{"), raw_ans.rfind("}")
-        data = json.loads(raw_ans[a:b + 1])
-        name = (data.get("name") or "").strip()[:80]
-        category = (data.get("category") or "other").strip().lower()
-    except Exception:  # noqa: BLE001
-        pass
-    if category not in {"nationality", "status", "religion", "role", "group", "other"}:
-        category = "other"
-    if not name:
-        name = raw.strip()[:80]
-
-    # CLOSED categories: exact seed -> closest seed (gender/number variants like
-    # росіянка->росіянин share a long prefix) -> only then demote to 'other'.
-    # Never invent a new tag in a closed category. Open categories create freely.
-    if category in closed:
-        seeded = list(Tag.objects.filter(category=category).values_list("name", flat=True))
-        obj = Tag.objects.filter(category=category, name__iexact=name).first()
-        if not obj and seeded:
-            nl = name.lower()
-            best = max(seeded, key=lambda s: (_common_prefix(nl, s.lower()),
-                                              token_set_ratio(nl, s.lower())))
-            bl = best.lower()
-            if _common_prefix(nl, bl) >= 4 or token_set_ratio(nl, bl) >= 85:
-                obj = Tag.objects.filter(category=category, name__iexact=best).first()
-        if not obj:
-            category = "other"  # not in the closed seed -> demote, don't invent one
-            obj = (Tag.objects.filter(category="other", name__iexact=name).first()
-                   or Tag.objects.create(name=name, category="other"))
-    else:
+        name = ans[:80].lower()       # open-category values are lowercase (автоледі, не Автоледі)
         obj = (Tag.objects.filter(category=category, name__iexact=name).first()
                or Tag.objects.create(name=name, category=category))
 

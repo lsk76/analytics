@@ -219,8 +219,8 @@ def collect_task_period_action(modeladmin, request, queryset):
 
 @admin.register(TagCategory)
 class TagCategoryAdmin(admin.ModelAdmin):
-    list_display = ("key", "label", "closed", "order")
-    list_editable = ("label", "closed", "order")
+    list_display = ("key", "label", "closed", "hint", "order")
+    list_editable = ("label", "closed", "hint", "order")
     ordering = ("order", "key")
 
 
@@ -247,7 +247,7 @@ class TagAliasInline(admin.TabularInline):
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
-    list_display = ("name", "category")
+    list_display = ("name", "category", "created_at")
     list_filter = ("category",)
     search_fields = ("name", "aliases__raw")
     inlines = [TagAliasInline]

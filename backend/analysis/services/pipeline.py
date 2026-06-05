@@ -23,7 +23,7 @@ from rapidfuzz.fuzz import token_set_ratio
 from analysis.models import Post, Event, Channel, ResearchRun
 from .telezip import TelezipClient
 from . import llm
-from .normalize import resolve_tag, resolve_conflict_tag, resolve_region
+from .normalize import resolve_region
 
 logger = logging.getLogger(__name__)
 
@@ -339,17 +339,18 @@ def classify(run):
 
 # --------------------------------------------------------------------------- dedup (pair-LLM)
 
-PAIR_SYS = (
-    "Дано два новинні повідомлення (A і B). Визнач, чи описують вони ОДИН І ТОЙ САМИЙ "
-    "конкретний інцидент: те саме місце/населений пункт, ті самі учасники та ті самі дії.\n"
-    "ВАЖЛИВО: спільна тема (обидва про мігрантів, про етнічний конфлікт тощо) НЕ означає одну подію. "
-    "Якщо місце, жертви або суть події різні — це РІЗНІ події.\n"
+# Neutral, domain-agnostic fallback judge prompt (used only if a task did not set
+# its own dedup_judge_prompt). Domain-specific wording lives on the task.
+_DEFAULT_JUDGE = (
+    "Дано два повідомлення (A і B). Чи описують вони ОДИН І ТОЙ САМИЙ конкретний "
+    "інцидент: те саме місце, ті самі учасники, ті самі дії?\n"
+    "Спільна тема НЕ означає одну подію. Якщо місце, учасники або суть події різні — РІЗНІ.\n"
     "Відповідай одним словом: ОДНА або РІЗНІ."
 )
 
 
 async def _judge_pairs(pairs_text, system=None):
-    system = system or PAIR_SYS
+    system = system or _DEFAULT_JUDGE
     sem = asyncio.Semaphore(CONCURRENCY)
     same = [False] * len(pairs_text)
     client = llm.make_client()
@@ -405,12 +406,8 @@ def _create_event(run, task, posts_in):
         post_count=len(posts_in),
         is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
     )
-    # sides + the conflict type are all stored as canonical Tags
-    tag_objs = [o for raw in (cls.get("sides") or []) if (o := resolve_tag(raw))]
-    if cls.get("type") and (ct := resolve_conflict_tag(cls["type"])):
-        tag_objs.append(ct)
-    if tag_objs:
-        ev.tags.set(tag_objs)
+    # NOTE: legacy run-scoped pipeline (superseded by services/stages.py). Tag
+    # resolution removed with resolve_tag/resolve_conflict_tag; not used by workers.
     chans = {}
     for p in posts_in:
         p.event = ev

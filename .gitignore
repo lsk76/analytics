@@ -46,3 +46,4 @@ data/
 # DB backups
 backups/
 events_validation.json
+june_review.json

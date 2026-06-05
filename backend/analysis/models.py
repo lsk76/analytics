@@ -167,6 +167,10 @@ class TagCategory(models.Model):
         default=False, verbose_name="Закрита (лише сід-список)",
         help_text="Якщо так — теги цієї категорії беруться лише з сід-списку, нові не створюються.",
     )
+    hint = models.CharField(
+        max_length=300, blank=True, verbose_name="Підказка для промпта",
+        help_text="Що писати в цю категорію (для відкритих). Порожньо — дефолтна підказка.",
+    )
     order = models.PositiveSmallIntegerField(default=100, verbose_name="Порядок")
 
     class Meta:
