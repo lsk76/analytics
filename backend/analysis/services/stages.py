@@ -238,9 +238,11 @@ def enrich_once(task):
 # --------------------------------------------------------------------------- watermark
 
 def _collection_frontier(task):
-    """Earliest date that is NOT yet fully collected (everything before it is done)."""
-    pend = (CollectChunk.objects.filter(task=task)
-            .exclude(status__in=["done", "split"]).order_by("date_from").first())
+    """Earliest date still IN PROGRESS (pending/running). 'failed' is terminal — a
+    permanently failed range must NOT block downstream stages forever, so we treat
+    it as 'collected as far as it will get' and proceed with whatever data exists."""
+    pend = (CollectChunk.objects.filter(task=task, status__in=["pending", "running"])
+            .order_by("date_from").first())
     return pend.date_from if pend else None
 
 
