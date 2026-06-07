@@ -66,13 +66,16 @@ def _advance(post_ids, to_stage):
 # --------------------------------------------------------------------------- collect
 
 def _claim_chunk(task):
-    cutoff = djtz.now() - LOCK_TIMEOUT
+    now = djtz.now()
+    cutoff = now - LOCK_TIMEOUT
     with transaction.atomic():
-        # claim a pending chunk OR reclaim a 'running' one abandoned by a dead worker
+        # claim a pending chunk OR reclaim a 'running' one abandoned by a dead worker.
+        # `next_retry_at` is the cooldown gate after a transient error (None = ready now).
         chunk = (CollectChunk.objects
                  .filter(task=task)
                  .filter(Q(status="pending")
                          | Q(status="running", locked_at__lt=cutoff))
+                 .filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
                  .select_for_update(skip_locked=True)
                  .order_by("date_from").first())
         if chunk:
@@ -137,6 +140,23 @@ def _split_chunk(chunk):
     return made
 
 
+# Substrings that mark a TRANSIENT error worth endless retry. Anything else (HTTP 4xx,
+# parse, auth) is permanent and should fail after a few attempts to avoid masking bugs.
+_TRANSIENT_MARKERS = (
+    "Cannot connect to host", "Connection reset", "Connection refused",
+    "TimeoutError", "Timeout", "timed out",
+    "Name or service not known", "Temporary failure in name",
+    "ServerDisconnected", "ClientConnectorError", "ClientOSError",
+    "SSL", "ssl:",
+    "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "HTTP 429",
+)
+
+
+def _is_transient_error(e: Exception) -> bool:
+    msg = f"{type(e).__name__}: {e}"
+    return any(m in msg for m in _TRANSIENT_MARKERS)
+
+
 def collect_once(task):
     """Process ONE pending CollectChunk. Returns True if it did work."""
     chunk = _claim_chunk(task)
@@ -151,13 +171,26 @@ def collect_once(task):
         if chunk.date_to > chunk.date_from:           # multi-day -> split to 1-day chunks
             n = _split_chunk(chunk)
             logger.info("split chunk into %d daily chunks", n)
-        else:                                          # already 1 day -> retry later
-            chunk.status = "failed" if chunk.attempts >= 4 else "pending"
+        else:                                          # 1 day -> retry policy
+            transient = _is_transient_error(e)
+            chunk.attempts = (chunk.attempts or 0) + 1
             chunk.locked_at = None
             chunk.error = str(e)[:1000]
-            chunk.save(update_fields=["status", "locked_at", "error"])
-            if chunk.status == "failed":      # terminal chunk -> job may now be done
-                _maybe_finish_job(chunk.job)
+            if transient:
+                # endless retry for connection/DNS/timeout/5xx — backoff 15s → 30s → 60s cap
+                delay = (15, 30, 60)[min(chunk.attempts - 1, 2)]
+                chunk.status = "pending"
+                chunk.next_retry_at = djtz.now() + timedelta(seconds=delay)
+                chunk.save(update_fields=["status", "attempts", "locked_at",
+                                          "error", "next_retry_at"])
+                logger.info("collect %s: transient error, retry in %ds (attempt %d)",
+                            chunk.date_from, delay, chunk.attempts)
+            else:
+                # permanent error (4xx, parse, auth) — fail after 4 attempts
+                chunk.status = "failed" if chunk.attempts >= 4 else "pending"
+                chunk.save(update_fields=["status", "attempts", "locked_at", "error"])
+                if chunk.status == "failed":
+                    _maybe_finish_job(chunk.job)
         return True
 
     n = 0
@@ -192,8 +225,10 @@ def collect_once(task):
     chunk.status = "done"
     chunk.posts_collected = n
     chunk.locked_at = None
+    chunk.next_retry_at = None        # clear any backoff from prior transient failures
     chunk.finished_at = djtz.now()
-    chunk.save(update_fields=["status", "posts_collected", "locked_at", "finished_at"])
+    chunk.save(update_fields=["status", "posts_collected", "locked_at",
+                              "next_retry_at", "finished_at"])
     logger.info("collect %s..%s: +%d posts", chunk.date_from, chunk.date_to, n)
     _maybe_finish_job(chunk.job)
     return True

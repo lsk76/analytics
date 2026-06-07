@@ -200,7 +200,7 @@ def review_once(task):
     ids = _claim_events(task, REVIEW_BATCH)
     if not ids:
         return False
-    model = task.review_model or "anthropic/claude-sonnet-4"
+    model = task.review_model or "anthropic/claude-sonnet-4.6"
     system = task.review_prompt.strip() or _DEFAULT_REVIEW_SYS
 
     actions = []

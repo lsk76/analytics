@@ -1,0 +1,395 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls static %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:app_list' app_label='analysis' %}">Аналітика</a> ›
+  <a href="{% url 'admin:analysis_event_changelist' %}{% if preserved_qs %}?{{ preserved_qs }}{% endif %}">Події</a> ›
+  Графіки
+</div>
+{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .charts-wrap { max-width: 1400px; margin: 12px auto; }
+  .charts-meta { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+                 padding: 10px 14px; margin:10px 0;
+                 background: var(--darkened-bg); border:1px solid var(--border-color);
+                 border-radius:8px; color: var(--body-fg); }
+  .charts-meta strong { font-size: 18px; }
+  .gran-switch a { padding: 4px 10px; border-radius:6px; text-decoration:none;
+                   border:1px solid var(--border-color); color: var(--body-fg);
+                   background: var(--body-bg); margin-right:4px; }
+  .gran-switch a.active { background: var(--link-fg); color: var(--button-fg); border-color: transparent; }
+  .charts-grid { display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+  .chart-card { background: var(--body-bg); border:1px solid var(--border-color);
+                border-radius:8px; padding:14px; }
+  .chart-card.full { grid-column: 1 / -1; }
+  .chart-card h3 { margin: 0 0 10px; font-size:15px; color: var(--body-fg);
+                   display:flex; align-items:center; gap:12px; }
+  .inline-top { display:inline-flex; align-items:center; gap:6px;
+                margin-left:auto; font-size:12px; font-weight:normal; }
+  .inline-top input[type=number] {
+    width:64px; background: var(--body-bg); color: var(--body-fg);
+    border:1px solid var(--border-color); border-radius:4px; padding:2px 6px;
+  }
+  .inline-top button { padding:2px 8px; }
+  .chart-canvas-wrap { position:relative; height: 280px; }
+  .chart-canvas-wrap.tall { height: 380px; }
+  .tag-section h2 { color: var(--body-fg); margin: 18px 0 8px; font-size:18px; }
+  .tag-config { display:flex; flex-wrap:wrap; align-items:center; gap:14px;
+                padding:10px 12px; margin: 8px 0 14px;
+                background: var(--darkened-bg); border:1px solid var(--border-color);
+                border-radius:8px; color: var(--body-fg); font-size:13px; }
+  .tag-config .cats { display:inline-flex; flex-wrap:wrap; gap:6px; }
+  .tag-config .cat-chip { display:inline-flex; align-items:center; gap:4px;
+                          padding:3px 8px; border:1px solid var(--border-color);
+                          border-radius:14px; cursor:pointer; }
+  .tag-config input[type=number], .tag-config select {
+    background: var(--body-bg); color: var(--body-fg);
+    border:1px solid var(--border-color); border-radius:4px; padding:2px 6px;
+  }
+  .tag-grid-1 { grid-template-columns: 1fr; }
+  .tag-grid-2 { grid-template-columns: 1fr 1fr; }
+  .tag-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .empty { color: var(--body-quiet-color); padding:20px; text-align:center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="charts-wrap">
+  <div class="charts-meta">
+    <strong>📊 {{ events_total }} подій у поточному фільтрі</strong>
+    <span class="gran-switch">
+      Інтервал:
+      <a href="?gran=day{% if qs_no_gran %}&amp;{{ qs_no_gran }}{% endif %}"
+         class="{% if gran == 'day' %}active{% endif %}">день</a>
+      <a href="?gran=week{% if qs_no_gran %}&amp;{{ qs_no_gran }}{% endif %}"
+         class="{% if gran == 'week' %}active{% endif %}">тиждень</a>
+      <a href="?gran=month{% if qs_no_gran %}&amp;{{ qs_no_gran }}{% endif %}"
+         class="{% if gran == 'month' %}active{% endif %}">місяць</a>
+    </span>
+    <form method="get" class="inline-top" style="margin:0">
+      {% for k, vals in labelmax_passthrough %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endfor %}
+      <label title="Обрізає довгі підписи на барах / у легенді pie/doughnut. Тултіп показує повне.">
+        Макс. довжина підпису&nbsp;
+        <input type="number" name="label_max" value="{{ label_max }}" min="8" max="120" step="1">
+      </label>
+      <button type="submit" class="default">↻</button>
+    </form>
+    <a href="{% url 'admin:analysis_event_changelist' %}{% if preserved_qs %}?{{ preserved_qs }}{% endif %}"
+       style="margin-left:auto">← Назад до списку подій</a>
+  </div>
+
+  {% if events_total == 0 %}
+    <div class="chart-card empty">Немає подій під поточні фільтри.</div>
+  {% else %}
+
+    <div class="charts-grid">
+      <div class="chart-card full">
+        <h3>Події в часі</h3>
+        <div class="chart-canvas-wrap"><canvas id="ch_events"></canvas></div>
+      </div>
+      <div class="chart-card full">
+        <h3>Охоплення (сумарне)</h3>
+        <div class="chart-canvas-wrap"><canvas id="ch_reach"></canvas></div>
+      </div>
+
+      <div class="chart-card full">
+        <h3>Топ суб'єктів РФ
+          <form method="get" class="inline-top">
+            {% for k, vals in regiontop_passthrough %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endfor %}
+            <label>Топ&nbsp;<input type="number" name="region_top" value="{{ region_top }}" min="3" max="200" step="1"></label>
+            <button type="submit" class="default">↻</button>
+          </form>
+        </h3>
+        <div class="chart-canvas-wrap tall"><canvas id="ch_region"></canvas></div>
+      </div>
+
+      <div class="chart-card full">
+        <h3>Топ каналів-публікаторів
+          <form method="get" class="inline-top">
+            {% for k, vals in channeltop_passthrough %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endfor %}
+            <label>Топ&nbsp;<input type="number" name="channel_top" value="{{ channel_top }}" min="3" max="200" step="1"></label>
+            <button type="submit" class="default">↻</button>
+          </form>
+        </h3>
+        <div class="chart-canvas-wrap tall"><canvas id="ch_channel"></canvas></div>
+      </div>
+    </div>
+
+    <div class="tag-section">
+      <h2>Розподіл по тегах</h2>
+      <form method="get" class="tag-config">
+        {# зберігаємо поточні фільтри/гран сторінки #}
+        {% for k, vals in passthrough_pairs %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endfor %}
+        <label>Категорії:&nbsp;
+          <span class="cats">
+            {% for c in tag_cats_all %}
+              <label class="cat-chip">
+                <input type="checkbox" name="tag_cats" value="{{ c.key }}"
+                       {% if c.key in tag_cats_selected %}checked{% endif %}>
+                {{ c.label }}
+              </label>
+            {% endfor %}
+          </span>
+        </label>
+        <label>Топ&nbsp;<input type="number" name="tag_top" value="{{ tag_top }}" min="3" max="100" step="1" style="width:64px"></label>
+        <label>Вигляд:&nbsp;
+          <select name="tag_chart">
+            <option value="bar" {% if tag_chart == 'bar' %}selected{% endif %}>Бар (горизонт.)</option>
+            <option value="pie" {% if tag_chart == 'pie' %}selected{% endif %}>Пиріг</option>
+            <option value="doughnut" {% if tag_chart == 'doughnut' %}selected{% endif %}>Кільце</option>
+          </select>
+        </label>
+        <label>Колонок&nbsp;
+          <select name="tag_cols">
+            <option value="1" {% if tag_cols == 1 %}selected{% endif %}>1</option>
+            <option value="2" {% if tag_cols == 2 %}selected{% endif %}>2</option>
+            <option value="3" {% if tag_cols == 3 %}selected{% endif %}>3</option>
+          </select>
+        </label>
+        <button type="submit" class="default">Застосувати</button>
+      </form>
+      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tag-grid"></div>
+    </div>
+
+  {% endif %}
+</div>
+
+<script src="{% static 'analysis/vendor/chart.umd.min.js' %}"></script>
+<script id="charts-data" type="application/json">{{ data|safe }}</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof Chart === 'undefined') {
+    const wrap = document.querySelector('.charts-wrap');
+    if (wrap) wrap.insertAdjacentHTML('afterbegin',
+      '<div class="chart-card empty" style="color:#b91c1c">⚠️ Не вдалося завантажити Chart.js. ' +
+      'Запустіть <code>python manage.py collectstatic</code> у контейнері web або перевірте ' +
+      'STATIC_URL/whitenoise.</div>');
+    return;
+  }
+  let DATA = {};
+  try { DATA = JSON.parse(document.getElementById('charts-data').textContent); }
+  catch (e) { console.error('charts-data parse failed', e); return; }
+  if (!DATA.timeseries) return;
+
+  // Take colors directly from what Django is actually painting in the current theme
+  // (instead of CSS-var lookup, which can vary between themes). `body.color` is the
+  // real text color (dark in light theme, light in dark theme), and a real card's
+  // border color gives us a tone-matched grid.
+  const text = getComputedStyle(document.body).color;
+  const sample = document.querySelector('.charts-meta, .chart-card') || document.body;
+  const grid = getComputedStyle(sample).borderColor || text;
+  Chart.defaults.color = text;
+  Chart.defaults.borderColor = grid;
+  Chart.defaults.font.family =
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+  const PALETTE = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+                   '#ec4899','#14b8a6','#f97316','#06b6d4','#a855f7',
+                   '#84cc16','#eab308','#22d3ee','#fb7185','#94a3b8'];
+
+  // Max characters for category-axis tick labels & legend labels. Longer values are
+  // ellipsised on display but the FULL value is kept in tooltips (truncMap remembers).
+  const LABEL_MAX = Number(DATA.label_max) || 36;
+  function trunc(s) {
+    s = (s == null ? '' : String(s));
+    return s.length > LABEL_MAX ? s.slice(0, LABEL_MAX - 1) + '…' : s;
+  }
+  // Build tooltip options for non-time charts: full untruncated title +
+  // value + percentage of the chart's total + optional sample-events footer.
+  // `samples` is an array of arrays (one list of {date, summary} per data point).
+  function withFullTooltip(fullLabels, values, samples) {
+    const total = (values || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    return {
+      callbacks: {
+        title: (items) => items.map(i => fullLabels[i.dataIndex] ?? i.label),
+        label: (item) => {
+          const v = Number(item.parsed?.x ?? item.parsed?.y ?? item.parsed) || 0;
+          const pct = total ? ((v / total) * 100).toFixed(1) : '0.0';
+          return ` ${v} (${pct}%)`;
+        },
+        footer: (items) => {
+          if (!samples) return '';
+          const idx = items[0].dataIndex;
+          const ev = samples[idx] || [];
+          if (!ev.length) return '';
+          const lines = ev.map(e => '• ' + (e.date ? e.date + ' — ' : '') + e.summary);
+          if ((values[idx] || 0) > ev.length) lines.push('… +' + ((values[idx]||0) - ev.length));
+          return lines.join('\n');
+        },
+      },
+    };
+  }
+
+  // Standard onClick handler: read a URL stored alongside the data and open in
+  // a NEW tab (so the user keeps the charts page).
+  function navOnClick(urls) {
+    return function(evt, elements) {
+      if (!elements.length || !urls) return;
+      const u = urls[elements[0].index];
+      if (u) window.open(u, '_blank', 'noopener');
+    };
+  }
+
+  const labels = DATA.timeseries.map(r => r.date);
+  const tsUrls = DATA.timeseries.map(r => r.url || '');
+  const tsSamples = DATA.timeseries.map(r => r.samples || []);
+  const baseLine = (ctx, label, values, color) => new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{
+      label, data: values, borderColor: color,
+      backgroundColor: color + '33', tension: 0.25, fill: true,
+      pointRadius: labels.length > 60 ? 2 : 4,
+      pointHoverRadius: labels.length > 60 ? 5 : 7,
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      onClick: navOnClick(tsUrls),
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : ''; },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items.map(i => labels[i.dataIndex]),
+            label: (item) => ` ${label}: ${item.formattedValue}`,
+            footer: (items) => {
+              const idx = items[0].dataIndex;
+              const ev = tsSamples[idx] || [];
+              if (!ev.length) return '';
+              const lines = ev.map(e => '• ' + e.summary);
+              const total = DATA.timeseries[idx].events;
+              if (total > ev.length) lines.push('… +' + (total - ev.length));
+              return lines.join('\n');
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { maxRotation: 0, autoSkip: true } },
+        y: { beginAtZero: true },
+      },
+    },
+  });
+  baseLine(document.getElementById('ch_events'),  'Події',  DATA.timeseries.map(r => r.events),  PALETTE[0]);
+  baseLine(document.getElementById('ch_reach'),   'Охоплення', DATA.timeseries.map(r => r.reach),    PALETTE[1]);
+
+  const horizBar = (ctx, rows, color, labelKey='name', valKey='count', extra=null) => {
+    const full = rows.map(r => {
+      let lbl = r[labelKey] || '(без назви)';
+      if (extra) { const e = extra(r); if (e) lbl += ' ' + e; }
+      return lbl;
+    });
+    const shown = full.map(trunc);
+    const values = rows.map(r => r[valKey]);
+    const samples = rows.map(r => r.samples || []);
+    const urls = rows.map(r => r.url || '');
+    return new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: shown,
+        datasets: [{
+          label: 'Подій', data: values,
+          backgroundColor: color, borderColor: color, borderWidth: 0,
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        onClick: navOnClick(urls),
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : ''; },
+        plugins: { legend: { display: false }, tooltip: withFullTooltip(full, values, samples) },
+        scales: {
+          x: { beginAtZero: true },
+          y: { ticks: { autoSkip: false, font: { size: 11 } } },
+        },
+      },
+    });
+  };
+  horizBar(document.getElementById('ch_region'),  DATA.by_region,  PALETTE[3]);
+  horizBar(document.getElementById('ch_channel'), DATA.by_channel, PALETTE[4],
+           'name', 'count',
+           r => r.uname ? '@'+r.uname : (r.subs ? '· 👥 '+r.subs : ''));
+
+  // per-tag-category charts (bar / pie / doughnut — chosen by user)
+  const tagGrid = document.getElementById('tag-grid');
+  const tagChart = DATA.tag_chart || 'bar';
+  if (tagGrid && DATA.by_tag) {
+    DATA.by_tag.forEach((cat, i) => {
+      const card = document.createElement('div');
+      card.className = 'chart-card';
+      card.innerHTML = '<h3>' + cat.label + ' <small style="color:var(--body-quiet-color)">(' +
+                       cat.rows.length + ')</small></h3>' +
+                       '<div class="chart-canvas-wrap tall"><canvas></canvas></div>';
+      tagGrid.appendChild(card);
+      const ctx = card.querySelector('canvas');
+      const labels = cat.rows.map(r => r.name || '(без назви)');
+      const values = cat.rows.map(r => r.count);
+      if (tagChart === 'bar') {
+        horizBar(ctx, cat.rows, PALETTE[(i + 5) % PALETTE.length]);
+      } else {
+        // pie / doughnut — palette across slices.
+        const colors = labels.map((_, k) => PALETTE[k % PALETTE.length]);
+        const fullLabels = labels.slice();
+        const urls = cat.rows.map(r => r.url || '');
+        const samplesByRow = cat.rows.map(r => r.samples || []);
+        const total = values.reduce((a, b) => a + (Number(b) || 0), 0);
+        new Chart(ctx, {
+          type: tagChart,
+          data: { labels: fullLabels.map(trunc),
+                  datasets: [{ data: values, backgroundColor: colors,
+                               borderColor: 'transparent', borderWidth: 1 }] },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            onClick: navOnClick(urls),
+            onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : ''; },
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: {
+                  boxWidth: 12, padding: 5, font: { size: 11 },
+                  color: text,                 // explicit, in case theme inheritance breaks
+                  // append percentage to every legend entry
+                  generateLabels: (chart) => {
+                    const ds = chart.data.datasets[0];
+                    return chart.data.labels.map((lbl, k) => {
+                      const v = Number(ds.data[k]) || 0;
+                      const pct = total ? ((v / total) * 100).toFixed(1) : '0.0';
+                      return {
+                        text: `${lbl} — ${pct}%`,
+                        fillStyle: ds.backgroundColor[k],
+                        strokeStyle: 'transparent',
+                        fontColor: text,
+                        index: k,
+                      };
+                    });
+                  },
+                },
+              },
+              tooltip: { callbacks: {
+                title: (items) => items.map(i => fullLabels[i.dataIndex] ?? i.label),
+                label: (item) => {
+                  const v = Number(item.parsed) || 0;
+                  const pct = total ? ((v / total) * 100).toFixed(1) : '0.0';
+                  return ` ${v} (${pct}%)`;
+                },
+                footer: (items) => {
+                  const idx = items[0].dataIndex;
+                  const ev = samplesByRow[idx] || [];
+                  if (!ev.length) return '';
+                  const lines = ev.map(e => '• ' + (e.date ? e.date + ' — ' : '') + e.summary);
+                  if ((values[idx] || 0) > ev.length) lines.push('… +' + ((values[idx]||0) - ev.length));
+                  return lines.join('\n');
+                },
+              }},
+            },
+          },
+        });
+      }
+    });
+  }
+});
+</script>
+{% endblock %}

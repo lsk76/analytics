@@ -124,7 +124,7 @@ class Command(BaseCommand):
                 "generic_sides": GENERIC_SIDES,
                 # final AI audit — pricier model does the manual QA pass
                 "review_enabled": True,
-                "review_model": "anthropic/claude-sonnet-4",
+                "review_model": "anthropic/claude-sonnet-4.6",
                 "review_prompt": REVIEW_PROMPT,
             },
         )

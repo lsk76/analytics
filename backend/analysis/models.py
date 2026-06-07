@@ -111,7 +111,7 @@ class AnalysisTask(models.Model):
                   "злиття дублів, фікс гео/полів.",
     )
     review_model = models.CharField(
-        max_length=100, blank=True, default="anthropic/claude-sonnet-4",
+        max_length=100, blank=True, default="anthropic/claude-sonnet-4.6",
         verbose_name="Модель аудиту",
         help_text="Дорожча LLM для фінального аудиту (OpenRouter).",
     )
@@ -344,6 +344,10 @@ class CollectChunk(models.Model):
     attempts = models.PositiveSmallIntegerField(default=0, verbose_name="Спроб")
     posts_collected = models.PositiveIntegerField(default=0, verbose_name="Зібрано постів")
     locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Захоплено")
+    next_retry_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, verbose_name="Наступна спроба не раніше",
+        help_text="Експоненційний backoff для транзієнтних помилок мережі/TeleZip",
+    )
     error = models.TextField(blank=True, verbose_name="Помилка")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Завершено")

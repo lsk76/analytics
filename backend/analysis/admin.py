@@ -1,5 +1,10 @@
+import json
+
 from django.contrib import admin, messages
-from django.db.models import Count
+from django.db.models import Count, Sum, F
+from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
+from django.shortcuts import render
+from django.urls import path
 from django.utils import timezone as djtz
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
@@ -345,6 +350,289 @@ class EventAdmin(admin.ModelAdmin):
                     "posts_preview", "summary")
     readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at")
     date_hierarchy = "event_date"
+    change_list_template = "admin/analysis/event/change_list.html"
+
+    # ---------- charts -------------------------------------------------------
+
+    def get_urls(self):
+        custom = [
+            path("charts/", self.admin_site.admin_view(self.charts_view),
+                 name="analysis_event_charts"),
+        ]
+        return custom + super().get_urls()
+
+    # query params owned by the charts page (NOT changelist filter lookups)
+    _CHART_PARAMS = ("gran", "tag_cats", "tag_top", "tag_chart", "tag_cols",
+                     "region_top", "channel_top", "label_max")
+
+    def charts_view(self, request):
+        """Charts page — reuses the changelist filters so charts reflect EXACTLY what
+        the user currently sees in /admin/analysis/event/. Own params:
+            gran=day|week|month
+            tag_cats=<cat_key>[,…]       (which TagCategories to render)
+            tag_top=<int>                (top-N tags per category)
+            tag_chart=bar|pie|doughnut   (per-category chart type)
+            tag_cols=1|2|3               (per-category grid columns)
+        """
+        gran = request.GET.get("gran", "day")
+        if gran not in ("day", "week", "month"):
+            gran = "day"
+        trunc = {"day": TruncDate, "week": TruncWeek, "month": TruncMonth}[gran]
+
+        # tag-config params (with sane defaults)
+        all_cats = list(TagCategory.objects.order_by("order", "key"))
+        all_keys = [c.key for c in all_cats]
+        raw_sel = request.GET.getlist("tag_cats")
+        tag_cats_selected = [k for k in raw_sel if k in all_keys] or all_keys
+        try: tag_top = max(3, min(100, int(request.GET.get("tag_top", 20))))
+        except (TypeError, ValueError): tag_top = 20
+        tag_chart = request.GET.get("tag_chart", "bar")
+        if tag_chart not in ("bar", "pie", "doughnut"): tag_chart = "bar"
+        try: tag_cols = int(request.GET.get("tag_cols", 2))
+        except (TypeError, ValueError): tag_cols = 2
+        if tag_cols not in (1, 2, 3): tag_cols = 2
+        try: region_top = max(3, min(200, int(request.GET.get("region_top", 25))))
+        except (TypeError, ValueError): region_top = 25
+        try: channel_top = max(3, min(200, int(request.GET.get("channel_top", 25))))
+        except (TypeError, ValueError): channel_top = 25
+        # Max characters per displayed label (axis ticks / pie legend). Longer values
+        # get ellipsised; tooltips still show the full text.
+        try: label_max = max(8, min(120, int(request.GET.get("label_max", 36))))
+        except (TypeError, ValueError): label_max = 36
+
+        # Apply the same filtering as the changelist (strip our own params first,
+        # else ChangeList tries to resolve them as field lookups)
+        from django.http import QueryDict
+        get_clean = QueryDict(request.GET.urlencode(), mutable=True)
+        for own in self._CHART_PARAMS:
+            get_clean.pop(own, None)
+        request.GET = get_clean
+        cl = self.get_changelist_instance(request)
+        qs = cl.queryset
+
+        # Build a URL for the events list with the SAME changelist filters as now,
+        # plus an extra param (so clicks drill down).
+        from django.urls import reverse
+        from datetime import timedelta as _td
+        cl_base_url = reverse("admin:analysis_event_changelist")
+        # Index of the reach_display column in EventAdmin.list_display (1-based) — used
+        # for `?o=-<N>` to open the drill-down already sorted by reach desc.
+        _ld = self.get_list_display(request)
+        try:
+            reach_idx = list(_ld).index("reach_display") + 1
+        except ValueError:
+            reach_idx = 0
+        def drill_url(extra_params):
+            # `get_clean.lists()` here is the changelist-filter subset (chart params stripped)
+            qd = QueryDict("", mutable=True)
+            for k, vs in get_clean.lists():
+                for v in vs:
+                    qd.appendlist(k, v)
+            # extra_params can replace OR append; for date-range we REPLACE existing
+            for k, v in extra_params.items():
+                if isinstance(v, (list, tuple)):
+                    qd.setlist(k, [str(x) for x in v])
+                else:
+                    qd[k] = str(v)
+            # default sort = reach desc (most-followed channels first), unless the caller
+            # explicitly set their own ordering via `o=`
+            if reach_idx and "o" not in qd:
+                qd["o"] = f"-{reach_idx}"
+            return f"{cl_base_url}?{qd.urlencode()}" if qd else cl_base_url
+
+        def bucket_range(d):
+            """For a TruncDate/Week/Month bucket start date, return (date_from, date_to)
+            covering the events that fell into that bucket."""
+            if d is None:
+                return None, None
+            if gran == "day":
+                return d, d
+            if gran == "week":
+                return d, d + _td(days=6)
+            # month — last day of month
+            from calendar import monthrange
+            return d, d.replace(day=monthrange(d.year, d.month)[1])
+
+        def samples_for(qs_):
+            """Few representative events for tooltips."""
+            return [
+                {"date": e.event_date.isoformat() if e.event_date else "",
+                 "summary": (e.summary or "")[:90]}
+                for e in qs_.order_by("-reach", "id")[:5]
+            ]
+
+        # ---- time series ------------------------------------------------------
+        # events + total reach per bucket
+        ts_events = list(
+            qs.exclude(event_date__isnull=True)
+              .annotate(bucket=trunc("event_date"))
+              .values("bucket")
+              .annotate(events=Count("id"), reach=Sum("reach"))
+              .order_by("bucket")
+        )
+        # unique publishing channels per bucket (through posts)
+        ts_channels = list(
+            Post.objects.filter(event__in=qs, channel__isnull=False,
+                                event__event_date__isnull=False)
+                .annotate(bucket=trunc("event__event_date"))
+                .values("bucket")
+                .annotate(channels=Count("channel", distinct=True))
+                .order_by("bucket")
+        )
+        ch_by_bucket = {r["bucket"]: r["channels"] for r in ts_channels}
+        timeseries = []
+        for r in ts_events:
+            d_from, d_to = bucket_range(r["bucket"])
+            url, samples = "", []
+            if d_from is not None:
+                url = drill_url({"event_date__gte": d_from.isoformat(),
+                                  "event_date__lte": d_to.isoformat()})
+                samples = samples_for(qs.filter(event_date__gte=d_from,
+                                                event_date__lte=d_to))
+            timeseries.append({
+                "date": r["bucket"].isoformat() if r["bucket"] else None,
+                "events": r["events"],
+                "reach": int(r["reach"] or 0),
+                "channels": ch_by_bucket.get(r["bucket"], 0),
+                "url": url,
+                "samples": samples,
+            })
+
+        # ---- breakdowns -------------------------------------------------------
+        # top RF subjects — include id + URL + samples
+        by_region_raw = list(
+            qs.exclude(region_subject__isnull=True)
+              .values("region_subject_id", "region_subject__name")
+              .annotate(count=Count("id"))
+              .order_by("-count")[:region_top]
+        )
+        by_region = []
+        for r in by_region_raw:
+            rid = r.pop("region_subject_id")
+            name = r.pop("region_subject__name")
+            row = {"id": rid, "name": name, "count": r["count"]}
+            row["url"] = drill_url({"region_id": [rid]})
+            row["samples"] = samples_for(qs.filter(region_subject_id=rid))
+            by_region.append(row)
+
+        by_tag = []   # list of {category, label, rows: [{id, name, count, url, samples}]}
+        for c in all_cats:
+            if c.key not in tag_cats_selected:
+                continue
+            raw = list(
+                qs.filter(tags__category=c.key)
+                  .values("tags__id", "tags__name")
+                  .annotate(count=Count("id", distinct=True))
+                  .order_by("-count")[:tag_top]
+            )
+            if not raw:
+                continue
+            rows = []
+            for r in raw:
+                tid = r["tags__id"]; name = r["tags__name"]
+                rows.append({
+                    "id": tid, "name": name, "count": r["count"],
+                    "url": drill_url({f"tag_{c.key}": [tid]}),
+                    "samples": samples_for(qs.filter(tags__id=tid)),
+                })
+            by_tag.append({"category": c.key, "label": c.label, "rows": rows})
+
+        by_channel_raw = list(
+            Post.objects.filter(event__in=qs, channel__isnull=False)
+                .values("channel_id", "channel__title",
+                        "channel__username", "channel__subscribers")
+                .annotate(count=Count("event", distinct=True))
+                .order_by("-count")[:channel_top]
+        )
+        by_channel = []
+        for r in by_channel_raw:
+            cid = r["channel_id"]
+            by_channel.append({
+                "id": cid,
+                "name": r["channel__title"],
+                "uname": r["channel__username"],
+                "subs": r["channel__subscribers"],
+                "count": r["count"],
+                "url": drill_url({"channel_id": [cid]}),
+                "samples": samples_for(qs.filter(posts__channel_id=cid).distinct()),
+            })
+
+        # original GET (with all our params), used by templates for round-tripping
+        from django.http import QueryDict
+        orig = QueryDict(get_clean.urlencode(), mutable=True)
+        # add our params back so preserved_qs / charts list URL are full
+        if gran != "day": orig["gran"] = gran  # default elided
+        for k in raw_sel: orig.appendlist("tag_cats", k)
+        if tag_top != 20: orig["tag_top"] = str(tag_top)
+        if tag_chart != "bar": orig["tag_chart"] = tag_chart
+        if tag_cols != 2: orig["tag_cols"] = str(tag_cols)
+        preserved_qs = orig.urlencode()
+        # querystring stripped of `gran` — used by the day/week/month switch links
+        qd = QueryDict(preserved_qs, mutable=True); qd.pop("gran", None)
+        qs_no_gran = qd.urlencode()
+        # passthrough for the tag-config form: every NON-tag/-tag-related param
+        # (changelist filters etc.) so submitting the form keeps the current filter scope
+        # Form passthrough — every NON-form-owned GET param (changelist filters +
+        # other chart params), so submitting any inline form keeps the current scope.
+        chart_state = {
+            "gran": [gran],
+            "tag_cats": list(tag_cats_selected),
+            "tag_top": [str(tag_top)],
+            "tag_chart": [tag_chart],
+            "tag_cols": [str(tag_cols)],
+            "region_top": [str(region_top)],
+            "channel_top": [str(channel_top)],
+            "label_max": [str(label_max)],
+        }
+        def passthrough_for(form_owns):
+            # changelist filters + all chart params EXCEPT the ones the form itself owns
+            return (list(get_clean.lists())
+                    + [(k, v) for k, v in chart_state.items() if k not in form_owns])
+        # tag-config form owns: tag_cats, tag_top, tag_chart, tag_cols
+        passthrough_pairs = passthrough_for({"tag_cats", "tag_top", "tag_chart", "tag_cols"})
+        regiontop_passthrough = passthrough_for({"region_top"})
+        channeltop_passthrough = passthrough_for({"channel_top"})
+        labelmax_passthrough = passthrough_for({"label_max"})
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "title": "Графіки подій",
+            "opts": self.model._meta,
+            "has_view_permission": True,
+            "events_total": qs.count(),
+            "gran": gran,
+            "qs_no_gran": qs_no_gran,
+            "preserved_qs": preserved_qs,
+            "tag_cats_all": all_cats,
+            "tag_cats_selected": tag_cats_selected,
+            "tag_top": tag_top,
+            "tag_chart": tag_chart,
+            "tag_cols": tag_cols,
+            "region_top": region_top,
+            "channel_top": channel_top,
+            "label_max": label_max,
+            "passthrough_pairs": passthrough_pairs,
+            "regiontop_passthrough": regiontop_passthrough,
+            "channeltop_passthrough": channeltop_passthrough,
+            "labelmax_passthrough": labelmax_passthrough,
+            "data": json.dumps({
+                "timeseries": timeseries,
+                "by_region": list(by_region),
+                "by_tag": by_tag,
+                "by_channel": list(by_channel),
+                "gran": gran,
+                "tag_chart": tag_chart,
+                "label_max": label_max,
+            }, ensure_ascii=False, default=str),
+        }
+        return render(request, "admin/analysis/event/charts.html", ctx)
+
+    def changelist_view(self, request, extra_context=None):
+        # forward the current querystring to the "Графіки" link
+        extra_context = dict(extra_context or {})
+        extra_context["charts_qs"] = request.GET.urlencode()
+        return super().changelist_view(request, extra_context=extra_context)
+
     def get_list_filter(self, request):
         # build one faceted multiselect per tag category, dynamically from the registry
         cat_filters = [tag_category_filter(c.key, c.label)
