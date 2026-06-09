@@ -1,17 +1,7 @@
-{% extends "admin/base_site.html" %}
-{% load admin_urls static %}
-
-{% block breadcrumbs %}
-<div class="breadcrumbs">
-  <a href="{% url 'admin:index' %}">Головна</a> ›
-  <a href="{% url 'admin:app_list' app_label='analysis' %}">Аналітика</a> ›
-  <a href="{% url 'admin:analysis_event_changelist' %}{% if preserved_qs %}?{{ preserved_qs }}{% endif %}">Події</a> ›
-  Графіки
-</div>
-{% endblock %}
-
-{% block extrastyle %}
-{{ block.super }}
+{% load static %}{% comment %}
+  Minimal HTML — only the charts body + its styles + scripts. Used by the inline
+  "show charts" toggle on the EventAdmin changelist (fetched via JS and injected).
+{% endcomment %}
 <style>
   .charts-wrap { max-width: 1400px; margin: 12px auto; }
   .charts-meta { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
@@ -55,34 +45,6 @@
   .tag-grid-2 { grid-template-columns: 1fr 1fr; }
   .tag-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
   .empty { color: var(--body-quiet-color); padding:20px; text-align:center; }
-  .filter-panel { margin: 0 0 12px; padding: 0; background: var(--body-bg);
-                  border:1px solid var(--border-color); border-radius:8px;
-                  color: var(--body-fg); }
-  .filter-panel > summary { cursor:pointer; padding: 10px 14px; font-weight:600;
-                            list-style: none; user-select: none; }
-  .filter-panel > summary::-webkit-details-marker { display:none; }
-  .filter-panel > summary::before { content: "▸ "; margin-right:2px; }
-  .filter-panel[open] > summary::before { content: "▾ "; }
-  .filter-panel > summary em { color: var(--body-quiet-color); font-weight: normal;
-                               font-style: italic; font-size: 12px; }
-  .filter-form { padding: 4px 14px 14px; display:flex; flex-direction:column; gap:12px; }
-  .filter-row { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; }
-  .filter-form label { display:inline-flex; flex-direction:column; gap:2px;
-                       font-size:12px; color: var(--body-quiet-color); }
-  .filter-form label.multi { min-width: 220px; max-width: 320px; flex: 1 1 220px; }
-  .filter-form input[type=date], .filter-form select {
-    background: var(--body-bg); color: var(--body-fg);
-    border:1px solid var(--border-color); border-radius:4px; padding:4px 8px;
-    font-size:13px; min-height: 28px;
-  }
-  .filter-form label.multi select[multiple] { padding: 4px; }
-  .filter-form small { color: var(--body-quiet-color); font-size: 11px; font-weight: normal; }
-  .reset-link { color: var(--body-quiet-color); text-decoration: none;
-                margin-left: 8px; font-size: 13px; }
-  .reset-link:hover { color: var(--link-hover-color); }
+  .filter-panel { display:none; }   /* hide redundant filter panel — list page has filters */
 </style>
-{% endblock %}
-
-{% block content %}
 {% include "admin/analysis/event/_charts_body.html" %}
-{% endblock %}

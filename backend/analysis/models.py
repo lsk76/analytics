@@ -460,6 +460,10 @@ class Event(models.Model):
     tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Сторони/теги")
     summary = models.TextField(blank=True, verbose_name="Опис")
     post_count = models.PositiveIntegerField(default=0, verbose_name="Кількість постів")
+    channel_count = models.PositiveIntegerField(
+        default=0, db_index=True, verbose_name="Кількість каналів",
+        help_text="Скільки УНІКАЛЬНИХ каналів опублікували цю подію.",
+    )
     reach = models.BigIntegerField(
         default=0, verbose_name="Охоплення",
         help_text="Сумарна к-сть підписників унікальних каналів події",
@@ -467,6 +471,16 @@ class Event(models.Model):
     is_corroborated = models.BooleanField(
         default=False, verbose_name="Підтверджено",
         help_text="Підтверджено ≥2 каналами",
+    )
+    is_bot_farm = models.BooleanField(
+        default=False, db_index=True, verbose_name="Бот-ферма / інфо-операція",
+        help_text="Подія поширювалась SEO/бот-сіткою (URL-інжекти, дублювання тексту, "
+                  "розтяг у часі або шаблонна мікроваріація). Виявляється евристикою — "
+                  "див. `manage.py detect_bot_farms`.",
+    )
+    bot_farm_score = models.FloatField(
+        default=0.0, verbose_name="Бот-ферма score",
+        help_text="0..1: чим вище — тим більше бот-ознак (URL-інжекти, дублювання, спред).",
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 

@@ -39,9 +39,15 @@ def _common_prefix(a: str, b: str) -> int:
 def _sync_llm(prompt: str) -> str:
     try:
         client = OpenAI(api_key=settings.OPENROUTER_API_KEY, base_url=settings.OPENROUTER_API_BASE_URL)
+        # canonicalize / region-resolve LLM replies = a single short string (tag name or
+        # JSON {subject,settlement}); 256 tokens is more than enough. Without explicit
+        # max_tokens, the model's theoretical max (65535 for Gemini 2.5 Flash) gets
+        # reserved against the key's credit limit → spurious 402 even when we'd only
+        # actually use ~30 tokens.
         resp = client.chat.completions.create(
             model=settings.LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=256,
             timeout=60,
         )
         return (resp.choices[0].message.content or "").strip()

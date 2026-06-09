@@ -1,10 +1,151 @@
 {% extends "admin/change_list.html" %}
-{% load admin_urls %}
+{% load admin_urls static %}
 
 {% block object-tools-items %}
   <li>
-    <a href="{% url 'admin:analysis_event_charts' %}{% if charts_qs %}?{{ charts_qs }}{% endif %}"
+    <a href="#" id="toggle-charts-btn"
+       data-show="📊 Графіки" data-hide="📋 Список"
        class="addlink" style="background-image:none">📊 Графіки</a>
   </li>
   {{ block.super }}
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+{% comment %}
+  Inline pre-DOM marker: if URL hash says #charts, hide the table immediately so
+  the user doesn't see a flicker of results before JS kicks in.
+{% endcomment %}
+<script>
+  (function() {
+    if (location.hash === '#charts') {
+      document.documentElement.setAttribute('data-charts-mode', '1');
+    }
+  })();
+</script>
+<style>
+  /* CHARTS MODE — hide the data form / actions / pagination / toolbar, leave the
+     sidebar filters (#changelist-filter) visible so the user can change scope. */
+  html[data-charts-mode="1"] #changelist-form,
+  html[data-charts-mode="1"] #changelist-form .results,
+  html[data-charts-mode="1"] #toolbar,
+  html[data-charts-mode="1"] .paginator,
+  html[data-charts-mode="1"] .actions { display: none !important; }
+  #charts-inline { display: none; }
+  html[data-charts-mode="1"] #charts-inline { display: block; }
+  #charts-inline .loading { color: var(--body-quiet-color); padding: 20px;
+                            background: var(--body-bg); border:1px dashed var(--border-color);
+                            border-radius: 8px; text-align: center; margin: 10px 0; }
+</style>
+<script src="{% static 'analysis/vendor/chart.umd.min.js' %}"></script>
+<script>
+// View-mode persistence via `#charts` hash. The hash survives admin filter clicks
+// only if we re-attach it to navigation links — Django filter <a>s point at "?foo=bar"
+// which would otherwise drop the hash on reload. So: intercept clicks/submits while
+// in charts mode and append the hash.
+document.addEventListener('DOMContentLoaded', function() {
+  const btn = document.getElementById('toggle-charts-btn');
+  if (!btn) return;
+
+  const HASH = '#charts';
+  const isCharts = () => location.hash === HASH;
+  const setHtmlMode = (on) => {
+    if (on) document.documentElement.setAttribute('data-charts-mode', '1');
+    else    document.documentElement.removeAttribute('data-charts-mode');
+  };
+
+  // ---- mount the inline charts container as a sibling of #changelist-form ----
+  const form = document.querySelector('#changelist-form');
+  const container = document.createElement('div');
+  container.id = 'charts-inline';
+  if (form && form.parentNode) form.parentNode.insertBefore(container, form);
+  else (document.querySelector('#changelist') || document.body).appendChild(container);
+
+  // ---- fragment loader ----
+  let loaded = false;
+  function loadCharts() {
+    if (loaded) return Promise.resolve();
+    container.innerHTML = '<div class="loading">⏳ Будую графіки…</div>';
+    const qs = new URLSearchParams(window.location.search);
+    qs.set('_fragment', '1');
+    return fetch('{% url "admin:analysis_event_charts" %}?' + qs.toString(),
+                 { credentials: 'same-origin' })
+      .then(r => r.text())
+      .then(html => {
+        container.innerHTML = html;
+        loaded = true;
+        // innerHTML doesn't run <script> tags — re-attach them so they execute.
+        // IMPORTANT: preserve `type` — e.g. `application/json` data-blocks must NOT
+        // be re-injected as executable JS (that crashes on the first `:`).
+        container.querySelectorAll('script').forEach(orig => {
+          const s = document.createElement('script');
+          for (const a of orig.attributes) s.setAttribute(a.name, a.value);
+          if (!orig.src) s.textContent = orig.textContent;
+          // Keep data scripts inside the container so #charts-data is findable
+          // by id from the charts init code; only real JS goes to document.body.
+          if (s.type && s.type !== '' && s.type !== 'text/javascript' &&
+              s.type !== 'application/javascript') {
+            container.appendChild(s);
+          } else {
+            document.body.appendChild(s);
+          }
+          orig.remove();
+        });
+      })
+      .catch(err => {
+        container.innerHTML = '<div class="loading" style="color:#b91c1c">Помилка: ' + err + '</div>';
+      });
+  }
+
+  // ---- toggle handler ----
+  function setMode(on) {
+    setHtmlMode(on);
+    btn.textContent = on ? btn.dataset.hide : btn.dataset.show;
+    // Persist in URL hash so reload / filter clicks keep the chosen view.
+    if (on) {
+      if (!isCharts()) history.replaceState(null, '', location.pathname + location.search + HASH);
+    } else {
+      if (isCharts()) history.replaceState(null, '', location.pathname + location.search);
+    }
+    if (on) loadCharts();
+  }
+  btn.addEventListener('click', function(e) {
+    e.preventDefault();
+    setMode(!isCharts());
+  });
+
+  // ---- initial state from hash ----
+  if (isCharts()) setMode(true);
+
+  // ---- carry the hash across filter / search navigation ----
+  // Filter sidebar uses <a href="?…"> links; search bar is a GET <form>.
+  // We rewrite both on the fly when we're in charts mode, so the reloaded page
+  // lands back in charts mode automatically.
+  document.addEventListener('click', function(e) {
+    if (!isCharts()) return;
+    const a = e.target.closest('a');
+    if (!a || !a.href) return;
+    if (a.id === 'toggle-charts-btn') return;
+    // only rewrite same-origin links that don't already carry a hash
+    let u;
+    try { u = new URL(a.href, location.href); } catch (_) { return; }
+    if (u.origin !== location.origin) return;
+    if (u.hash) return;
+    u.hash = HASH;
+    a.href = u.toString();
+  }, true);
+
+  document.querySelectorAll('form[method="get"], form:not([method])').forEach(function(f) {
+    f.addEventListener('submit', function(e) {
+      if (!isCharts()) return;
+      e.preventDefault();
+      const data = new FormData(f);
+      const qs = new URLSearchParams();
+      data.forEach((v, k) => qs.append(k, v));
+      const action = f.getAttribute('action') || location.pathname;
+      location.href = action + (qs.toString() ? '?' + qs.toString() : '') + HASH;
+    });
+  });
+});
+</script>
 {% endblock %}

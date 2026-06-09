@@ -135,8 +135,10 @@ async def _infer_regions(channels):
     async def one(cid, title, about):
         async with sem:
             txt = f"Назва: {title}\nОпис: {about[:400]}"
+            # region name is a short string — 64 tokens is plenty
             r = await llm.query([{"role": "system", "content": REGION_SYS},
-                                 {"role": "user", "content": txt}], client=client)
+                                 {"role": "user", "content": txt}],
+                                client=client, max_tokens=64)
             out[cid] = (r or "").strip().strip('"')[:128]
 
     try:
@@ -218,9 +220,11 @@ async def _classify_batches(system_prompt, batches, model):
     async def one(bi, texts):
         async with sem:
             user = "\n".join(f"[{i}] {t[:700]}" for i, t in enumerate(texts))
+            # JSON array of N verdicts (one per post in batch) — ~500 tokens per item
+            # incl. tags + summary; cap at 4000 to fit batches of 8 comfortably.
             raw = await llm.query(
                 [{"role": "system", "content": system_prompt}, {"role": "user", "content": user}],
-                model=model, client=client)
+                model=model, client=client, max_tokens=4000)
             results[bi] = llm.extract_json(raw) or []
 
     try:
@@ -357,9 +361,10 @@ async def _judge_pairs(pairs_text, system=None):
 
     async def one(k, a, b):
         async with sem:
+            # dedup judge replies "ОДНА" or "РІЗНІ" — 16 tokens is more than enough
             r = await llm.query([{"role": "system", "content": system},
                                  {"role": "user", "content": f"A: {a[:280]}\nB: {b[:280]}"}],
-                                client=client)
+                                client=client, max_tokens=16)
             same[k] = (r or "").strip().lower().startswith(("одна", "одно", "так", "да", "yes"))
 
     try:

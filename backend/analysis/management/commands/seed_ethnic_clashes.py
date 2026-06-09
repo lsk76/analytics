@@ -53,7 +53,14 @@ CLASSIFY_PROMPT = (
     "- війна, спорт, ігри, суто політичний текст без конкретного інциденту.\n"
     "У теги-сторони став лише РЕАЛЬНІ групи учасників; якщо сторона невідома — пропусти її "
     "(краще одна конкретна сторона, ніж заглушка).\n"
-    "Значення тегів пиши українською, узагальнено (напр. таджик, русский, чеченець, мігрант)."
+    "Значення тегів пиши українською, узагальнено (напр. таджик, русский, чеченець, мігрант).\n"
+    "‼️ ВЛАСНІ НАЗВИ ОРГАНІЗАЦІЙ (для тегів категорії `group`): якщо в тексті явно "
+    "названа конкретна організація — напр. «Русская община», «Северный человек», "
+    "«Чорна братва», РИМ (Російський імперський рух), NSWP, «Имперский легион», "
+    "«Хесовські», БАРС, ENOT, «White Noise 88» — обов'язково додай цю НАЗВУ як "
+    "окремий тег у `group` (на додачу до родового — «націоналісти», «банда» тощо). "
+    "Назву пиши так, як у джерелі (з великої літери). У `summary` теж "
+    "згадай цю назву в лапках — не узагальнюй до «праве угруповання» чи «етнічне ОПГ»."
 )
 
 # Dedup judge prompt (was the global PAIR_SYS) — now stored on the task.
@@ -119,7 +126,7 @@ class Command(BaseCommand):
                 "llm_model": "google/gemini-2.5-flash",
                 # domain config — everything explicit on the task (no global fallbacks)
                 "geo_enabled": True,
-                "closed_tag_categories": ["nationality"],
+                "closed_tag_categories": ["nationality", "role"],
                 "dedup_judge_prompt": DEDUP_JUDGE_PROMPT,
                 "generic_sides": GENERIC_SIDES,
                 # final AI audit — pricier model does the manual QA pass

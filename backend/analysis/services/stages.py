@@ -21,7 +21,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import Q
 from django.utils import timezone as djtz
 
@@ -32,12 +32,23 @@ from .normalize import resolve_region, resolve_in_category
 from analysis.models import Tag
 from . import pipeline as P  # reuse pure helpers
 from rapidfuzz.fuzz import token_set_ratio
+from rapidfuzz import process as rf_process
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 LOCK_TIMEOUT = timedelta(minutes=20)   # stale claim is reclaimable after this
 ENRICH_BATCH = 300
 CLASSIFY_GROUP_BATCH = 400             # group-reps per classify tick
+PRECLUSTER_WINDOW_DAYS = 1             # each precluster tick claims this many days of posts.
+                                       # Even with cdist-vectorised fuzzy, the matrix is N²:
+                                       # measured 5k posts/day @ avg 841-char texts → ~30s/tick
+                                       # at window=1. window=3 → 15k posts → 9× more comparisons
+                                       # → 10+ min/tick (texts are long, so SIMD savings are
+                                       # bounded by tokenisation cost). Single-worker setup with
+                                       # window=1 + anchor back-buffer (dedup_window_days neighbours)
+                                       # still catches cross-day duplicates correctly. Re-raise once
+                                       # we have the PreclusterClaim catalog table for parallel workers.
 
 
 # --------------------------------------------------------------------------- claim helpers
@@ -343,21 +354,62 @@ def precluster_once(task):
             out = out.filter(posted_at__date__lte=settle_to)
         finalized = out.update(stage=Post.STAGE_DONE, stage_locked_at=None)
 
-    base = Post.objects.filter(task=task, stage=Post.STAGE_ENRICHED,
-                               posted_at__isnull=False).filter(scope)
-    newq = base if settle_to is None else base.filter(posted_at__date__lte=settle_to)
-    newp = list(newq.order_by("posted_at", "id"))
-    if not newp:
+    # CLAIM a contiguous DATE RANGE of enriched posts. Each worker takes a 14-day
+    # window starting from the earliest yet-unlocked post. With multiple workers,
+    # everyone gets disjoint date ranges (because the FIRST row's FOR-UPDATE-SKIP-LOCKED
+    # serialises the choice of starting date). Inside its own range a worker runs the
+    # full union-find with anchors — so cross-day merges within the range are correct.
+    # The only risk zone is the day boundary BETWEEN two adjacent workers' ranges:
+    # mitigated by (a) sonnet audit, (b) the next precluster pass picking up any
+    # newly-enriched posts in the boundary days and seeing the now-preclustered neighbours
+    # as anchors.
+    cutoff = djtz.now() - LOCK_TIMEOUT
+    base = (Post.objects.filter(task=task, stage=Post.STAGE_ENRICHED,
+                                posted_at__isnull=False).filter(scope)
+            .filter(Q(stage_locked_at__isnull=True) | Q(stage_locked_at__lt=cutoff)))
+    if settle_to is not None:
+        base = base.filter(posted_at__date__lte=settle_to)
+    with transaction.atomic():
+        earliest = (base.select_for_update(skip_locked=True)
+                    .order_by("posted_at", "id").first())
+        if not earliest:
+            return finalized > 0
+        d_from = earliest.posted_at.date()
+        d_to = d_from + timedelta(days=PRECLUSTER_WINDOW_DAYS)
+        # Lock the entire date window — other workers' SELECT FOR UPDATE SKIP LOCKED
+        # will skip these rows and pick the next available date range.
+        window_qs = (Post.objects.filter(task=task, stage=Post.STAGE_ENRICHED,
+                                          posted_at__isnull=False)
+                     .filter(scope)
+                     .filter(posted_at__date__gte=d_from, posted_at__date__lt=d_to))
+        if settle_to is not None:
+            window_qs = window_qs.filter(posted_at__date__lte=settle_to)
+        n_locked = window_qs.update(stage_locked_at=djtz.now())
+    if not n_locked:
         return finalized > 0
+    newp = list(window_qs.order_by("posted_at", "id"))
+    logger.info("precluster: claimed %d posts in window %s..%s",
+                len(newp), d_from, d_to - timedelta(days=1))
 
-    # back-buffer: already-preclustered (or later) neighbours within `win` for cross-day merges
+    # back-buffer: ONE representative per dedup_group from the prior `win` days. We only
+    # need one anchor per existing cluster because all members share text/content_hash —
+    # comparing the newp against the rep is equivalent to comparing against every member,
+    # but keeps the cdist matrix small. Without this, anchors can balloon to 10-15× the
+    # newp count (e.g. on 27.09: 5.4k newp + 16k anchors = 21k items → 16× the work).
     oldest = newp[0].posted_at - win
-    anchors = list(
-        Post.objects.filter(task=task, posted_at__gte=oldest, posted_at__lt=newp[0].posted_at)
-        .exclude(stage__in=[Post.STAGE_COLLECTED, Post.STAGE_ENRICHED])
-        .exclude(dedup_group__isnull=True)
-        .order_by("posted_at", "id")
-    )
+    anchors_qs = (Post.objects.filter(task=task, posted_at__gte=oldest, posted_at__lt=newp[0].posted_at)
+                  .exclude(stage__in=[Post.STAGE_COLLECTED, Post.STAGE_ENRICHED])
+                  .exclude(dedup_group__isnull=True))
+    # group by dedup_group, pick the earliest member as the representative
+    seen_groups = set()
+    anchors = []
+    for p in anchors_qs.order_by("dedup_group", "posted_at", "id"):
+        if p.dedup_group in seen_groups:
+            continue
+        seen_groups.add(p.dedup_group)
+        anchors.append(p)
+    # keep the rest of the code's assumption that anchors are time-ordered
+    anchors.sort(key=lambda p: (p.posted_at, p.id))
 
     items = anchors + newp
     n = len(items)
@@ -385,12 +437,27 @@ def precluster_once(task):
             union(g[0], k)
 
     norms = [P._norm(p.text) for p in items]
-    for i in range(n):
-        for j in range(i + 1, n):
-            if items[j].posted_at - items[i].posted_at > win:
-                break
-            if token_set_ratio(norms[i], norms[j]) >= task.dedup_pre_thresh:
-                union(i, j)
+    # Vectorised pairwise fuzzy via rapidfuzz.process.cdist — runs the same
+    # token_set_ratio comparisons but in C/SIMD with score_cutoff filtering, so
+    # entries below `dedup_pre_thresh` collapse to 0 inside the matrix.
+    # Measured on day=2025-09-27 (5449 posts, avg_len=841): Python nested loop = 248s,
+    # cdist = 27s (~9× faster), and produces IDENTICAL clusters (45 multi-clusters,
+    # 5379 merged_posts, 70 singletons in both). Cutover date for this implementation:
+    # 2025-09-27 — if cdist ever produces corrupted clusters, release locks on
+    # posts.posted_at >= 2025-09-27 and reprocess.
+    win_secs = win.total_seconds()
+    posted = np.array([p.posted_at.timestamp() for p in items])
+    mat = rf_process.cdist(norms, norms, scorer=token_set_ratio,
+                           score_cutoff=task.dedup_pre_thresh, workers=-1)
+    # Iterate non-zero upper-triangle entries; restrict to pairs within `win` days.
+    ii, jj = np.where(mat >= task.dedup_pre_thresh)
+    for i_, j_ in zip(ii, jj):
+        i, j = int(i_), int(j_)
+        if j <= i:
+            continue
+        if abs(posted[j] - posted[i]) > win_secs:
+            continue
+        union(i, j)
 
     # resolve each union-set to a single group id (prefer an anchor's existing id = smallest)
     set_gid = {}
@@ -509,13 +576,15 @@ def _create_event(task, posts_in):
         region_subject, settlement = resolve_region(loc) if loc else (None, "")
         if not settlement and sett_hint:
             settlement = sett_hint
+    uniq_channels = {p.channel_id for p in posts_in if p.channel_id}
     ev = Event.objects.create(
         task=task,
         event_date=head.posted_at.date(),
         region=region, region_subject=region_subject, settlement=settlement,
         summary=cls.get("summary") or head.text[:300],
         post_count=len(posts_in),
-        is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
+        channel_count=len(uniq_channels),
+        is_corroborated=len(uniq_channels) >= 2,
     )
     # resolve tags per the task's chosen categories (values are lists)
     tag_objs = []
@@ -543,9 +612,10 @@ def _attach_posts(ev, posts_in):
     members = list(Post.objects.filter(event=ev).select_related("channel"))
     chans = {p.channel_id: (p.channel.subscribers or 0) for p in members if p.channel_id}
     ev.post_count = len(members)
+    ev.channel_count = len(chans)
     ev.reach = sum(chans.values())
     ev.is_corroborated = len(chans) >= 2
-    ev.save(update_fields=["post_count", "reach", "is_corroborated"])
+    ev.save(update_fields=["post_count", "channel_count", "reach", "is_corroborated"])
 
 
 def dedup_once(task):
@@ -561,11 +631,13 @@ def dedup_once(task):
         relq = relq.filter(posted_at__date__lte=settle_to)
     rel = list(relq.select_related("channel").order_by("posted_at", "id"))
 
-    # non-relevant classified posts in the settled region are simply finalized
-    irrel = Post.objects.filter(task=task, stage=Post.STAGE_CLASSIFIED)
-    if settle_to is not None:
-        irrel = irrel.filter(posted_at__date__lte=settle_to)
-    irrel = irrel.exclude(id__in=[p.id for p in rel])
+    # Non-relevant classified posts can be finalized WITHOUT the settle_to gate:
+    # they don't participate in dedup and can't ever join a relevant cluster (classify
+    # propagates the same `is_relevant` to every member of a dedup_group). Holding
+    # them back behind the watermark only created visible "stuck classified" backlog
+    # when precluster on a long backfill is slow to advance the frontier.
+    irrel = (Post.objects.filter(task=task, stage=Post.STAGE_CLASSIFIED, is_relevant=False)
+             .exclude(id__in=[p.id for p in rel]))
     irr_n = irrel.update(stage=Post.STAGE_DONE, stage_locked_at=None)
 
     if not rel:
@@ -574,7 +646,24 @@ def dedup_once(task):
     by_group = defaultdict(list)
     for p in rel:
         by_group[p.dedup_group].append(p)
-    new_clusters = sorted((P._cluster_of(g) for g in by_group.values()),
+    # Hard cap on cluster date-spread: split a `dedup_group` into sub-clusters whenever
+    # the gap between consecutive posts exceeds MAX_CLUSTER_GAP_DAYS. Without this, the
+    # precluster anchor-chain (A↔B within 2d, B↔C within 2d, …) can carry one `dedup_group`
+    # across many months — same SEO-spam template, or different real incidents that share
+    # wording stitched together via intermediaries. The cap reins both:
+    # - spam-farm clusters keep one Event (first burst) and don't accumulate forever;
+    # - chained over-merges across distinct incidents split into separate Events.
+    MAX_CLUSTER_GAP_DAYS = 14
+    split_groups = []
+    for posts in by_group.values():
+        posts.sort(key=lambda p: p.posted_at)
+        cur = [posts[0]]
+        for p in posts[1:]:
+            if (p.posted_at - cur[-1].posted_at).days > MAX_CLUSTER_GAP_DAYS:
+                split_groups.append(cur); cur = []
+            cur.append(p)
+        split_groups.append(cur)
+    new_clusters = sorted((P._cluster_of(g) for g in split_groups),
                           key=lambda c: c["dmin"])
 
     # anchors: recent events (within win) we may still merge into
@@ -649,7 +738,18 @@ def dedup_once(task):
         new_posts = [p for i in idxs if i >= base for p in pool[i]["posts"]]
         if anchor is not None:                 # merge new posts into the existing event
             if new_posts:
-                _attach_posts(pool[anchor]["event"], new_posts)
+                target = pool[anchor]["event"]
+                # The recent_events queryset was prefetched at the start of this tick.
+                # A concurrent review-worker may delete some of those Events as
+                # "duplicate" verdicts at any moment — even between an exists() check
+                # and the update below. So we run the attach in a savepoint and fall
+                # back to creating a fresh Event if the FK constraint trips.
+                try:
+                    with transaction.atomic():
+                        _attach_posts(target, new_posts)
+                except IntegrityError:
+                    _create_event(task, new_posts)
+                    created += 1
         else:                                  # brand-new event
             all_posts = [p for i in idxs for p in pool[i]["posts"]]
             _create_event(task, all_posts)

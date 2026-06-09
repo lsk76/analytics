@@ -24,8 +24,14 @@ from analysis.services.stages import _ready_through, _attach_posts, LOCK_TIMEOUT
 logger = logging.getLogger(__name__)
 
 REVIEW_BATCH = 6          # events claimed per pass
-CAND_PER_EVENT = 10       # duplicate candidates shown to the model (region/tag-filtered)
-SRC_POSTS = 1             # source posts shown per event (reposts are ~identical; 1 is enough)
+CAND_PER_EVENT = 25       # duplicate candidates shown to the model (region/tag-filtered).
+                          # 10 was too few for dense days (e.g. 2025-04-06 had 22 events
+                          # all about "чеченці в Петербурзі змушують підлітків вибачатися"
+                          # — only top-10 by region+tag-score were visible to Sonnet, the
+                          # rest stayed un-merged because the model never saw them).
+SRC_POSTS = 3             # source posts shown per event (3 gives more context to the judge,
+                          # which dropped too many true-positives when only the first repost
+                          # was visible and that one omitted the ethnic angle)
 
 _DEFAULT_REVIEW_SYS = (
     "Ти — суворий редактор-аудитор подій. Тобі дають ОДНУ подію (короткий опис, гео, "
@@ -50,14 +56,18 @@ def _settle_to(task):
 
 
 def _claim_events(task, limit):
+    """Claim PENDING events for audit. We do NOT gate on the global pipeline watermark
+    (`_settle_to`) here: an Event only enters review_status=PENDING after dedup has
+    finalized it, and any later collected/processed posts that target an existing event
+    can only attach to that event (dedup_window away) — they will NOT change a
+    finalized event's date, region, or summary. So a fresh collection job for an
+    earlier year does NOT block reviewing already-finished events from later periods.
+    Without this, starting a 2025 backfill would freeze all Q1/Q2 2026 audits."""
     cutoff = djtz.now() - LOCK_TIMEOUT
-    settle_to = _settle_to(task)
     with transaction.atomic():
         qs = (Event.objects.select_for_update(skip_locked=True)
               .filter(task=task, review_status=Event.REVIEW_PENDING)
               .filter(models_q_unlocked(cutoff)))
-        if settle_to is not None:
-            qs = qs.filter(event_date__lte=settle_to)
         ids = list(qs.order_by("event_date", "id").values_list("id", flat=True)[:limit])
         if ids:
             Event.objects.filter(id__in=ids).update(review_locked_at=djtz.now())
@@ -135,11 +145,30 @@ def _apply(task, event, verdict, cand_ids):
     v = (verdict.get("verdict") or "keep").lower()
     reason = (verdict.get("reason") or "")[:500]
 
+    # Audit log (one line per event) for offline analysis like the prompt
+    # iteration script — lets us see what the model actually decided BEFORE
+    # the row gets deleted by drop/duplicate.
+    try:
+        import os
+        with open("/tmp/review_audit.log", "a") as _f:
+            _f.write(f"{event.id}: {v}\n")
+    except Exception:
+        pass
+
     if v == "drop":
-        Post.objects.filter(event=event).update(event=None)
-        logger.info("review drop #%s: %s", event.id, reason)
-        event.delete()
-        return "drop"
+        # Soft drop: mark as REJECTED instead of deleting. The event stays in the
+        # DB so the user can inspect it (filter review_status=rejected in admin),
+        # spot-check the model's calls, and bulk-reverse mistakes by flipping
+        # back to APPROVED. Posts keep their event_id so the cluster history
+        # is preserved.
+        event.review_status = Event.REVIEW_REJECTED
+        event.review_notes = reason
+        event.reviewed_at = djtz.now()
+        event.review_locked_at = None
+        event.save(update_fields=["review_status", "review_notes",
+                                  "reviewed_at", "review_locked_at"])
+        logger.info("review reject #%s: %s", event.id, reason)
+        return "reject"
 
     if v == "duplicate":
         tgt_id = verdict.get("duplicate_of")
@@ -216,11 +245,40 @@ def review_once(task):
         verdict = llm.extract_json(raw) or {}
         if isinstance(verdict, list):
             verdict = verdict[0] if verdict else {}
+        # Normalize: Sonnet occasionally returns a bare string ("keep") or some other
+        # non-dict shape. Wrap it so `_apply` (which calls .get(...)) doesn't crash
+        # and re-claim the event into an infinite loop.
+        if not isinstance(verdict, dict):
+            txt = (str(verdict) or "").strip().lower()
+            keep_kw = {"keep", "drop", "duplicate"}
+            # Words that DESCRIBE an event (bare event-word verdicts) — Flash
+            # returns these instead of JSON when the source text strongly implies
+            # an incident. They mean "this IS an incident" → treat as KEEP.
+            event_kw = ("бійка", "напад", "вбивство", "побиття", "стрілянина",
+                        "ножов", "зґвалтування", "погроз", "мігрант", "вимаган",
+                        "організована група", "група", "робітник", "інцидент",
+                        "конфлікт", "сутичка")
+            if txt in keep_kw:
+                verdict = {"verdict": txt, "reason": "model returned bare verdict"}
+            elif any(kw in txt for kw in event_kw):
+                verdict = {"verdict": "keep",
+                           "reason": f"bare-event-word ({txt[:60]})"}
+            else:
+                # Unknown bare output → DROP to avoid polluting corpus.
+                verdict = {"verdict": "drop",
+                           "reason": f"non-dict ({type(verdict).__name__}): {str(verdict)[:200]}"}
         try:
             actions.append(_apply(task, event, verdict, cand_ids))
         except Exception as e:  # noqa: BLE001 — never let one event kill the batch
             logger.warning("review apply #%s failed: %s", eid, e)
-            Event.objects.filter(id=eid).update(review_locked_at=None)
+            # Mark as approved (with note) so a malformed response doesn't loop forever.
+            Event.objects.filter(id=eid).update(
+                review_status=Event.REVIEW_APPROVED,
+                review_notes=f"audit error: {str(e)[:300]}",
+                reviewed_at=djtz.now(),
+                review_locked_at=None,
+            )
+            actions.append("err->keep")
     logger.info("review: %d events -> %s", len(ids), ", ".join(actions))
     return True
 
@@ -230,9 +288,13 @@ def _ask(system, user, model):
     async def go():
         client = llm.make_client()
         try:
+            # audit verdict = JSON with verdict/region/settlement/summary/tags/reason —
+            # ~400 tokens, 1500 is a safe cap that fits all responses.
             return await llm.query(
                 [{"role": "system", "content": system},
-                 {"role": "user", "content": user}], model=model, client=client)
+                 {"role": "user", "content": user}],
+                model=model, client=client, max_tokens=1500,
+                json_mode=True)        # force strict JSON-object output
         finally:
             await client.close()
     return asyncio.run(go())

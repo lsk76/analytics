@@ -212,6 +212,90 @@ class ResearchRunAdmin(admin.ModelAdmin):
     readonly_fields = ("started_at", "finished_at", "stage_progress", "params", "stats",
                        "posts_collected", "posts_relevant", "events_total",
                        "events_corroborated", "created_at")
+    change_list_template = "admin/analysis/researchrun/change_list.html"
+
+    # ---------- status dashboard --------------------------------------------
+
+    def get_urls(self):
+        custom = [
+            path("status/", self.admin_site.admin_view(self.status_view),
+                 name="analysis_researchrun_status"),
+        ]
+        return custom + super().get_urls()
+
+    def status_view(self, request):
+        """Live dashboard for all active collection jobs. Auto-refresh every 30s."""
+        now = djtz.now()
+        # active = anything not terminally done; we still show recent done ones below
+        active = list(ResearchRun.objects.select_related("task")
+                      .exclude(status__in=["done", "cancelled"])
+                      .order_by("-created_at"))
+        recent_done = list(ResearchRun.objects.select_related("task")
+                           .filter(status__in=["collected", "done"])
+                           .order_by("-finished_at", "-created_at")[:5])
+
+        def _job_card(j):
+            chs = list(CollectChunk.objects.filter(job=j))
+            c_total = len(chs)
+            c_by = {"done": 0, "running": 0, "pending": 0, "failed": 0, "split": 0}
+            cooldown = 0
+            for ch in chs:
+                c_by[ch.status] = c_by.get(ch.status, 0) + 1
+                if ch.status == "pending" and ch.next_retry_at and ch.next_retry_at > now:
+                    cooldown += 1
+            # `split` chunks are terminal (delegated to children that ended up done),
+            # so count them as finished progress.
+            chunks_finished = c_by["done"] + c_by["split"]
+            chunk_pct = round(100 * chunks_finished / c_total) if c_total else 0
+
+            # post-stage breakdown for the job's date range (posts belong to task, not job)
+            pcounts = dict(Post.objects.filter(task=j.task,
+                                                posted_at__date__gte=j.date_from,
+                                                posted_at__date__lte=j.date_to)
+                           .values_list("stage").annotate(n=Count("id")))
+            p_total = sum(pcounts.values())
+            p_terminal = pcounts.get(Post.STAGE_DONE, 0) + pcounts.get(Post.STAGE_FAILED, 0)
+            p_pct = round(100 * p_terminal / p_total) if p_total else 0
+
+            # event + review breakdown for the period
+            evs = Event.objects.filter(task=j.task,
+                                       event_date__gte=j.date_from,
+                                       event_date__lte=j.date_to)
+            e_total = evs.count()
+            r_by = dict(evs.values_list("review_status").annotate(n=Count("id")))
+            r_approved = r_by.get(Event.REVIEW_APPROVED, 0)
+            r_pct = round(100 * r_approved / e_total) if e_total else 0
+
+            # an in-flight chunk to surface most recent activity
+            last_run = (CollectChunk.objects.filter(job=j)
+                        .exclude(locked_at__isnull=True)
+                        .order_by("-locked_at").first())
+            return {
+                "job": j,
+                "chunks_total": c_total, "chunks": c_by, "chunks_pct": chunk_pct,
+                "chunks_cooldown": cooldown,
+                "posts_total": p_total, "posts_pct": p_pct,
+                "post_stages": [(lbl, pcounts.get(st, 0))
+                                for st, lbl in self._STAGE_SEQ if pcounts.get(st)],
+                "posts_failed": pcounts.get(Post.STAGE_FAILED, 0),
+                "events_total": e_total, "events_review": r_by, "events_pct": r_pct,
+                "last_running": last_run,
+            }
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "title": "Статус збору",
+            "opts": self.model._meta,
+            "has_view_permission": True,
+            "now": now,
+            "active_cards": [_job_card(j) for j in active],
+            "recent_done": [_job_card(j) for j in recent_done],
+        }
+        return render(request, "admin/analysis/researchrun/status.html", ctx)
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = dict(extra_context or {})
+        return super().changelist_view(request, extra_context=extra_context)
 
     # пайплайн-стадії в порядку проходження (термінальні: done/failed)
     _STAGE_SEQ = [
@@ -226,7 +310,9 @@ class ResearchRunAdmin(admin.ModelAdmin):
     @admin.display(description="Чанки")
     def chunk_progress(self, obj):
         total = obj.chunks.count()
-        done = obj.chunks.filter(status="done").count()
+        # `split` is a terminal state: the parent delegated to 1-day children (which
+        # themselves end up `done`). It is NOT outstanding work — count it as finished.
+        done = obj.chunks.filter(status__in=["done", "split"]).count()
         pct = round(100 * done / total) if total else 0
         return format_html("{}/{} <small>({}%)</small>", done, total, pct) if total else "—"
 
@@ -316,6 +402,14 @@ class TagAdmin(admin.ModelAdmin):
     inlines = [TagAliasInline]
 
 
+# Numeric «from … to …» range filters for Event admin.
+# Either bound may be left empty; the field is a plain DB column on Event.
+from rangefilter.filters import NumericRangeFilterBuilder
+
+ChannelCountFilter = NumericRangeFilterBuilder(title="К-сть каналів")
+ReachFilter = NumericRangeFilterBuilder(title="Охоплення")
+
+
 class JobPeriodFilter(admin.SimpleListFilter):
     """Filter posts by a collect job — posts of that job's task within its period."""
     title = "Збір (job)"
@@ -345,7 +439,8 @@ class PostAdmin(admin.ModelAdmin):
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("event_date", "review_badge", "region_subject", "settlement",
+    list_display = ("event_date", "review_badge", "bot_farm_badge",
+                    "region_subject", "settlement",
                     "conflict_display", "tags_list", "count_short", "reach_display",
                     "posts_preview", "summary")
     readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at")
@@ -363,7 +458,7 @@ class EventAdmin(admin.ModelAdmin):
 
     # query params owned by the charts page (NOT changelist filter lookups)
     _CHART_PARAMS = ("gran", "tag_cats", "tag_top", "tag_chart", "tag_cols",
-                     "region_top", "channel_top", "label_max")
+                     "region_top", "channel_top", "label_max", "_fragment")
 
     def charts_view(self, request):
         """Charts page — reuses the changelist filters so charts reflect EXACTLY what
@@ -374,6 +469,7 @@ class EventAdmin(admin.ModelAdmin):
             tag_chart=bar|pie|doughnut   (per-category chart type)
             tag_cols=1|2|3               (per-category grid columns)
         """
+        is_fragment = request.GET.get("_fragment") == "1"
         gran = request.GET.get("gran", "day")
         if gran not in ("day", "week", "month"):
             gran = "day"
@@ -453,13 +549,12 @@ class EventAdmin(admin.ModelAdmin):
             from calendar import monthrange
             return d, d.replace(day=monthrange(d.year, d.month)[1])
 
-        def samples_for(qs_):
-            """Few representative events for tooltips."""
-            return [
-                {"date": e.event_date.isoformat() if e.event_date else "",
-                 "summary": (e.summary or "")[:90]}
-                for e in qs_.order_by("-reach", "id")[:5]
-            ]
+        # Per-row event "preview" lists were here, but they triggered ~1 query per
+        # bucket/region/tag/channel → N+1 (1000+ queries on a 300-event period).
+        # The drill-down link already takes the user to the full filtered list,
+        # so a tiny tooltip preview wasn't worth the round-trip cost.
+        def samples_for(_qs):
+            return []
 
         # ---- time series ------------------------------------------------------
         # events + total reach per bucket
@@ -537,6 +632,44 @@ class EventAdmin(admin.ModelAdmin):
                 })
             by_tag.append({"category": c.key, "label": c.label, "rows": rows})
 
+        # Distribution by reach buckets (vertical bar): how many events fall into
+        # each reach band? Useful to see if data is dominated by viral big-reach or
+        # by local low-reach incidents. Same idea for channel_count buckets.
+        REACH_BUCKETS = [
+            ("< 1k",        0,           999),
+            ("1k–2k",       1_000,       1_999),
+            ("2k–3k",       2_000,       2_999),
+            ("3k–5k",       3_000,       4_999),
+            ("5k–7k",       5_000,       6_999),
+            ("7k–10k",      7_000,       9_999),
+            ("10k–100k",    10_000,      99_999),
+            ("100k–1M",     100_000,     999_999),
+            ("1M+",         1_000_000,   10**12),
+        ]
+        CHAN_BUCKETS = [
+            ("1",           1,    1),
+            ("2–5",         2,    5),
+            ("6–20",        6,    20),
+            ("21–100",      21,   100),
+            ("100+",        101,  10**9),
+        ]
+        by_reach_bucket = []
+        for label, lo, hi in REACH_BUCKETS:
+            n = qs.filter(reach__gte=lo, reach__lte=hi).count()
+            by_reach_bucket.append({
+                "name": label, "count": n,
+                "url": drill_url({"reach_min": lo, "reach_max": hi}),
+                "samples": [],
+            })
+        by_channel_count_bucket = []
+        for label, lo, hi in CHAN_BUCKETS:
+            n = qs.filter(channel_count__gte=lo, channel_count__lte=hi).count()
+            by_channel_count_bucket.append({
+                "name": label, "count": n,
+                "url": drill_url({"channel_count_min": lo, "channel_count_max": hi}),
+                "samples": [],
+            })
+
         by_channel_raw = list(
             Post.objects.filter(event__in=qs, channel__isnull=False)
                 .values("channel_id", "channel__title",
@@ -594,6 +727,42 @@ class EventAdmin(admin.ModelAdmin):
         channeltop_passthrough = passthrough_for({"channel_top"})
         labelmax_passthrough = passthrough_for({"label_max"})
 
+        # ---- filter panel: option lists + currently-selected values ---------
+        all_tasks_list = list(AnalysisTask.objects.order_by("name").values("id", "name"))
+        all_regions_list = list(Region.objects.order_by("name").values("id", "name"))
+        # tags per (currently displayed) category — for the filter dropdowns
+        tag_options = []     # [{key, label, tags: [{id, name}], selected: [<id>...] }]
+        for c in all_cats:
+            if c.key not in tag_cats_selected:
+                continue
+            sel = request.GET.getlist(f"tag_{c.key}")
+            tag_options.append({
+                "key": c.key, "label": c.label,
+                "tags": list(Tag.objects.filter(category=c.key)
+                             .order_by("name").values("id", "name")),
+                "selected": sel,
+            })
+        # Filter form owns: every changelist-filter param. So passthrough = all chart
+        # params only (gran, tag_*, region_top, channel_top, label_max).
+        filter_form_passthrough = [(k, v) for k, v in chart_state.items()]
+        # currently-selected values for the form fields
+        selected_filters = {
+            "date_from": (request.GET.get("event_date__range__gte")
+                          or request.GET.get("event_date__gte", "")),
+            "date_to": (request.GET.get("event_date__range__lte")
+                        or request.GET.get("event_date__lte", "")),
+            "task": request.GET.get("task", ""),
+            "review_status": request.GET.get("review_status", ""),
+            "is_corroborated": request.GET.get("is_corroborated__exact", ""),
+            "regions": request.GET.getlist("region_id"),
+        }
+        any_filter_set = any([
+            selected_filters["date_from"], selected_filters["date_to"],
+            selected_filters["task"], selected_filters["review_status"],
+            selected_filters["is_corroborated"], selected_filters["regions"],
+            any(opt["selected"] for opt in tag_options),
+        ])
+
         ctx = {
             **self.admin_site.each_context(request),
             "title": "Графіки подій",
@@ -615,22 +784,43 @@ class EventAdmin(admin.ModelAdmin):
             "regiontop_passthrough": regiontop_passthrough,
             "channeltop_passthrough": channeltop_passthrough,
             "labelmax_passthrough": labelmax_passthrough,
+            "all_tasks_list": all_tasks_list,
+            "all_regions_list": all_regions_list,
+            "tag_options": tag_options,
+            "filter_form_passthrough": filter_form_passthrough,
+            "selected_filters": selected_filters,
+            "any_filter_set": any_filter_set,
+            "review_status_choices": Event.REVIEW_CHOICES,
             "data": json.dumps({
                 "timeseries": timeseries,
                 "by_region": list(by_region),
                 "by_tag": by_tag,
                 "by_channel": list(by_channel),
+                "by_reach_bucket": by_reach_bucket,
+                "by_channel_count_bucket": by_channel_count_bucket,
                 "gran": gran,
                 "tag_chart": tag_chart,
                 "label_max": label_max,
             }, ensure_ascii=False, default=str),
         }
+        if is_fragment:
+            return render(request, "admin/analysis/event/charts_fragment.html", ctx)
         return render(request, "admin/analysis/event/charts.html", ctx)
 
     def changelist_view(self, request, extra_context=None):
         # forward the current querystring to the "Графіки" link
         extra_context = dict(extra_context or {})
         extra_context["charts_qs"] = request.GET.urlencode()
+        # Chart-page params (gran, tag_top, …) may end up in the changelist URL when
+        # users navigate from the inline charts view (e.g. clicking week/month buttons).
+        # Django admin would treat them as field lookups and reject with `?e=1`,
+        # so strip them here BEFORE the changelist processes the request.
+        if any(p in request.GET for p in self._CHART_PARAMS):
+            from django.http import QueryDict
+            clean = QueryDict(request.GET.urlencode(), mutable=True)
+            for p in self._CHART_PARAMS:
+                clean.pop(p, None)
+            request.GET = clean
         return super().changelist_view(request, extra_context=extra_context)
 
     def get_list_filter(self, request):
@@ -644,13 +834,47 @@ class EventAdmin(admin.ModelAdmin):
             SubjectFilter,
             *cat_filters,
             ChannelFilter,
+            ("channel_count", ChannelCountFilter),
+            ("reach", ReachFilter),
             "is_corroborated",
+            "is_bot_farm",
         )
+
+    actions = ["approve_selected", "reject_selected"]
+
+    @admin.action(description="✅ Схвалити вибрані події")
+    def approve_selected(self, request, queryset):
+        from django.utils import timezone as djtz
+        n = queryset.update(
+            review_status=Event.REVIEW_APPROVED,
+            review_notes="manual: approved by user",
+            reviewed_at=djtz.now(),
+            review_locked_at=None,
+        )
+        self.message_user(request, f"Схвалено: {n} подій.")
+
+    @admin.action(description="🚫 Відхилити вибрані події")
+    def reject_selected(self, request, queryset):
+        from django.utils import timezone as djtz
+        n = queryset.update(
+            review_status=Event.REVIEW_REJECTED,
+            review_notes="manual: rejected by user",
+            reviewed_at=djtz.now(),
+            review_locked_at=None,
+        )
+        self.message_user(request, f"Відхилено: {n} подій.")
 
     @admin.display(description="Аудит")
     def review_badge(self, obj):
         icon = {"approved": "✅", "pending": "⏳", "rejected": "🚫"}.get(obj.review_status, "•")
         return format_html('<span title="{}">{}</span>', obj.review_notes or "", icon)
+
+    @admin.display(description="🤖", ordering="-bot_farm_score")
+    def bot_farm_badge(self, obj):
+        if not obj.is_bot_farm:
+            return ""
+        return format_html('<span title="bot-farm score: {}">🤖</span>',
+                           f"{obj.bot_farm_score:.2f}")
 
     search_fields = ("summary", "region", "settlement")
     filter_horizontal = ("tags",)

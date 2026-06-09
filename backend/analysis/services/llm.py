@@ -18,15 +18,29 @@ def make_client() -> AsyncOpenAI:
 
 
 async def query(messages: List[dict], model: Optional[str] = None, timeout: float = 120.0,
-                client: Optional[AsyncOpenAI] = None) -> str:
+                client: Optional[AsyncOpenAI] = None,
+                max_tokens: int = 2000,
+                json_mode: bool = False) -> str:
+    """Send a chat completion. `max_tokens` defaults to 2000 — large enough for
+    classify batches and audit verdicts, while avoiding OpenRouter's 402 error
+    ("requested up to N tokens but can only afford M") that fires when the model's
+    *theoretical* max (e.g. 65535 for Gemini 2.5 Flash) is reserved against the
+    key's monthly limit. Override per call for known-larger outputs.
+
+    `json_mode=True` asks OpenRouter to enforce a strict JSON-object output
+    (`response_format={"type":"json_object"}`). Use for callers that PARSE the
+    reply with `extract_json`; otherwise the model sometimes returns a bare word
+    ("напад", "бійка") that we then have to fall back on heuristically."""
     model = model or settings.LLM_MODEL
     own = client is None
     if own:
         client = make_client()
     try:
-        resp = await client.chat.completions.create(
-            model=model, messages=messages, timeout=timeout,
-        )
+        kwargs = dict(model=model, messages=messages, timeout=timeout,
+                      max_tokens=max_tokens)
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = await client.chat.completions.create(**kwargs)
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM error (%s): %s", model, e)

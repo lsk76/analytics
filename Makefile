@@ -79,8 +79,14 @@ workers-logs:            # follow all worker logs
 workers-stop:
 	$(DC) stop $(WORKERS)
 
-scale-workers:           # e.g. make scale-workers ENRICH=2 CLASSIFY=2
-	$(DC) up -d --scale worker-enrich=$(or $(ENRICH),1) --scale worker-classify=$(or $(CLASSIFY),1)
+scale-workers:           # e.g. make scale-workers REVIEW=4 ENRICH=2 CLASSIFY=2
+	$(DC) up -d \
+	  --scale worker-enrich=$(or $(ENRICH),1) \
+	  --scale worker-classify=$(or $(CLASSIFY),1) \
+	  --scale worker-review=$(or $(REVIEW),1) \
+	  --scale worker-collect=$(or $(COLLECT),1) \
+	  --scale worker-precluster=$(or $(PRECLUSTER),1) \
+	  --scale worker-dedup=$(or $(DEDUP),1)
 
 worker:                  # ad-hoc single pass: make worker STAGE=collect
 	@if [ -z "$(STAGE)" ]; then echo "Usage: make worker STAGE=collect|enrich|precluster|classify|dedup|review"; exit 1; fi
@@ -124,6 +130,7 @@ seed:
 	$(DC) exec web python manage.py seed_regions
 	$(DC) exec web python manage.py seed_nationalities
 	$(DC) exec web python manage.py seed_tag_categories
+	$(DC) exec web python manage.py seed_named_orgs
 	$(DC) exec web python manage.py seed_ethnic_clashes
 
 run:
