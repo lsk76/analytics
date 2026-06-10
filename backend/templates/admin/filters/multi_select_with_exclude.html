@@ -1,0 +1,109 @@
+{% load i18n %}
+<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+
+<style>
+#changelist-filter .filter-mxe { padding: 0; margin: 0; list-style: none; }
+#changelist-filter .filter-mxe li {
+    display: flex; align-items: center; gap: 4px;
+    padding: 1px 8px; margin: 0;
+    border-radius: 3px;
+}
+#changelist-filter .filter-mxe li.excluded {
+    background: rgba(179, 38, 30, 0.10);
+}
+#changelist-filter .filter-mxe li.included {
+    background: rgba(46, 125, 50, 0.10);
+}
+#changelist-filter .filter-mxe input[type=checkbox] {
+    margin: 0 1px; vertical-align: middle;
+    accent-color: #2e7d32;
+}
+#changelist-filter .filter-mxe input.excl {
+    accent-color: #b3261e;
+}
+#changelist-filter .filter-mxe label {
+    flex: 1; cursor: pointer; padding: 1px 0;
+    font-size: 12px; line-height: 1.2;
+}
+#changelist-filter .filter-mxe .hdr {
+    font-size: 10px; color: var(--body-quiet-color, #888);
+    padding: 0 8px 2px 8px;
+    display: flex; gap: 4px;
+}
+#changelist-filter .filter-mxe .hdr .h-inc { color: #2e7d32; min-width: 14px; text-align: center; }
+#changelist-filter .filter-mxe .hdr .h-exc { color: #b3261e; min-width: 14px; text-align: center; }
+</style>
+
+<ul class="filter-mxe">
+    <li class="hdr">
+        <span class="h-inc" title="включити">✓</span>
+        <span class="h-exc" title="виключити">✗</span>
+        <span style="flex:1">{% trans "tag" %}</span>
+    </li>
+    {% for choice in choices %}
+        {% if choice.value == '__all__' %}
+            <li{% if choice.selected %} class="selected"{% endif %}>
+                <a href="{{ choice.query_string|iriencode }}">— {{ choice.display }} —</a>
+            </li>
+        {% else %}
+            <li class="{% if choice.included %}included{% endif %}{% if choice.excluded %} excluded{% endif %}">
+                <input type="checkbox" class="inc"
+                       data-param-inc="{{ spec.parameter_name }}"
+                       data-param-exc="{{ spec.exclude_param }}"
+                       data-tag-id="{{ choice.value }}"
+                       data-role="inc"
+                       title="включити цей тег"
+                       {% if choice.included %}checked{% endif %}>
+                <input type="checkbox" class="excl"
+                       data-param-inc="{{ spec.parameter_name }}"
+                       data-param-exc="{{ spec.exclude_param }}"
+                       data-tag-id="{{ choice.value }}"
+                       data-role="exc"
+                       title="виключити цей тег"
+                       {% if choice.excluded %}checked{% endif %}>
+                <label>{{ choice.display }}</label>
+            </li>
+        {% endif %}
+    {% endfor %}
+</ul>
+
+<script>
+(function() {
+    function handle(cb) {
+        var paramInc = cb.dataset.paramInc;
+        var paramExc = cb.dataset.paramExc;
+        var tagId    = cb.dataset.tagId;
+        var role     = cb.dataset.role;       // 'inc' | 'exc'
+        var thisParam  = role === 'inc' ? paramInc : paramExc;
+        var otherParam = role === 'inc' ? paramExc : paramInc;
+        var li = cb.closest('li');
+        // sibling checkbox (the opposite role for the same tag)
+        var sib = li ? li.querySelector('input[data-role="' + (role === 'inc' ? 'exc' : 'inc') + '"]') : null;
+
+        var url = new URL(window.location);
+        // Drop tagId from the OPPOSITE param (mutually exclusive: a tag
+        // cannot be both included and excluded simultaneously).
+        var otherVals = url.searchParams.getAll(otherParam).filter(function(v) { return v !== tagId; });
+        url.searchParams.delete(otherParam);
+        otherVals.forEach(function(v) { url.searchParams.append(otherParam, v); });
+
+        // Toggle THIS param: add if checked, drop if unchecked.
+        var thisVals = url.searchParams.getAll(thisParam).filter(function(v) { return v !== tagId; });
+        url.searchParams.delete(thisParam);
+        thisVals.forEach(function(v) { url.searchParams.append(thisParam, v); });
+        if (cb.checked) url.searchParams.append(thisParam, tagId);
+
+        // Visual feedback before navigation
+        if (sib && cb.checked) sib.checked = false;
+        if (li) {
+            li.classList.toggle('included', li.querySelector('input[data-role="inc"]').checked);
+            li.classList.toggle('excluded', li.querySelector('input[data-role="exc"]').checked);
+        }
+
+        window.location = url.toString();
+    }
+    document.querySelectorAll('.filter-mxe input[type=checkbox][data-tag-id]').forEach(function(cb) {
+        cb.addEventListener('change', function() { handle(cb); });
+    });
+})();
+</script>

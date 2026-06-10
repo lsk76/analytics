@@ -1,0 +1,130 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .cf-wrap { padding: 12px 18px; }
+  .cf-filters { background: var(--darkened-bg, #f8f8f8); padding: 12px 14px; border-radius: 6px;
+                margin-bottom: 14px; }
+  .cf-filters .row { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .cf-filters fieldset { border: 1px solid var(--hairline-color, #ccc); padding: 6px 10px; border-radius: 4px;
+                         max-height: 160px; overflow-y: auto; }
+  .cf-filters legend { padding: 0 6px; font-size: 12px; color: var(--body-quiet-color); }
+  .cf-filters label { font-size: 12px; display: block; }
+  .cf-filters input[type=date], .cf-filters input[type=number] { width: 130px; }
+  .cf-actions { margin-top: 10px; }
+  .cf-actions button { padding: 6px 14px; }
+
+  .matrix { border-collapse: collapse; font-size: 11px; }
+  .matrix th, .matrix td { border: 1px solid var(--hairline-color, #ddd);
+                           padding: 3px 5px; text-align: center; }
+  .matrix th.row-h { text-align: right; padding-right: 8px; max-width: 160px;
+                     white-space: nowrap; font-weight: 600; }
+  .matrix th.col-h {
+      writing-mode: vertical-rl; transform: rotate(180deg);
+      max-height: 140px; vertical-align: bottom; padding: 6px 2px;
+      font-weight: 600; font-size: 11px;
+  }
+  .matrix td { font-variant-numeric: tabular-nums; min-width: 32px; }
+  .matrix td.zero { color: #aaa; }
+  .matrix td.cell { cursor: pointer; }
+  .matrix td.cell:hover { outline: 2px solid #0a5; }
+  .matrix td a { color: inherit; text-decoration: none; display: block; }
+  .matrix .total { font-weight: 600; background: var(--darkened-bg, #f3f3f3); }
+  .legend { font-size: 11px; color: var(--body-quiet-color); margin-top: 8px; }
+  .summary { margin-bottom: 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cf-wrap">
+  <h1>{{ title }}</h1>
+
+  <form method="get" class="cf-filters">
+    <div class="row">
+      <fieldset>
+        <legend>Регіони (Ctrl-клік для кількох)</legend>
+        {% for r in all_regions %}
+          <label>
+            <input type="checkbox" name="region_id" value="{{ r.id }}"
+              {% if r.checked %}checked{% endif %}>
+            {{ r.name }}
+          </label>
+        {% endfor %}
+      </fieldset>
+
+      <fieldset>
+        <legend>Тип конфлікту</legend>
+        {% for c in all_conflicts %}
+          <label>
+            <input type="checkbox" name="conflict" value="{{ c }}"
+              {% if c in selected_conflicts %}checked{% endif %}>
+            {{ c }}
+          </label>
+        {% endfor %}
+      </fieldset>
+
+      <fieldset>
+        <legend>Період</legend>
+        <label>Від: <input type="date" name="date_from" value="{{ date_from }}"></label>
+        <label>До: <input type="date" name="date_to" value="{{ date_to }}"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Параметри</legend>
+        <label>
+          <input type="checkbox" name="include_intra" value="1"
+            {% if include_intra %}checked{% endif %}>
+          Показати інтра-етн (діагональ)
+        </label>
+        <label>Мін. кількість в клітинці:
+          <input type="number" name="min_count" min="1" value="{{ min_count }}">
+        </label>
+      </fieldset>
+    </div>
+    <div class="cf-actions">
+      <button type="submit" class="default">↻ Оновити</button>
+      <a href="?" class="button">Скинути</a>
+    </div>
+  </form>
+
+  <div class="summary">
+    Всього подій під фільтр: <strong>{{ events_total }}</strong>;
+    унікальних національностей у матриці: <strong>{{ nations|length }}</strong>.
+    Клік по клітинці → відкриє список подій з цим перетином тегів.
+  </div>
+
+  {% if nations %}
+  <table class="matrix">
+    <thead>
+      <tr>
+        <th></th>
+        {% for n in nations %}<th class="col-h">{{ n }}</th>{% endfor %}
+        <th class="col-h">Всього</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in grid %}
+      <tr>
+        <th class="row-h">{{ row.name }}</th>
+        {% for c in row.cells %}
+          <td class="cell {% if c.v == 0 %}zero{% endif %}"
+              style="background: {{ c.bg }}; color: {{ c.fg }};">
+            {% if c.v %}<a href="{{ c.url }}" title="{{ c.title }}">{{ c.v }}</a>{% else %}·{% endif %}
+          </td>
+        {% endfor %}
+        <td class="total">{{ row.total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="legend">
+    Колір: інтенсивність червоного = відносна частота в матриці (max = {{ max_cell }}).
+    Колонка «Всього» = у скількох подіях у фільтрі згадано цю національність.
+  </div>
+  {% else %}
+  <p>Жодної національності не знайдено під поточний фільтр.</p>
+  {% endif %}
+</div>
+{% endblock %}

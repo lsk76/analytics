@@ -68,8 +68,12 @@ document.addEventListener('DOMContentLoaded', function() {
     container.innerHTML = '<div class="loading">⏳ Будую графіки…</div>';
     const qs = new URLSearchParams(window.location.search);
     qs.set('_fragment', '1');
+    // Cache-buster: forces re-fetch even when an older copy lives in the
+    // browser disk cache (the `Cache-Control: no-store` header only affects
+    // FUTURE requests, not the already-cached one users may have).
+    qs.set('_ts', Date.now().toString());
     return fetch('{% url "admin:analysis_event_charts" %}?' + qs.toString(),
-                 { credentials: 'same-origin' })
+                 { credentials: 'same-origin', cache: 'no-store' })
       .then(r => r.text())
       .then(html => {
         container.innerHTML = html;

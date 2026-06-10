@@ -238,6 +238,10 @@ class Region(models.Model):
     ]
     name = models.CharField(max_length=120, unique=True, verbose_name="Назва (канонічна)")
     kind = models.CharField(max_length=20, choices=KIND_CHOICES, blank=True, verbose_name="Тип")
+    population = models.BigIntegerField(
+        null=True, blank=True, verbose_name="Населення",
+        help_text="К-сть мешканців (для нормалізації подій per-100k).",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:
@@ -458,6 +462,18 @@ class Event(models.Model):
     )
     settlement = models.CharField(max_length=160, blank=True, verbose_name="Населений пункт")
     tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Сторони/теги")
+    # Hand-validated attacker / victim ethnic groups (subset of nationality tags).
+    # Empty for pre-2026 events; populated as the corpus is audited per-region.
+    attacker_tags = models.ManyToManyField(
+        Tag, blank=True, related_name="events_as_attacker",
+        verbose_name="Етнос — нападник",
+        help_text="Лише nationality-теги; задайте після ручної верифікації.",
+    )
+    victim_tags = models.ManyToManyField(
+        Tag, blank=True, related_name="events_as_victim",
+        verbose_name="Етнос — жертва",
+        help_text="Лише nationality-теги; задайте після ручної верифікації.",
+    )
     summary = models.TextField(blank=True, verbose_name="Опис")
     post_count = models.PositiveIntegerField(default=0, verbose_name="Кількість постів")
     channel_count = models.PositiveIntegerField(

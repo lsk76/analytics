@@ -46,17 +46,53 @@ def facet_base(changelist, request, exclude_spec):
 
 class TagCategoryMultiSelectFilter(MultiSelectFilter):
     """
-    Faceted multi-select for tags of ONE category:
-      * shows only tags PRESENT in the current selection (other filters applied);
-      * each option carries the number of events that would remain.
-    Within a category the selected tags are OR-ed; across categories — AND-ed.
+    Faceted per-tag include/exclude widget for ONE category.
+
+    Each tag has TWO checkboxes side-by-side:
+      ✓ — include this tag (events that HAVE it)
+      ✗ — exclude this tag (events that DON'T have it)
+    Different tags in the same category can be marked differently, e.g. tag A
+    included while tag B excluded. The two checkboxes for the same tag are
+    mutually exclusive (the JS enforces this).
+
+    URL representation:
+      ?tag_<cat>=<id>      — include (multi-value; OR-ed within category)
+      ?tag_<cat>_excl=<id> — exclude (multi-value)
+    Combined: queryset .filter(include).exclude(exclude). Across categories
+    it's still AND.
     """
     category = None
+    template = "admin/filters/multi_select_with_exclude.html"
 
-    def filter_queryset(self, queryset, values):
+    @property
+    def exclude_param(self):
+        return f"{self.parameter_name}_excl"
+
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        # SimpleListFilter pops only `parameter_name` from lookup_params; the
+        # exclude companion would otherwise leak into queryset.filter() and
+        # crash. Pop it here so Django stops treating it as a field lookup.
+        params.pop(self.exclude_param, None)
+
+    def expected_parameters(self):
+        return [self.parameter_name, self.exclude_param]
+
+    def queryset(self, request, queryset):
+        # We override queryset (instead of filter_queryset) because we have
+        # TWO param families to apply, not one.
+        inc = self.request.GET.getlist(self.parameter_name)
+        exc = self.request.GET.getlist(self.exclude_param)
+        if inc:
+            queryset = queryset.filter(tags__id__in=inc).distinct()
+        if exc:
+            queryset = queryset.exclude(tags__id__in=exc).distinct()
+        return queryset
+
+    def filter_queryset(self, queryset, values):  # kept for base-class contract
         return queryset.filter(tags__id__in=values)
 
-    def lookups(self, request, model_admin):  # fallback; choices() does the real work
+    def lookups(self, request, model_admin):  # ensures has_output()
         return [(str(t.id), t.name)
                 for t in Tag.objects.filter(category=self.category).order_by("name")]
 
@@ -64,31 +100,37 @@ class TagCategoryMultiSelectFilter(MultiSelectFilter):
         return facet_base(changelist, self.request, self)
 
     def choices(self, changelist):
-        selected = self.request.GET.getlist(self.parameter_name)
+        """Yield one item per tag with `included` AND `excluded` flags.
+
+        The first item is the standard "All" reset link that clears BOTH
+        include and exclude sets for this category.
+        """
+        included = self.request.GET.getlist(self.parameter_name)
+        excluded = self.request.GET.getlist(self.exclude_param)
         yield {
-            "selected": len(selected) == 0,
-            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+            "selected": not (included or excluded),
+            "query_string": changelist.get_query_string(
+                remove=[self.parameter_name, self.exclude_param]),
             "display": _("All"),
             "value": "__all__",
         }
         base = self._facet_base(changelist)
-        # materialize event ids first — base may carry .distinct()/M2M joins that
-        # corrupt a grouped annotate; count on a clean queryset instead
         ids = list(base.values_list("pk", flat=True).distinct())
         rows = (Event.objects.filter(pk__in=ids, tags__category=self.category)
                 .values("tags__id", "tags__name")
                 .annotate(n=Count("pk", distinct=True)))
         present = {str(r["tags__id"]): (r["tags__name"], r["n"]) for r in rows}
-        # keep currently-selected tags visible even if they yield 0 now
-        for tid in selected:
+        # Keep currently-selected (include OR exclude) tags visible even if
+        # they yield 0 in the current facet — else the user can't untick them.
+        for tid in set(included) | set(excluded):
             if tid not in present:
                 t = Tag.objects.filter(id=tid).first()
                 if t:
                     present[tid] = (t.name, 0)
         for tid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
             yield {
-                "selected": tid in selected,
-                "query_string": "",
+                "included": tid in included,
+                "excluded": tid in excluded,
                 "display": f"{name} ({n})",
                 "value": tid,
             }
@@ -410,6 +452,59 @@ ChannelCountFilter = NumericRangeFilterBuilder(title="К-сть каналів")
 ReachFilter = NumericRangeFilterBuilder(title="Охоплення")
 
 
+class InterEthnicFilter(admin.SimpleListFilter):
+    """
+    Slice events by how many distinct nationality tags they carry.
+
+    Definitions:
+      * inter  — ≥2 distinct tags with category='nationality' (the loose
+        "inter-ethnic" heuristic — two ethnicities tagged on the same event)
+      * mono   — exactly 1 nationality tag (intra-ethnic OR one side untagged)
+      * audit  — both `attacker_tags` and `victim_tags` non-empty (only the
+        ~hundred events we hand-audited; strictest signal of inter-ethnic
+        framing because sides are explicit, not co-occurrence)
+      * none   — no nationality tag at all (review/enrich gap)
+    """
+    title = "Етнічність сторін"
+    parameter_name = "ethnicity"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("inter", "Міжетнічні (≥2 нац. теги)"),
+            ("mono",  "Моноетнічні (1 нац. тег)"),
+            ("audit", "Аудит: сторони визначені"),
+            ("none",  "Без нац. тегів"),
+        ]
+
+    def queryset(self, request, queryset):
+        from django.db.models import Q
+        v = self.value()
+        if v == "inter":
+            return (queryset
+                    .annotate(_n_nat=Count("tags",
+                                            filter=Q(tags__category="nationality"),
+                                            distinct=True))
+                    .filter(_n_nat__gte=2))
+        if v == "mono":
+            return (queryset
+                    .annotate(_n_nat=Count("tags",
+                                            filter=Q(tags__category="nationality"),
+                                            distinct=True))
+                    .filter(_n_nat=1))
+        if v == "none":
+            return (queryset
+                    .annotate(_n_nat=Count("tags",
+                                            filter=Q(tags__category="nationality"),
+                                            distinct=True))
+                    .filter(_n_nat=0))
+        if v == "audit":
+            return (queryset
+                    .annotate(_n_att=Count("attacker_tags", distinct=True),
+                              _n_vic=Count("victim_tags", distinct=True))
+                    .filter(_n_att__gte=1, _n_vic__gte=1))
+        return queryset
+
+
 class JobPeriodFilter(admin.SimpleListFilter):
     """Filter posts by a collect job — posts of that job's task within its period."""
     title = "Збір (job)"
@@ -453,12 +548,196 @@ class EventAdmin(admin.ModelAdmin):
         custom = [
             path("charts/", self.admin_site.admin_view(self.charts_view),
                  name="analysis_event_charts"),
+            path("conflicts/", self.admin_site.admin_view(self.conflicts_view),
+                 name="analysis_event_conflicts"),
         ]
         return custom + super().get_urls()
 
-    # query params owned by the charts page (NOT changelist filter lookups)
+    PRESET_HOTSPOT_REGIONS = [
+        "Бурятія", "Саха (Якутія)", "Тива", "Татарстан",
+        "Башкортостан", "Чечня", "Інгушетія", "Дагестан",
+    ]
+
+    def conflicts_view(self, request):
+        """Inter-ethnic tension explorer. Builds a co-occurrence matrix of
+        nationality tags within the filtered event set: cell (A, B) is the
+        number of events where BOTH A and B appear (it's not a strict
+        attacker→victim mapping — the schema doesn't have that — but a
+        heatmap of which ethnicities show up together in incidents).
+
+        Filters via GET params (so a URL can be shared / bookmarked as a
+        saved query):
+          ?region_id=1&region_id=2     — RF subjects (default: 8 hotspots)
+          ?date_from=YYYY-MM-DD&date_to=...
+          ?conflict=напад&conflict=бійка   — restrict to conflict tags
+          ?include_intra=1             — include self-pairs (A↔A)
+          ?min_count=N                 — hide cells below threshold
+        """
+        from django.db.models import Count
+        from collections import defaultdict
+
+        # ---- parse filters ----------------------------------------------------
+        region_ids = [int(x) for x in request.GET.getlist("region_id") if x.isdigit()]
+        date_from = request.GET.get("date_from") or ""
+        date_to = request.GET.get("date_to") or ""
+        conflict_filter = request.GET.getlist("conflict")
+        include_intra = request.GET.get("include_intra") == "1"
+        try:
+            min_count = max(1, int(request.GET.get("min_count", 2)))
+        except (TypeError, ValueError):
+            min_count = 2
+
+        # Default to the 8 hotspot regions if user hasn't picked any
+        if not region_ids:
+            hotspots = list(Region.objects.filter(
+                name__in=self.PRESET_HOTSPOT_REGIONS).values_list("id", flat=True))
+            region_ids = hotspots
+
+        # ---- base queryset (events satisfying the filters) -------------------
+        qs = Event.objects.filter(review_status=Event.REVIEW_APPROVED)
+        if region_ids:
+            qs = qs.filter(region_subject_id__in=region_ids)
+        if date_from:
+            qs = qs.filter(event_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(event_date__lte=date_to)
+        if conflict_filter:
+            qs = qs.filter(tags__name__in=conflict_filter,
+                           tags__category="conflict").distinct()
+        # Per-tag exclusions (parallel to the changelist's include set).
+        # URL form: ?tag_<cat>_excl=<id>… — drops events carrying any of these.
+        for _cat_key in TagCategory.objects.values_list("key", flat=True):
+            ids = [int(x) for x in request.GET.getlist(f"tag_{_cat_key}_excl")
+                   if x.isdigit()]
+            if ids:
+                qs = qs.exclude(tags__id__in=ids)
+
+        # ---- build the matrix -------------------------------------------------
+        # event_id -> set(nationality_name)
+        from analysis.models import Tag as _Tag
+        nat_map = defaultdict(set)
+        for et in (qs.values("id")
+                     .annotate(nat_id=Count("tags__id"))
+                     .values_list("id", flat=True)):
+            pass        # noqa — touch qs to force load? no — direct iteration:
+
+        rows = (qs.filter(tags__category="nationality")
+                  .values_list("id", "tags__name"))
+        for eid, nat in rows:
+            if nat:
+                nat_map[eid].add(nat)
+
+        # symmetric co-occurrence + diagonal (intra-ethnic = single-nat events)
+        matrix = defaultdict(int)         # (A, B) sorted -> count
+        diagonal = defaultdict(int)
+        nat_totals = defaultdict(int)     # total events mentioning A
+        for eid, nats in nat_map.items():
+            nats = list(nats)
+            for n in nats:
+                nat_totals[n] += 1
+            if len(nats) == 1:
+                diagonal[nats[0]] += 1
+            else:
+                for i, a in enumerate(nats):
+                    for b in nats[i + 1:]:
+                        key = tuple(sorted((a, b)))
+                        matrix[key] += 1
+
+        # union of all nations used; sort by total volume
+        all_nats = sorted(nat_totals.keys(),
+                          key=lambda n: (-nat_totals[n], n))
+
+        # render only nations involved in at least one cell >= min_count
+        visible = {n for n in all_nats
+                   if (include_intra and diagonal[n] >= min_count)
+                   or any((tuple(sorted((n, m))) in matrix
+                           and matrix[tuple(sorted((n, m)))] >= min_count)
+                          for m in all_nats if m != n)}
+        nations = [n for n in all_nats if n in visible]
+
+        # first pass — compute raw values and max
+        max_cell = 1
+        raw = {}
+        for a in nations:
+            for b in nations:
+                if a == b:
+                    v = diagonal[a] if include_intra else 0
+                else:
+                    v = matrix.get(tuple(sorted((a, b))), 0)
+                raw[(a, b)] = v
+                if v > max_cell:
+                    max_cell = v
+
+        # drill-down URLs per cell — open events list with the same filter + tags
+        from django.urls import reverse
+        from django.http import QueryDict
+        cl_url = reverse("admin:analysis_event_changelist")
+        tag_ids = {t.name: t.id for t in
+                   _Tag.objects.filter(category="nationality", name__in=nations)}
+
+        def cell_url(a, b):
+            qd = QueryDict("", mutable=True)
+            for rid in region_ids:
+                qd.appendlist("region_id", str(rid))
+            if date_from:
+                qd["event_date__gte"] = date_from
+            if date_to:
+                qd["event_date__lte"] = date_to
+            ids = [tag_ids[a]] if a == b else [tag_ids[a], tag_ids[b]]
+            for tid in ids:
+                qd.appendlist("tag_nationality", str(tid))
+            return f"{cl_url}?{qd.urlencode()}"
+
+        # second pass — assemble fully-rendered cells (template-friendly)
+        grid = []
+        for a in nations:
+            row_cells = []
+            for b in nations:
+                v = raw[(a, b)]
+                alpha = (v / max_cell) if max_cell and v else 0
+                bg = (f"rgba(220,40,40,{alpha:.3f})" if v else "transparent")
+                fg = "#fff" if alpha > 0.5 else "#000"
+                row_cells.append({
+                    "v": v, "url": cell_url(a, b),
+                    "bg": bg, "fg": fg,
+                    "title": f"{a} × {b}: {v} подій",
+                })
+            grid.append({"name": a, "total": nat_totals[a], "cells": row_cells})
+
+        # filter form: list available regions + conflict tags for the dropdowns
+        all_regions = list(Region.objects.order_by("name").values("id", "name"))
+        all_conflicts = list(_Tag.objects.filter(category="conflict")
+                               .order_by("name").values_list("name", flat=True))
+        # what's currently selected (for re-rendering the form)
+        sel_region_ids = set(region_ids)
+        for r in all_regions:
+            r["checked"] = r["id"] in sel_region_ids
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "title": "Аналітика конфліктів — co-occurrence",
+            "opts": self.model._meta,
+            "has_view_permission": True,
+            "events_total": qs.distinct().count(),
+            "nations": nations,
+            "grid": grid,
+            "max_cell": max_cell,
+            "include_intra": include_intra,
+            "min_count": min_count,
+            "all_regions": all_regions,
+            "all_conflicts": all_conflicts,
+            "selected_conflicts": conflict_filter,
+            "date_from": date_from, "date_to": date_to,
+        }
+        return render(request, "admin/analysis/event/conflicts.html", ctx)
+
+    # query params owned by the charts page (NOT changelist filter lookups).
+    # `_ts` is a cache-buster added by the inline-charts JS to defeat any
+    # browser disk cache when the template layout changes — strip it so
+    # ChangeList doesn't try to resolve it as a model field.
     _CHART_PARAMS = ("gran", "tag_cats", "tag_top", "tag_chart", "tag_cols",
-                     "region_top", "channel_top", "label_max", "_fragment")
+                     "region_top", "channel_top", "label_max",
+                     "_fragment", "_ts")
 
     def charts_view(self, request):
         """Charts page — reuses the changelist filters so charts reflect EXACTLY what
@@ -580,8 +859,10 @@ class EventAdmin(admin.ModelAdmin):
             d_from, d_to = bucket_range(r["bucket"])
             url, samples = "", []
             if d_from is not None:
-                url = drill_url({"event_date__gte": d_from.isoformat(),
-                                  "event_date__lte": d_to.isoformat()})
+                # Use the rangefilter's canonical param names so the date inputs
+                # in the sidebar pre-fill correctly after the click-through.
+                url = drill_url({"event_date__range__gte": d_from.isoformat(),
+                                 "event_date__range__lte": d_to.isoformat()})
                 samples = samples_for(qs.filter(event_date__gte=d_from,
                                                 event_date__lte=d_to))
             timeseries.append({
@@ -594,21 +875,118 @@ class EventAdmin(admin.ModelAdmin):
             })
 
         # ---- breakdowns -------------------------------------------------------
-        # top RF subjects — include id + URL + samples
+        # RF subjects (ALL with events, not just top-N): events count +
+        # summed reach + per-100k normalised by Region.population. The old
+        # standalone per-100k bar chart was folded into this one, so the
+        # single chart now carries all three metrics side-by-side.
+        # `.order_by()` clears the changelist's default sort so it doesn't
+        # leak into GROUP BY (otherwise we'd get 1 row per event with
+        # count=1 — same bug we hit on rep_totals_map).
         by_region_raw = list(
             qs.exclude(region_subject__isnull=True)
+              .order_by()
               .values("region_subject_id", "region_subject__name")
-              .annotate(count=Count("id"))
-              .order_by("-count")[:region_top]
+              .annotate(count=Count("id", distinct=True),
+                        reach=Sum("reach"))
+              .order_by("-count")
+        )
+        pops = dict(
+            Region.objects.filter(id__in=[r["region_subject_id"] for r in by_region_raw],
+                                   population__isnull=False)
+                          .values_list("id", "population")
         )
         by_region = []
         for r in by_region_raw:
             rid = r.pop("region_subject_id")
             name = r.pop("region_subject__name")
-            row = {"id": rid, "name": name, "count": r["count"]}
+            pop = pops.get(rid)
+            reach_v = int(r["reach"] or 0)
+            per_100k = round(100000.0 * r["count"] / pop, 2) if pop else 0
+            # Reach normalised by population — comparable across regions of
+            # very different sizes (e.g. Buryatia 970k vs Moscow 13M).
+            reach_per_100k = int(100000.0 * reach_v / pop) if pop else 0
+            row = {
+                "id": rid, "name": name,
+                "count": r["count"],
+                "reach": reach_v,
+                "per_100k": per_100k,
+                "reach_per_100k": reach_per_100k,
+                "population": pop,
+            }
             row["url"] = drill_url({"region_id": [rid]})
             row["samples"] = samples_for(qs.filter(region_subject_id=rid))
             by_region.append(row)
+
+        # Republic-focused breakdown: time series PER region + per-100k normalised.
+        # Use every region present in the FILTERED qs (so changelist filters such
+        # as date/tag/etc. propagate). Only regions with a populated `population`
+        # field can be shown — per-100k is meaningless otherwise.
+        rep_ids_in_qs = list(
+            qs.exclude(region_subject_id__isnull=True)
+              .values_list("region_subject_id", flat=True)
+              .distinct()
+        )
+        # Allow explicit override via ?republic_id=… ; otherwise take everything
+        # in qs (still gated by `population IS NOT NULL` below).
+        rep_ids_param = [int(x) for x in request.GET.getlist("republic_id") if x.isdigit()]
+        rep_ids = rep_ids_param or rep_ids_in_qs
+        republics = list(Region.objects.filter(id__in=rep_ids, population__isnull=False)
+                         .order_by("name").values("id", "name", "population"))
+        # ts: (bucket, region_id) → count (distinct for the same JOIN reason)
+        rep_ts_rows = list(
+            qs.filter(region_subject_id__in=rep_ids)
+              .exclude(event_date__isnull=True)
+              .annotate(bucket=trunc("event_date"))
+              .values("bucket", "region_subject_id")
+              .annotate(events=Count("id", distinct=True))
+              .order_by("bucket")
+        )
+        # totals per republic (events overall + per-100k). distinct=True because
+        # `qs` may already have JOINs from changelist tag filters; without it,
+        # M2M tag rows multiply each event into its number of tags. `.order_by()`
+        # is critical: the changelist passes its own ordering (event_date, id)
+        # which Django silently appends to GROUP BY → one row per event with
+        # COUNT=1. Clearing ordering makes the GROUP BY honour only our keys.
+        rep_totals_map = {}
+        for row in (qs.filter(region_subject_id__in=rep_ids)
+                      .order_by()
+                      .values("region_subject_id")
+                      .annotate(events=Count("id", distinct=True))):
+            rep_totals_map[row["region_subject_id"]] = row["events"]
+
+        by_republic_total = []
+        for r in republics:
+            total = rep_totals_map.get(r["id"], 0)
+            per_100k = (100000.0 * total / r["population"]) if r["population"] else 0
+            by_republic_total.append({
+                "id": r["id"], "name": r["name"], "population": r["population"],
+                "count": total, "per_100k": round(per_100k, 2),
+                "url": drill_url({"region_id": [r["id"]]}),
+            })
+
+        # republic timeseries: assemble {bucket → {name → count, name_per_100k → ...}}
+        # Each (republic, bucket) cell also carries a drill-down URL combining
+        # the region filter AND the bucket's date range — so clicking a point
+        # on the line chart lands on EXACTLY those events.
+        rep_by_id = {r["id"]: r for r in republics}
+        buckets = sorted({row["bucket"] for row in rep_ts_rows if row["bucket"]})
+        republic_timeseries = []
+        for b in buckets:
+            d_from, d_to = bucket_range(b)
+            entry = {"date": b.isoformat()}
+            for rid, rep in rep_by_id.items():
+                cnt = next((row["events"] for row in rep_ts_rows
+                            if row["bucket"] == b and row["region_subject_id"] == rid), 0)
+                entry[rep["name"]] = cnt
+                if rep["population"]:
+                    entry[rep["name"] + "_per_100k"] = round(
+                        100000.0 * cnt / rep["population"], 3)
+                entry[rep["name"] + "_url"] = drill_url({
+                    "region_id": [rid],
+                    "event_date__range__gte": d_from.isoformat(),
+                    "event_date__range__lte": d_to.isoformat(),
+                }) if d_from else ""
+            republic_timeseries.append(entry)
 
         by_tag = []   # list of {category, label, rows: [{id, name, count, url, samples}]}
         for c in all_cats:
@@ -653,12 +1031,16 @@ class EventAdmin(admin.ModelAdmin):
             ("21–100",      21,   100),
             ("100+",        101,  10**9),
         ]
+        # Buckets drill into the rangefilter widgets — use their canonical
+        # `<field>__range__gte/lte` param names. Plain `reach_min`/`reach_max`
+        # don't exist as model fields and were being kicked to `?e=1`.
         by_reach_bucket = []
         for label, lo, hi in REACH_BUCKETS:
             n = qs.filter(reach__gte=lo, reach__lte=hi).count()
             by_reach_bucket.append({
                 "name": label, "count": n,
-                "url": drill_url({"reach_min": lo, "reach_max": hi}),
+                "url": drill_url({"reach__range__gte": lo,
+                                  "reach__range__lte": hi}),
                 "samples": [],
             })
         by_channel_count_bucket = []
@@ -666,7 +1048,8 @@ class EventAdmin(admin.ModelAdmin):
             n = qs.filter(channel_count__gte=lo, channel_count__lte=hi).count()
             by_channel_count_bucket.append({
                 "name": label, "count": n,
-                "url": drill_url({"channel_count_min": lo, "channel_count_max": hi}),
+                "url": drill_url({"channel_count__range__gte": lo,
+                                  "channel_count__range__lte": hi}),
                 "samples": [],
             })
 
@@ -730,17 +1113,20 @@ class EventAdmin(admin.ModelAdmin):
         # ---- filter panel: option lists + currently-selected values ---------
         all_tasks_list = list(AnalysisTask.objects.order_by("name").values("id", "name"))
         all_regions_list = list(Region.objects.order_by("name").values("id", "name"))
-        # tags per (currently displayed) category — for the filter dropdowns
-        tag_options = []     # [{key, label, tags: [{id, name}], selected: [<id>...] }]
+        # tags per (currently displayed) category — for the filter dropdowns.
+        # Each category exposes two parallel multi-selects: include + exclude.
+        tag_options = []  # [{key, label, tags, selected, selected_exclude}]
         for c in all_cats:
             if c.key not in tag_cats_selected:
                 continue
-            sel = request.GET.getlist(f"tag_{c.key}")
+            sel_inc = request.GET.getlist(f"tag_{c.key}")
+            sel_exc = request.GET.getlist(f"tag_{c.key}_excl")
             tag_options.append({
                 "key": c.key, "label": c.label,
                 "tags": list(Tag.objects.filter(category=c.key)
                              .order_by("name").values("id", "name")),
-                "selected": sel,
+                "selected": sel_inc,
+                "selected_exclude": sel_exc,
             })
         # Filter form owns: every changelist-filter param. So passthrough = all chart
         # params only (gran, tag_*, region_top, channel_top, label_max).
@@ -761,7 +1147,13 @@ class EventAdmin(admin.ModelAdmin):
             selected_filters["task"], selected_filters["review_status"],
             selected_filters["is_corroborated"], selected_filters["regions"],
             any(opt["selected"] for opt in tag_options),
+            any(opt["selected_exclude"] for opt in tag_options),
         ])
+
+        # Chart height scales with the number of regions. We render 4 bars
+        # per region (events / reach / events-per-100k / reach-per-100k) so
+        # each needs vertical room — ~130 px per region.
+        by_region_height = max(280, 60 + 130 * len(by_region))
 
         ctx = {
             **self.admin_site.each_context(request),
@@ -780,6 +1172,7 @@ class EventAdmin(admin.ModelAdmin):
             "region_top": region_top,
             "channel_top": channel_top,
             "label_max": label_max,
+            "by_region_height": by_region_height,
             "passthrough_pairs": passthrough_pairs,
             "regiontop_passthrough": regiontop_passthrough,
             "channeltop_passthrough": channeltop_passthrough,
@@ -798,14 +1191,23 @@ class EventAdmin(admin.ModelAdmin):
                 "by_channel": list(by_channel),
                 "by_reach_bucket": by_reach_bucket,
                 "by_channel_count_bucket": by_channel_count_bucket,
+                "republics": [r["name"] for r in republics],
+                "republic_timeseries": republic_timeseries,
+                "by_republic_total": by_republic_total,
                 "gran": gran,
                 "tag_chart": tag_chart,
                 "label_max": label_max,
             }, ensure_ascii=False, default=str),
         }
-        if is_fragment:
-            return render(request, "admin/analysis/event/charts_fragment.html", ctx)
-        return render(request, "admin/analysis/event/charts.html", ctx)
+        # Tell the browser NOT to cache — charts are highly dynamic (filter
+        # changes + template edits both invalidate). Without this, browsers
+        # sometimes serve a stale fragment when only the layout (template)
+        # changed but the URL stayed the same.
+        tmpl = ("admin/analysis/event/charts_fragment.html" if is_fragment
+                else "admin/analysis/event/charts.html")
+        resp = render(request, tmpl, ctx)
+        resp["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resp
 
     def changelist_view(self, request, extra_context=None):
         # forward the current querystring to the "Графіки" link
@@ -815,11 +1217,28 @@ class EventAdmin(admin.ModelAdmin):
         # users navigate from the inline charts view (e.g. clicking week/month buttons).
         # Django admin would treat them as field lookups and reject with `?e=1`,
         # so strip them here BEFORE the changelist processes the request.
-        if any(p in request.GET for p in self._CHART_PARAMS):
+        needs_rewrite = (
+            any(p in request.GET for p in self._CHART_PARAMS)
+            # Legacy: bookmarks with tag_<cat>_mode=exclude — convert in place
+            # so old links keep working. Same for spurious _mode keys we now ignore.
+            or any(k.endswith("_mode") and k.startswith("tag_") for k in request.GET)
+        )
+        if needs_rewrite:
             from django.http import QueryDict
             clean = QueryDict(request.GET.urlencode(), mutable=True)
             for p in self._CHART_PARAMS:
                 clean.pop(p, None)
+            # Legacy `_mode=exclude` → migrate to the new `_excl` param family.
+            for key in list(clean.keys()):
+                if not (key.startswith("tag_") and key.endswith("_mode")):
+                    continue
+                base = key[:-5]                        # 'tag_status_mode' → 'tag_status'
+                mode = clean.get(key, "")
+                clean.pop(key, None)
+                if mode == "exclude" and base in clean:
+                    vals = clean.getlist(base)
+                    clean.pop(base, None)             # was include; convert to exclude
+                    clean.setlist(f"{base}_excl", vals)
             request.GET = clean
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -831,6 +1250,7 @@ class EventAdmin(admin.ModelAdmin):
             ("event_date", DateRangeFilterBuilder(title="Період")),
             TaskFilter,
             "review_status",
+            InterEthnicFilter,
             SubjectFilter,
             *cat_filters,
             ChannelFilter,

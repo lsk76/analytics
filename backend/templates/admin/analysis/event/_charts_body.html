@@ -49,10 +49,19 @@
           </select>
         </label>
         {% for opt in tag_options %}
-          <label class="multi">{{ opt.label }}
+          <label class="multi">
+            <span style="color:#2e7d32">✓ {{ opt.label }} (включити)</span>
             <select name="tag_{{ opt.key }}" multiple size="6">
               {% for tg in opt.tags %}
                 <option value="{{ tg.id }}" {% if tg.id|stringformat:"s" in opt.selected %}selected{% endif %}>{{ tg.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="multi">
+            <span style="color:#b3261e">✗ {{ opt.label }} (виключити)</span>
+            <select name="tag_{{ opt.key }}_excl" multiple size="6" style="border-color:#b3261e">
+              {% for tg in opt.tags %}
+                <option value="{{ tg.id }}" {% if tg.id|stringformat:"s" in opt.selected_exclude %}selected{% endif %}>{{ tg.name }}</option>
               {% endfor %}
             </select>
           </label>
@@ -95,14 +104,13 @@
       </div>
 
       <div class="chart-card full">
-        <h3>Топ суб'єктів РФ
-          <form method="get" class="inline-top">
-            {% for k, vals in regiontop_passthrough %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endfor %}
-            <label>Топ&nbsp;<input type="number" name="region_top" value="{{ region_top }}" min="3" max="200" step="1"></label>
-            <button type="submit" class="default">↻</button>
-          </form>
-        </h3>
-        <div class="chart-canvas-wrap tall"><canvas id="ch_region"></canvas></div>
+        <h3>Суб'єкти: події <small style="font-weight:normal;color:var(--body-quiet-color)">+ сумарне охоплення</small></h3>
+        <div class="chart-canvas-wrap" style="height: {{ by_region_height }}px"><canvas id="ch_region"></canvas></div>
+      </div>
+
+      <div class="chart-card full">
+        <h3>Суб'єкти: події на 100k населення по часу</h3>
+        <div class="chart-canvas-wrap tall"><canvas id="ch_rep_ts100k"></canvas></div>
       </div>
 
       <div class="chart-card full">
@@ -124,6 +132,11 @@
       <div class="chart-card full">
         <h3>Розподіл за кількістю каналів</h3>
         <div class="chart-canvas-wrap"><canvas id="ch_chan_bucket"></canvas></div>
+      </div>
+
+      <div class="chart-card full">
+        <h3>Суб'єкти: події по часу</h3>
+        <div class="chart-canvas-wrap tall"><canvas id="ch_rep_ts"></canvas></div>
       </div>
     </div>
 
@@ -316,7 +329,94 @@ function initCharts() {
       },
     });
   };
-  horizBar(document.getElementById('ch_region'),  DATA.by_region,  PALETTE[3]);
+  // Subjects: 4 metrics on the same chart — events count, total reach,
+  // events per-100k population, reach per-100k population.  Four datasets
+  // on four separate X-axes because magnitudes differ wildly.
+  (function() {
+    const ctx = document.getElementById('ch_region');
+    const rows = DATA.by_region || [];
+    if (!ctx || !rows.length) return;
+    const full        = rows.map(r => r.name || '(без назви)');
+    const events      = rows.map(r => r.count || 0);
+    const reach       = rows.map(r => r.reach || 0);
+    const per100k     = rows.map(r => r.per_100k || 0);
+    const reachP100k  = rows.map(r => r.reach_per_100k || 0);
+    const popsArr     = rows.map(r => r.population || 0);
+    const urls        = rows.map(r => r.url || '');
+    const totalE      = events.reduce((a, b) => a + b, 0);
+    const totalR      = reach.reduce((a, b) => a + b, 0);
+    // Palette: events (red), reach (green), events/100k (purple), reach/100k (cyan).
+    const C_EV = PALETTE[3], C_REACH = PALETTE[1],
+          C_E100 = PALETTE[4], C_R100 = PALETTE[8];
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: full.map(trunc),
+        datasets: [
+          { label: 'Події', data: events, backgroundColor: C_EV,
+            borderColor: C_EV, borderWidth: 0, xAxisID: 'xEvents' },
+          { label: 'Сум. охоплення', data: reach, backgroundColor: C_REACH,
+            borderColor: C_REACH, borderWidth: 0, xAxisID: 'xReach' },
+          { label: 'Подій на 100k', data: per100k, backgroundColor: C_E100,
+            borderColor: C_E100, borderWidth: 0, xAxisID: 'xPer100k' },
+          { label: 'Охоплення на 100k', data: reachP100k, backgroundColor: C_R100,
+            borderColor: C_R100, borderWidth: 0, xAxisID: 'xReachPer100k' },
+        ],
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        onClick: navOnClick(urls),
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : ''; },
+        plugins: {
+          legend: { display: true, position: 'top' },
+          tooltip: {
+            callbacks: {
+              title: (items) => items.map(i => full[i.dataIndex] ?? i.label),
+              label: (item) => {
+                const v  = Number(item.parsed.x) || 0;
+                const i  = item.dataIndex;
+                const ds = item.dataset.label;
+                if (ds === 'Події') {
+                  const pct = totalE ? ((v/totalE)*100).toFixed(1) : '0.0';
+                  return ` Події: ${v} (${pct}% від ${totalE})`;
+                }
+                if (ds === 'Сум. охоплення') {
+                  const pct = totalR ? ((v/totalR)*100).toFixed(1) : '0.0';
+                  return ` Охоплення: ${v.toLocaleString('uk-UA')} (${pct}%)`;
+                }
+                const pop = popsArr[i];
+                const popStr = pop ? `${pop.toLocaleString('uk-UA')} нас.` : 'нас. невідоме';
+                if (ds === 'Подій на 100k') {
+                  return ` Подій на 100k: ${v} (${popStr})`;
+                }
+                return ` Охоплення на 100k: ${v.toLocaleString('uk-UA')} (${popStr})`;
+              },
+            },
+          },
+        },
+        scales: {
+          xEvents:       { position: 'bottom', beginAtZero: true,
+                           title: { display: true, text: 'Події', color: C_EV },
+                           ticks: { color: C_EV } },
+          xPer100k:      { position: 'bottom', beginAtZero: true,
+                           grid: { drawOnChartArea: false },
+                           title: { display: true, text: 'Подій на 100k', color: C_E100 },
+                           ticks: { color: C_E100 } },
+          xReach:        { position: 'top', beginAtZero: true,
+                           grid: { drawOnChartArea: false },
+                           title: { display: true, text: 'Сум. охоплення', color: C_REACH },
+                           ticks: { color: C_REACH,
+                                    callback: (v) => Number(v).toLocaleString('uk-UA') } },
+          xReachPer100k: { position: 'top', beginAtZero: true,
+                           grid: { drawOnChartArea: false },
+                           title: { display: true, text: 'Охоплення на 100k', color: C_R100 },
+                           ticks: { color: C_R100,
+                                    callback: (v) => Number(v).toLocaleString('uk-UA') } },
+          y: { ticks: { autoSkip: false, font: { size: 11 } } },
+        },
+      },
+    });
+  })();
   horizBar(document.getElementById('ch_channel'), DATA.by_channel, PALETTE[4],
            'name', 'count',
            r => r.uname ? '@'+r.uname : (r.subs ? '· 👥 '+r.subs : ''));
@@ -343,6 +443,64 @@ function initCharts() {
   };
   vertBar(document.getElementById('ch_reach_bucket'), DATA.by_reach_bucket || [], PALETTE[1]);
   vertBar(document.getElementById('ch_chan_bucket'),  DATA.by_channel_count_bucket || [], PALETTE[2]);
+
+  // Republic multi-line: one line per republic on a shared time axis. Each
+  // point has its own (republic, bucket) drill-down URL.
+  const repLines = (ctx, ts, names, perKey) => {
+    if (!ctx || !ts || !ts.length || !names.length) return;
+    const labels = ts.map(r => r.date);
+    const datasets = names.map((name, i) => ({
+      label: name,
+      data: ts.map(r => perKey ? (r[name + '_per_100k'] || 0) : (r[name] || 0)),
+      // per-point URLs stashed on the dataset for the click handler below
+      _urls: ts.map(r => r[name + '_url'] || ''),
+      borderColor: PALETTE[i % PALETTE.length],
+      backgroundColor: PALETTE[i % PALETTE.length] + '20',
+      borderWidth: 2, pointRadius: 2, pointHoverRadius: 6,
+      tension: 0.25, fill: false,
+    }));
+    return new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        onClick: (evt, elements, chart) => {
+          if (!elements.length) return;
+          // Pick the topmost element under cursor — Chart.js returns multiple
+          // hits when point markers from different lines overlap on the same x.
+          const el = elements[0];
+          const ds = chart.data.datasets[el.datasetIndex];
+          const url = ds && ds._urls ? ds._urls[el.index] : '';
+          if (url) window.open(url, '_blank', 'noopener');
+        },
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : ''; },
+        interaction: { mode: 'nearest', intersect: true },
+        plugins: {
+          legend: { position: 'bottom', labels: { color: text, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: (item) => {
+                const ds = item.dataset;
+                const v = item.formattedValue;
+                return ` ${ds.label}: ${v}` + (perKey ? ' / 100k' : '');
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { maxRotation: 0, autoSkip: true } },
+          y: { beginAtZero: true },
+        },
+      },
+    });
+  };
+  repLines(document.getElementById('ch_rep_ts'),
+           DATA.republic_timeseries || [], DATA.republics || [], false);
+  repLines(document.getElementById('ch_rep_ts100k'),
+           DATA.republic_timeseries || [], DATA.republics || [], true);
+
+  // (The per-100k republic bar chart was merged into ch_region above —
+  // it shares the same data axis there, no separate canvas needed.)
 
   // per-tag-category charts (bar / pie / doughnut — chosen by user)
   const tagGrid = document.getElementById('tag-grid');
