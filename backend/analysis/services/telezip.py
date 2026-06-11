@@ -92,11 +92,29 @@ class TelezipClient:
             "date": date_str,
             "content_hash": d.get("contentHash") or d.get("ContentHash"),
             "content": d.get("content") or d.get("Content"),
+            # opinion-monitor: author + reply context
+            "from_user_id":   d.get("fromUserId") or d.get("FromUserId"),
+            "from_user_name": d.get("fromUserName") or d.get("FromUserName"),
+            "reply_to":       d.get("replyTo") or d.get("ReplyTo"),
+            "top_message_id": d.get("topMessageId") or d.get("TopMessageId"),
+            "has_media":      d.get("hasMedia") if "hasMedia" in d else d.get("HasMedia"),
+            "edit_date":      d.get("editDate") or d.get("EditDate"),
         }
 
     async def find_posts(self, query: str, date_from: datetime, date_to: datetime,
-                         languages: Optional[List[str]] = None, unique: bool = True
+                         languages: Optional[List[str]] = None, unique: bool = True,
+                         channel_ids: Optional[List[int]] = None,
+                         channel_names: Optional[List[str]] = None,
                          ) -> List[Dict[str, Any]]:
+        """Search /Find. Optionally restrict to a list of channel ids/usernames.
+
+        TeleZip API quirks (probed 2026-06):
+          * `channelIds`   — array of int, case-insensitive key alias `ChannelIds`.
+          * `channelNames` — array of str (usernames, no @).
+          * `channelId` / `channel:foo` inline / `channels:` are SILENTLY IGNORED.
+          * Internal search timeout ~kicks in around 6h windows for broad terms;
+            chunk callers to ~1h slices.
+        """
         body: Dict[str, Any] = {
             "searchTerm": query,
             "fromDate": date_from.isoformat(),
@@ -106,6 +124,10 @@ class TelezipClient:
             body["unique"] = True
         if languages:
             body["languages"] = languages
+        if channel_ids:
+            body["channelIds"] = list(channel_ids)
+        if channel_names:
+            body["channelNames"] = list(channel_names)
         data = await self._request("POST", "/Find", json_data=body)
         return [self._parse_msg(m) for m in data]
 

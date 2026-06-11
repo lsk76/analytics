@@ -419,6 +419,29 @@ class Post(models.Model):
     content_hash = models.CharField(max_length=80, blank=True, db_index=True, verbose_name="Хеш контенту")
     telezip_mid = models.BigIntegerField(null=True, blank=True, verbose_name="TeleZip MID")
 
+    # --- opinion-monitor поля (для коментарів-думок, не подій) ---
+    author_name = models.CharField(
+        max_length=128, blank=True, verbose_name="Автор (FromUserName)",
+        help_text="Юзернейм або відображене ім'я автора коментаря",
+    )
+    author_tg_id = models.BigIntegerField(
+        null=True, blank=True, db_index=True, verbose_name="Автор tg_id",
+        help_text="FromUserId з TeleZip — для дедупу один-автор-у-багатьох-чатах",
+    )
+    reply_to_msg = models.BigIntegerField(
+        null=True, blank=True, verbose_name="ReplyTo msg_id",
+        help_text="Якщо це коментар-відповідь у linked-discussion",
+    )
+    also_in_chats = models.JSONField(
+        default=list, blank=True, verbose_name="Також у чатах",
+        help_text="Список username чатів, де той самий автор написав ідентичний текст "
+                  "(збираємо як 1 Post замість N).",
+    )
+    tags = models.ManyToManyField(
+        Tag, blank=True, related_name="posts", verbose_name="Теги",
+        help_text="Теги opinion/topic/criticism_target. Заповнюються LLM-тегувальником.",
+    )
+
     dedup_group = models.BigIntegerField(
         null=True, blank=True, db_index=True, verbose_name="Група дедупу",
         help_text="ID кластера після hash+fuzzy преклстеру (корінь групи)",
@@ -526,3 +549,57 @@ class Event(models.Model):
 
     def __str__(self):
         return f"{self.event_date} {self.region}: {self.summary[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Opinion-monitor: whitelist чатів для регіонального моніторингу
+# ---------------------------------------------------------------------------
+
+class MonitorChat(models.Model):
+    """
+    Чат у whitelist моніторингу опінії. Один AnalysisTask = один регіональний
+    моніторинг; багато MonitorChat = список чатів, які ми збираємо для цього
+    моніторингу.
+
+    Замість YAML-конфігу, тримаємо це у БД щоб можна було редагувати з адмінки
+    та бачити інлайн на сторінці самого AnalysisTask.
+    """
+    task = models.ForeignKey(
+        AnalysisTask, on_delete=models.CASCADE, related_name="monitor_chats",
+        verbose_name="Задача моніторингу",
+    )
+    channel = models.ForeignKey(
+        Channel, on_delete=models.CASCADE, related_name="enrolled_in",
+        verbose_name="Чат",
+    )
+    is_active = models.BooleanField(
+        default=True, db_index=True, verbose_name="Активний",
+        help_text="Зніми галочку щоб виключити чат з наступного збору, "
+                  "не видаляючи історичні дані.",
+    )
+    is_critical_source = models.BooleanField(
+        default=False, db_index=True, verbose_name="Критичне джерело",
+        help_text="Особливо важливий чат — пріоритет у звітах.",
+    )
+    priority = models.PositiveSmallIntegerField(
+        default=100, verbose_name="Пріоритет",
+        help_text="Менше = вище у списку. Для сортування при показі.",
+    )
+    notes = models.TextField(blank=True, verbose_name="Нотатки")
+    added_by = models.CharField(
+        max_length=80, blank=True, verbose_name="Хто додав",
+        help_text="Хто/коли додав чат у whitelist (ручний рядок).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Чат моніторингу"
+        verbose_name_plural = "Чати моніторингу"
+        unique_together = [["task", "channel"]]
+        ordering = ["task", "priority", "channel__username"]
+        indexes = [models.Index(fields=["task", "is_active"])]
+
+    def __str__(self):
+        ch = self.channel
+        u = (ch.username or "") if ch else ""
+        return f"{self.task.slug}: @{u or 'no-username'}"

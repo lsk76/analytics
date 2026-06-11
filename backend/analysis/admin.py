@@ -16,7 +16,7 @@ from .services import stages
 from .models import (
     AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
-    Region, RegionAlias,
+    Region, RegionAlias, MonitorChat,
 )
 from .multiselect_filter import (
     multiselect_filter, autocomplete_filter, MultiSelectFilter,
@@ -415,13 +415,42 @@ class TagCategoryAdmin(admin.ModelAdmin):
     ordering = ("order", "key")
 
 
+class MonitorChatInline(admin.TabularInline):
+    """Whitelist чатів для opinion-моніторингу. Видно одразу на сторінці Task."""
+    model = MonitorChat
+    extra = 0
+    autocomplete_fields = ("channel",)
+    fields = ("channel", "is_active", "is_critical_source", "priority",
+              "added_by", "notes")
+    ordering = ("priority", "channel__username")
+
+
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "date_from", "date_to", "geo_enabled", "is_active")
+    list_display = ("name", "slug", "date_from", "date_to", "geo_enabled",
+                    "is_active", "monitor_chats_count")
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
     filter_horizontal = ("tag_categories",)
     actions = [collect_task_period_action]
+    inlines = [MonitorChatInline]
+
+    @admin.display(description="Чати моніт.")
+    def monitor_chats_count(self, obj):
+        n_total = obj.monitor_chats.count()
+        n_active = obj.monitor_chats.filter(is_active=True).count()
+        return f"{n_active}/{n_total}" if n_total else "—"
+
+
+@admin.register(MonitorChat)
+class MonitorChatAdmin(admin.ModelAdmin):
+    """Standalone-сторінка чатів моніторингу (для bulk-операцій)."""
+    list_display = ("task", "channel", "is_active", "is_critical_source",
+                    "priority", "added_by", "created_at")
+    list_filter = ("task", "is_active", "is_critical_source")
+    search_fields = ("channel__username", "channel__title", "notes")
+    autocomplete_fields = ("task", "channel")
+    list_editable = ("is_active", "is_critical_source", "priority")
 
 
 @admin.register(Channel)
@@ -524,12 +553,94 @@ class JobPeriodFilter(admin.SimpleListFilter):
         return queryset
 
 
+class TagCategoryFilter(admin.SimpleListFilter):
+    title = "Категорія тегів"
+    parameter_name = "tag_cat"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("criticism_target", "має об'єкт критики"),
+            ("topic", "має тему"),
+            ("opinion", "має тип думки"),
+            ("any", "має будь-який тег"),
+            ("none", "без тегів"),
+        ]
+
+    def queryset(self, request, qs):
+        v = self.value()
+        if not v: return qs
+        if v == "none":
+            return qs.filter(tags__isnull=True).distinct()
+        if v == "any":
+            return qs.filter(tags__isnull=False).distinct()
+        return qs.filter(tags__category=v).distinct()
+
+
+class PrescreenFilter(admin.SimpleListFilter):
+    title = "Prescreen"
+    parameter_name = "prescreen"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("pos", "could_be_criticism = true"),
+            ("neg", "could_be_criticism = false"),
+            ("any", "будь-який вердикт"),
+            ("none", "ще не пройшов"),
+        ]
+
+    def queryset(self, request, qs):
+        v = self.value()
+        if v == "pos":
+            return qs.filter(classification___prescreen__could_be_criticism=True)
+        if v == "neg":
+            return qs.filter(classification___prescreen__could_be_criticism=False)
+        if v == "any":
+            return qs.filter(classification__has_key="_prescreen")
+        if v == "none":
+            return qs.exclude(classification__has_key="_prescreen")
+        return qs
+
+
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
-    list_display = ("url", "channel_name", "posted_at", "stage", "is_relevant", "event")
-    list_filter = ("task", JobPeriodFilter, "stage", "is_relevant")
+    list_display = ("posted_at", "channel_name", "criticism_targets",
+                    "topics", "opinions", "text_preview", "tg_link",
+                    "is_relevant")
+    list_filter = ("task", JobPeriodFilter, "stage", "is_relevant",
+                   TagCategoryFilter, PrescreenFilter)
     search_fields = ("url", "text")
     readonly_fields = ("stage_locked_at", "stage_attempts", "stage_error", "created_at")
+    list_per_page = 100
+
+    def get_queryset(self, request):
+        return (super().get_queryset(request)
+                .select_related("channel")
+                .prefetch_related("tags"))
+
+    @admin.display(description="критика")
+    def criticism_targets(self, obj):
+        names = sorted({t.name for t in obj.tags.all() if t.category == "criticism_target"})
+        return ", ".join(names) or "—"
+
+    @admin.display(description="тема")
+    def topics(self, obj):
+        names = sorted({t.name for t in obj.tags.all() if t.category == "topic"})
+        return ", ".join(names) or "—"
+
+    @admin.display(description="думка")
+    def opinions(self, obj):
+        names = sorted({t.name for t in obj.tags.all() if t.category == "opinion"})
+        return ", ".join(names) or "—"
+
+    @admin.display(description="текст")
+    def text_preview(self, obj):
+        t = (obj.text or "").replace("\n", " ").strip()
+        return (t[:160] + "…") if len(t) > 160 else t
+
+    @admin.display(description="tg")
+    def tg_link(self, obj):
+        if not obj.url: return "—"
+        return format_html('<a href="{}" target="_blank">→</a>', obj.url)
 
 
 @admin.register(Event)
