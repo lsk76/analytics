@@ -35,6 +35,15 @@ db.sqlite3
 data/
 /tmp/
 
+# --- Dev scratch & pilot artifacts (not part of the app) ---
+# _dev/ holds one-off scripts, eval ground-truth, benches, data dumps.
+# _pilot_* hold per-run batch JSON + logs from the opinion-monitor pilot.
+_dev/
+/backend/_dev/
+/backend/_pilot_fed_criticism/
+/backend/_pilot_logs/
+cookies.txt
+
 # --- OS / editor ---
 .DS_Store
 *.swp
@@ -45,5 +54,3 @@ data/
 
 # DB backups
 backups/
-events_validation.json
-june_review.json
