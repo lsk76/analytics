@@ -35,7 +35,9 @@ class Command(BaseCommand):
         parser.add_argument("--task", required=True)
         parser.add_argument("--category", default="",
                             help="One of criticism_target/topic/opinion. "
-                                 "Empty = all 3.")
+                                 "Empty = all 3. ВАЖЛИВО: --merge/--rename/--drop "
+                                 "діють ЛИШЕ в межах цієї категорії (щоб не зачепити "
+                                 "однойменний тег іншої категорії).")
         parser.add_argument("--min-count", type=int, default=1,
                             help="Hide tags with fewer Post-uses.")
         parser.add_argument("--samples", type=int, default=2,
@@ -54,13 +56,17 @@ class Command(BaseCommand):
         except AnalysisTask.DoesNotExist:
             raise CommandError(f"Task {opts['task']!r} not found.")
 
+        # Категорія обмежує мутації — без неї однойменний тег іншої категорії
+        # (напр. opinion=теорія_змови vs topic=теорія_змови) можна зачепити.
+        cat = opts["category"] or None
+
         # ---- mutations first --------------------------------------------
         if opts["merge"]:
-            self._merge(opts["merge"], task)
+            self._merge(opts["merge"], task, cat)
         if opts["rename"]:
-            self._rename(opts["rename"], task)
+            self._rename(opts["rename"], task, cat)
         if opts["drop"]:
-            self._drop(opts["drop"], task)
+            self._drop(opts["drop"], task, cat)
 
         # ---- listing ----------------------------------------------------
         cats = [opts["category"]] if opts["category"] else CATEGORIES
@@ -84,23 +90,27 @@ class Command(BaseCommand):
                         ch = p.channel.username if p.channel else "-"
                         self.stdout.write(f"         · @{ch}: {txt}")
 
+    @staticmethod
+    def _q(name, cat):
+        qs = Tag.objects.filter(name=name)
+        return qs.filter(category=cat) if cat else qs
+
     @transaction.atomic
-    def _merge(self, spec: str, task: AnalysisTask):
+    def _merge(self, spec: str, task: AnalysisTask, cat=None):
         for one in spec.split(";"):
             if ":" not in one: continue
             srcs, dst = one.split(":", 1)
             srcs = [s.strip() for s in srcs.split(",") if s.strip()]
             dst = dst.strip()
             if not srcs or not dst: continue
-            dst_tag = Tag.objects.filter(name=dst).first()
+            dst_tag = self._q(dst, cat).first()
             if not dst_tag:
-                # try to figure category from src
-                src_tag = Tag.objects.filter(name__in=srcs).first()
-                cat = src_tag.category if src_tag else "criticism_target"
-                dst_tag, _ = Tag.objects.get_or_create(name=dst, category=cat)
+                src_tag = self._q(srcs[0], cat).first()
+                use_cat = cat or (src_tag.category if src_tag else "criticism_target")
+                dst_tag, _ = Tag.objects.get_or_create(name=dst, category=use_cat)
             n_moved = 0
             for src_name in srcs:
-                src_tag = Tag.objects.filter(name=src_name).first()
+                src_tag = self._q(src_name, cat).first()
                 if not src_tag: continue
                 posts = Post.objects.filter(task=task, tags=src_tag)
                 for p in posts:
@@ -114,12 +124,12 @@ class Command(BaseCommand):
             ))
 
     @transaction.atomic
-    def _rename(self, spec: str, task: AnalysisTask):
+    def _rename(self, spec: str, task: AnalysisTask, cat=None):
         for one in spec.split(";"):
             if ":" not in one: continue
             old, new = one.split(":", 1)
             old, new = old.strip(), new.strip()
-            t = Tag.objects.filter(name=old).first()
+            t = self._q(old, cat).first()
             if not t:
                 self.stdout.write(self.style.WARNING(f"  rename: {old} not found"))
                 continue
@@ -128,10 +138,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"  renamed {old} → {new}"))
 
     @transaction.atomic
-    def _drop(self, spec: str, task: AnalysisTask):
+    def _drop(self, spec: str, task: AnalysisTask, cat=None):
         names = [s.strip() for s in spec.split(",") if s.strip()]
         for name in names:
-            t = Tag.objects.filter(name=name).first()
+            t = self._q(name, cat).first()
             if not t:
                 self.stdout.write(self.style.WARNING(f"  drop: {name} not found"))
                 continue

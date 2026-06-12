@@ -19,6 +19,10 @@ x-worker: &worker
 services:
   db:
     image: postgres:16-alpine
+    # Default Docker /dev/shm is 64MB — too small for hash-aggregations over the
+    # multi-million-row Post table (admin charts spilled with "No space left on
+    # device"). 1GB gives Postgres room for parallel aggregate work_mem.
+    shm_size: "1gb"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tg_events}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -55,6 +59,12 @@ services:
   worker-classify:   { <<: *worker, command: python manage.py run_worker --stage classify }
   worker-dedup:      { <<: *worker, command: python manage.py run_worker --stage dedup }
   worker-review:     { <<: *worker, command: python manage.py run_worker --stage review }
+
+  # --- opinion-monitor stage workers (pipeline="monitor" tasks only) --------
+  worker-mon-collect:   { <<: *worker, command: python manage.py run_worker --stage mon_collect }
+  worker-mon-filter:    { <<: *worker, command: python manage.py run_worker --stage mon_filter }
+  worker-mon-prescreen: { <<: *worker, command: python manage.py run_worker --stage mon_prescreen }
+  worker-mon-tag:       { <<: *worker, command: python manage.py run_worker --stage mon_tag }
 
 volumes:
   pgdata:

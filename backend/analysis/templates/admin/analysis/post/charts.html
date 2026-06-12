@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls static %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:app_list' app_label='analysis' %}">Аналітика</a> ›
+  <a href="{% url 'admin:analysis_post_changelist' %}{% if preserved_qs %}?{{ preserved_qs }}{% endif %}">Коментарі</a> ›
+  Графіки
+</div>
+{% endblock %}
+
+{% block content %}
+<script src="{% static 'analysis/vendor/chart.umd.min.js' %}"></script>
+{% include "admin/analysis/post/_charts_body.html" %}
+{% endblock %}

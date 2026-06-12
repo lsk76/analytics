@@ -120,6 +120,20 @@ class AnalysisTask(models.Model):
         help_text="Системний промпт аудитора. Порожньо — дефолтний.",
     )
 
+    # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
+    PIPELINE_EVENTS = "events"
+    PIPELINE_MONITOR = "monitor"
+    PIPELINE_CHOICES = [
+        (PIPELINE_EVENTS, "Події (enrich→precluster→classify→dedup)"),
+        (PIPELINE_MONITOR, "Моніторинг думок (filter→prescreen→tag)"),
+    ]
+    pipeline = models.CharField(
+        max_length=12, choices=PIPELINE_CHOICES, default=PIPELINE_EVENTS,
+        db_index=True, verbose_name="Конвеєр",
+        help_text="events-воркери та monitor-воркери беруть лише «свої» задачі — "
+                  "пост задачі ніколи не потрапить у чужу стадію.",
+    )
+
     is_active = models.BooleanField(default=True, verbose_name="Активна")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
@@ -382,12 +396,20 @@ class Post(models.Model):
     STAGE_DEDUPED = "deduped"
     STAGE_DONE = "done"
     STAGE_FAILED = "failed"
+    # opinion-monitor конвеєр (pipeline="monitor"): окремий префікс стадій,
+    # щоб event-воркери (enrich/precluster/...) ніколи не захоплювали ці пости
+    STAGE_MON_COLLECTED = "mon_collected"
+    STAGE_MON_FILTERED = "mon_filtered"
+    STAGE_MON_PRESCREENED = "mon_prescreened"
     STAGE_CHOICES = [
         (STAGE_COLLECTED, "Зібрано"),
         (STAGE_ENRICHED, "Збагачено"),
         (STAGE_PRECLUSTERED, "Прекластеризовано"),
         (STAGE_CLASSIFIED, "Класифіковано"),
         (STAGE_DEDUPED, "Дедупльовано"),
+        (STAGE_MON_COLLECTED, "Монітор: зібрано"),
+        (STAGE_MON_FILTERED, "Монітор: відфільтровано"),
+        (STAGE_MON_PRESCREENED, "Монітор: прескрін+"),
         (STAGE_DONE, "Готово"),
         (STAGE_FAILED, "Помилка"),
     ]
@@ -603,3 +625,24 @@ class MonitorChat(models.Model):
         ch = self.channel
         u = (ch.username or "") if ch else ""
         return f"{self.task.slug}: @{u or 'no-username'}"
+
+
+class TelezipSlot(models.Model):
+    """Cross-process concurrency gate for TeleZip.
+
+    N rows == N GLOBAL slots. A caller leases a free (or lease-expired) row for the
+    duration of one /Find request, then releases it. Replaces the per-process
+    asyncio.Semaphore so the concurrency cap holds across ALL worker processes
+    (the per-process semaphore let every extra process add its own 2 slots, which
+    is what tripped TeleZip 429s). Crash-safe: a dead holder's lease simply expires.
+    """
+    slot = models.IntegerField(unique=True)
+    leased_until = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        db_table = "analysis_telezip_slot"
+        verbose_name = "TeleZip slot"
+        verbose_name_plural = "TeleZip slots"
+
+    def __str__(self):
+        return f"slot {self.slot} (until {self.leased_until})"

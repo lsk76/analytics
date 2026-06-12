@@ -1,0 +1,9 @@
+# NEVER let secrets live in the repo tree — a .session/.env physically inside the
+# project trips the harness secret-scanner and locks the whole project.
+# Real secrets belong in ~/tg-secrets (see tg_client.py: TG_SECRETS_DIR).
+*.session
+*.session-journal
+.env
+*cache.json
+__pycache__/
+.venv/

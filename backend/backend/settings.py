@@ -116,3 +116,30 @@ TELEZIP_MAX_CONCURRENCY = int(os.getenv("TELEZIP_MAX_CONCURRENCY", "2"))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_API_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
+
+# --- Logging ---
+# Stage workers are long-lived; their per-tick progress goes through the
+# `analysis` logger at INFO (mon_filter/mon_prescreen/mon_tag/collect counts).
+# Default Django logging surfaces only WARNING+, so without this the worker
+# stdout shows just "старт" + TeleZip retries. Level overridable via LOG_LEVEL.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "ts": {
+            "format": "%(asctime)s %(levelname)s %(name)s | %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "ts"},
+    },
+    "root": {"handlers": ["console"], "level": "WARNING"},
+    "loggers": {
+        "analysis": {
+            "handlers": ["console"],
+            "level": os.getenv("LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}

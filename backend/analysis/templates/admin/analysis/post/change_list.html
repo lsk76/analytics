@@ -1,0 +1,117 @@
+{% extends "admin/change_list.html" %}
+{% load admin_urls static %}
+
+{% block object-tools-items %}
+  <li>
+    <a href="#" id="toggle-charts-btn"
+       data-show="📊 Графіки" data-hide="📋 Список"
+       class="addlink" style="background-image:none">📊 Графіки</a>
+  </li>
+  {{ block.super }}
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script>
+  // pre-DOM marker: if URL hash says #charts, hide the table immediately (no flicker)
+  (function () { if (location.hash === '#charts')
+    document.documentElement.setAttribute('data-charts-mode', '1'); })();
+</script>
+<style>
+  html[data-charts-mode="1"] #changelist-form,
+  html[data-charts-mode="1"] #changelist-form .results,
+  html[data-charts-mode="1"] #toolbar,
+  html[data-charts-mode="1"] .paginator,
+  html[data-charts-mode="1"] .actions { display: none !important; }
+  #charts-inline { display: none; }
+  html[data-charts-mode="1"] #charts-inline { display: block; }
+  #charts-inline .loading { color: var(--body-quiet-color); padding: 20px;
+                            background: var(--body-bg); border:1px dashed var(--border-color);
+                            border-radius: 8px; text-align: center; margin: 10px 0; }
+</style>
+<script src="{% static 'analysis/vendor/chart.umd.min.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var btn = document.getElementById('toggle-charts-btn');
+  if (!btn) return;
+  var HASH = '#charts';
+  var isCharts = function () { return location.hash === HASH; };
+  var setHtmlMode = function (on) {
+    if (on) document.documentElement.setAttribute('data-charts-mode', '1');
+    else document.documentElement.removeAttribute('data-charts-mode');
+  };
+
+  // mount the inline charts container as a sibling of #changelist-form
+  var form = document.querySelector('#changelist-form');
+  var container = document.createElement('div');
+  container.id = 'charts-inline';
+  if (form && form.parentNode) form.parentNode.insertBefore(container, form);
+  else (document.querySelector('#changelist') || document.body).appendChild(container);
+
+  var loaded = false;
+  function loadCharts() {
+    if (loaded) return;
+    container.innerHTML = '<div class="loading">⏳ Будую графіки…</div>';
+    var qs = new URLSearchParams(window.location.search);
+    qs.set('_fragment', '1');
+    qs.set('_ts', Date.now().toString());
+    fetch('{% url "admin:analysis_post_charts" %}?' + qs.toString(),
+          { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        container.innerHTML = html;
+        loaded = true;
+        // innerHTML doesn't run <script> — re-attach. Keep application/json data
+        // blocks inside the container (so getElementById finds them); JS → body.
+        container.querySelectorAll('script').forEach(function (orig) {
+          var s = document.createElement('script');
+          for (var i = 0; i < orig.attributes.length; i++)
+            s.setAttribute(orig.attributes[i].name, orig.attributes[i].value);
+          if (!orig.src) s.textContent = orig.textContent;
+          if (s.type && s.type !== '' && s.type !== 'text/javascript' &&
+              s.type !== 'application/javascript') container.appendChild(s);
+          else document.body.appendChild(s);
+          orig.remove();
+        });
+      })
+      .catch(function (err) {
+        container.innerHTML = '<div class="loading" style="color:#b91c1c">Помилка: ' + err + '</div>';
+      });
+  }
+
+  function setMode(on) {
+    setHtmlMode(on);
+    btn.textContent = on ? btn.dataset.hide : btn.dataset.show;
+    if (on && !isCharts())
+      history.replaceState(null, '', location.pathname + location.search + HASH);
+    else if (!on && isCharts())
+      history.replaceState(null, '', location.pathname + location.search);
+    if (on) loadCharts();
+  }
+  btn.addEventListener('click', function (e) { e.preventDefault(); setMode(!isCharts()); });
+  if (isCharts()) setMode(true);
+
+  // carry the #charts hash across filter/search navigation so reload stays in charts mode
+  document.addEventListener('click', function (e) {
+    if (!isCharts()) return;
+    var a = e.target.closest('a');
+    if (!a || !a.href || a.id === 'toggle-charts-btn') return;
+    var u; try { u = new URL(a.href, location.href); } catch (_) { return; }
+    if (u.origin !== location.origin || u.hash) return;
+    // chart drill-downs open in a new tab (target=_blank) — don't tag those
+    if (a.target === '_blank') return;
+    u.hash = HASH; a.href = u.toString();
+  }, true);
+  document.querySelectorAll('form[method="get"], form:not([method])').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      if (!isCharts()) return;
+      e.preventDefault();
+      var data = new FormData(f), qs = new URLSearchParams();
+      data.forEach(function (v, k) { qs.append(k, v); });
+      var action = f.getAttribute('action') || location.pathname;
+      location.href = action + (qs.toString() ? '?' + qs.toString() : '') + HASH;
+    });
+  });
+});
+</script>
+{% endblock %}

@@ -25,7 +25,7 @@ Examples:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -56,6 +56,10 @@ class Command(BaseCommand):
                                  "Сильно зменшує обсяг для повноцінного tagger.")
         parser.add_argument("--prefix", default="batch",
                             help="Filename prefix (default 'batch').")
+        parser.add_argument("--date-from", default="",
+                            help="YYYY-MM-DD; restrict by posted_at (optional).")
+        parser.add_argument("--date-to", default="",
+                            help="YYYY-MM-DD; restrict by posted_at (optional).")
 
     def handle(self, *args, **opts):
         try:
@@ -69,6 +73,11 @@ class Command(BaseCommand):
         qs = (Post.objects.filter(task=task)
               .select_related("channel")
               .exclude(text=""))
+
+        if opts["date_from"]:
+            qs = qs.filter(posted_at__date__gte=date.fromisoformat(opts["date_from"]))
+        if opts["date_to"]:
+            qs = qs.filter(posted_at__date__lte=date.fromisoformat(opts["date_to"]))
 
         if not opts["include_filtered"]:
             qs = qs.exclude(classification__is_filtered=True)

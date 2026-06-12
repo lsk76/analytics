@@ -160,6 +160,10 @@ _TRANSIENT_MARKERS = (
     "ServerDisconnected", "ClientConnectorError", "ClientOSError",
     "SSL", "ssl:",
     "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "HTTP 429",
+    # TelezipClient raises RuntimeError("TeleZip <status>") — match that exact
+    # shape too, else persistent 429/5xx throttling is misread as PERMANENT and a
+    # chunk gets failed after 4 attempts instead of retried forever with backoff.
+    "TeleZip 429", "TeleZip 500", "TeleZip 502", "TeleZip 503", "TeleZip 504",
 )
 
 

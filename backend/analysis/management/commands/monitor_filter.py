@@ -16,6 +16,7 @@ The filter is idempotent: re-run after editing pilot/filters.py to refresh.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -40,6 +41,10 @@ class Command(BaseCommand):
                             help="Too-long messages dropped as likely-posts, not comments.")
         parser.add_argument("--reset", action="store_true",
                             help="Wipe previous filter flags before running.")
+        parser.add_argument("--date-from", default="",
+                            help="YYYY-MM-DD; restrict by posted_at (optional).")
+        parser.add_argument("--date-to", default="",
+                            help="YYYY-MM-DD; restrict by posted_at (optional).")
 
     def handle(self, *args, **opts):
         try:
@@ -52,6 +57,10 @@ class Command(BaseCommand):
         max_len = opts["max_length"]
 
         qs = Post.objects.filter(task=task)
+        if opts["date_from"]:
+            qs = qs.filter(posted_at__date__gte=date.fromisoformat(opts["date_from"]))
+        if opts["date_to"]:
+            qs = qs.filter(posted_at__date__lte=date.fromisoformat(opts["date_to"]))
         total = qs.count()
         self.stdout.write(self.style.HTTP_INFO(
             f"== Filter {task.slug} | region={region or '-'} | "

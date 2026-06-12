@@ -1,0 +1,151 @@
+{% load static %}
+<style>
+  .cw { max-width: 1400px; margin: 12px auto; }
+  .cmeta { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:10px 14px;
+           margin:10px 0; background:var(--darkened-bg); border:1px solid var(--border-color);
+           border-radius:8px; color:var(--body-fg); }
+  .cmeta strong { font-size:18px; }
+  .gran a { padding:4px 10px; border-radius:6px; text-decoration:none;
+            border:1px solid var(--border-color); color:var(--body-fg);
+            background:var(--body-bg); margin-right:4px; }
+  .gran a.active { background:var(--link-fg); color:var(--button-fg); border-color:transparent; }
+  .grid { display:grid; gap:16px; grid-template-columns:1fr 1fr; }
+  .card { background:var(--body-bg); border:1px solid var(--border-color);
+          border-radius:8px; padding:14px; }
+  .card.full { grid-column:1 / -1; }
+  .card h3 { margin:0 0 10px; font-size:15px; color:var(--body-fg); }
+  .cwrap { position:relative; height:300px; }
+  .cwrap.tall { height:380px; }
+  .empty { color:var(--body-quiet-color); padding:20px; text-align:center; }
+  .hint { color:var(--body-quiet-color); font-size:12px; }
+</style>
+
+<div class="cw">
+  <div class="cmeta">
+    <strong>{{ total }}</strong> коментарів у поточному фільтрі
+    <span class="gran">
+      Гранулярність:
+      <a href="?{{ qs_no_gran }}&gran=day"   class="{% if gran == 'day' %}active{% endif %}">день</a>
+      <a href="?{{ qs_no_gran }}&gran=week"  class="{% if gran == 'week' %}active{% endif %}">тиждень</a>
+      <a href="?{{ qs_no_gran }}&gran=month" class="{% if gran == 'month' %}active{% endif %}">місяць</a>
+    </span>
+    <span class="hint">клік по графіку → пости у новій вкладці</span>
+  </div>
+
+  <div class="grid">
+    <div class="card full">
+      <h3>Коментарі в часі</h3>
+      <div class="cwrap"><canvas id="ch-time"></canvas></div>
+    </div>
+  </div>
+
+  <h2 style="color:var(--body-fg);margin:18px 0 8px;">По субʼєктах</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Коментарі</h3>
+      <div class="cwrap"><canvas id="ch-region-count"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Коментарі / охоплення <small class="hint">(÷ підписники чатів)</small></h3>
+      <div class="cwrap"><canvas id="ch-region-perreach"></canvas></div>
+    </div>
+    <div class="card full">
+      <h3>Коментарі / охоплення / населення <small class="hint">(÷ підписники ÷ населення регіону)</small></h3>
+      <div class="cwrap"><canvas id="ch-region-perreachpop"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card full">
+      <h3>Субʼєкти: коментарі по часу</h3>
+      <div class="cwrap tall"><canvas id="ch-region-time"></canvas></div>
+    </div>
+  </div>
+
+  <h2 style="color:var(--body-fg);margin:18px 0 8px;">Розподіл по тегах</h2>
+  <div class="grid">
+    {% for cat in by_tag %}
+      <div class="card">
+        <h3>{{ cat.label }} <small class="hint">({{ cat.rows|length }})</small></h3>
+        {# висота пропорційна к-сті тегів — кожен label отримує ~26px, інакше тиснуться #}
+        <div class="cwrap" style="height: {% widthratio cat.rows|length 1 26 %}px; min-height: 220px;">
+          <canvas id="ch-tag-{{ cat.category }}"></canvas>
+        </div>
+      </div>
+    {% empty %}
+      <div class="card full empty">Немає тегів у поточному фільтрі.</div>
+    {% endfor %}
+  </div>
+</div>
+
+<script id="d-time" type="application/json">{{ timeseries_json|safe }}</script>
+<script id="d-region" type="application/json">{{ by_region_json|safe }}</script>
+<script id="d-region-ts" type="application/json">{{ region_ts_json|safe }}</script>
+<script id="d-region-lines" type="application/json">{{ region_lines_json|safe }}</script>
+<script id="d-tags" type="application/json">{{ by_tag_json|safe }}</script>
+<script>
+(function () {
+  if (typeof Chart === 'undefined') return;
+  var css = getComputedStyle(document.body);
+  Chart.defaults.color = css.getPropertyValue('--body-fg') || '#333';
+  Chart.defaults.borderColor = css.getPropertyValue('--border-color') || '#ddd';
+  var PAL = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
+  var J = function (id) { var n=document.getElementById(id); try { return JSON.parse(n.textContent); } catch (e) { return null; } };
+  var open = function (url) { if (url) window.open(url, '_blank'); };
+
+  // 1) коментарі в часі
+  var t = J('d-time') || [];
+  new Chart(document.getElementById('ch-time'), {
+    type:'bar',
+    data: { labels: t.map(function (r) { return r.date; }),
+      datasets: [{ label:'Коментарі', data:t.map(function(r){return r.count;}), backgroundColor:PAL[0] }] },
+    options: { maintainAspectRatio:false, plugins:{legend:{display:false}},
+      onClick:function(e,el){ if(el.length){ open(t[el[0].index].url); } },
+      scales:{ y:{title:{display:true,text:'коментарі'}} } }
+  });
+
+  // 2) по субʼєктах — ТРИ окремі графіки
+  var rg = J('d-region') || [];
+  var rgLabels = rg.map(function(r){return r.name;});
+  function regionBar(id, getter, color, axisTitle, fmt) {
+    var el = document.getElementById(id); if (!el) return;
+    new Chart(el, {
+      type:'bar',
+      data:{ labels:rgLabels, datasets:[{ data:rg.map(getter), backgroundColor:color }] },
+      options:{ maintainAspectRatio:false, plugins:{ legend:{display:false},
+        tooltip:{ callbacks:{ label:function(c){ return fmt ? fmt(rg[c.dataIndex]) : c.parsed.y; } } } },
+        onClick:function(e,el2){ if(el2.length){ open(rg[el2[0].index].url); } },
+        scales:{ y:{ title:{display:true,text:axisTitle} } } }
+    });
+  }
+  regionBar('ch-region-count', function(r){return r.count;}, PAL[0], 'коментарі',
+            function(r){ return 'Коментарі: ' + r.count; });
+  regionBar('ch-region-perreach', function(r){return r.per_reach;}, PAL[1], 'коментарі / підписника',
+            function(r){ return 'Коментарі/охоплення: ' + r.per_reach.toFixed(4) + '  (' + r.count + ' / ' + r.reach + ' підписників)'; });
+  regionBar('ch-region-perreachpop', function(r){return r.per_reach_pop;}, PAL[4], 'коментарі / підписника / особу',
+            function(r){ return 'Коментарі/охоплення/населення: ' + r.per_reach_pop.toExponential(3) + '  (населення ' + (r.population || '—') + ')'; });
+
+  // 3) субʼєкти в часі
+  var rts = J('d-region-ts') || [], lines = J('d-region-lines') || [];
+  new Chart(document.getElementById('ch-region-time'), {
+    type:'line',
+    data:{ labels:rts.map(function(r){return r.date;}),
+      datasets:lines.map(function(name,i){ return {
+        label:name, data:rts.map(function(r){return r[name]||0;}),
+        borderColor:PAL[i%PAL.length], backgroundColor:PAL[i%PAL.length], tension:.25, pointRadius:1 }; }) },
+    options:{ maintainAspectRatio:false, interaction:{mode:'index',intersect:false} }
+  });
+
+  // 4) розподіл по тегах
+  (J('d-tags') || []).forEach(function (cat) {
+    var el = document.getElementById('ch-tag-' + cat.category); if (!el) return;
+    new Chart(el, {
+      type:'bar',
+      data:{ labels:cat.rows.map(function(r){return r.name;}),
+        datasets:[{ label:cat.label, data:cat.rows.map(function(r){return r.count;}), backgroundColor:PAL[1] }] },
+      options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}},
+        onClick:function(e,elx){ if(elx.length){ open(cat.rows[elx[0].index].url); } } }
+    });
+  });
+})();
+</script>

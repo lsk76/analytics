@@ -141,10 +141,11 @@ class Command(BaseCommand):
                     "date_from": date.fromisoformat(opts["date_from"]),
                     "date_to": date.fromisoformat(opts["date_to"]),
                     "languages": ["ru"],
+                    "pipeline": AnalysisTask.PIPELINE_MONITOR,  # mon_* воркери
                     "search_posts": False,
                     "search_comments": True,
                     "telezip_unique": False,
-                    "collect_chunk_days": 7,  # тиждень за один TeleZip-виклик
+                    "collect_chunk_days": 1,  # ширше — TeleZip 500 на cluster-query
                     "classify_system_prompt": DEFAULT_TAGGER_PROMPT,
                     "relevance_field": "is_relevant",
                     "dedup_window_days": 0,   # коментарі не дедупимо як події
