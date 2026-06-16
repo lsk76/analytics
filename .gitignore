@@ -42,6 +42,7 @@ _dev/
 /backend/_dev/
 /backend/_pilot_fed_criticism/
 /backend/_pilot_logs/
+/backend/_event_review/
 cookies.txt
 
 # --- OS / editor ---

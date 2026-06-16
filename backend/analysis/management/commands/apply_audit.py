@@ -1,13 +1,17 @@
 """
 Apply a hand-audit CSV to events:
   - valid=drop → review_status='rejected' (with audit note)
-  - attacker  → Event.attacker_tags = matching Tag rows (nationality category)
-  - victim    → Event.victim_tags  = matching Tag rows
+  - attacker  → Event.tags += Tag(category='attacker_nationality')
+  - victim    → Event.tags += Tag(category='victim_nationality')
+
+Сторони живуть у звичайному Event.tags під ЗАКРИТИМИ категоріями
+attacker_nationality / victim_nationality (словник = nationality). Окремих
+M2M-полів attacker_tags/victim_tags більше немає.
 
 CSV columns: id,valid,attacker,victim,note
-`attacker` and `victim` are comma-separated nationality names (must already
-exist as Tag rows with category='nationality'); empty cells leave the M2M
-untouched (use 'CLEAR' to wipe).
+`attacker`/`victim` — comma-separated назви національностей (мають існувати
+в словнику відповідної категорії); порожня клітинка не чіпає теги
+(використовуйте 'CLEAR' щоб стерти сторону).
 
   python manage.py apply_audit _audit_dagestan.csv
 """
@@ -30,24 +34,36 @@ class Command(BaseCommand):
         path = opts["csv_path"]
         dry = opts["dry_run"]
 
-        # Cache nationality tags by lowercase name
-        nat_tags = {t.name.lower(): t for t in
-                    Tag.objects.filter(category="nationality")}
+        # словники сторін (закриті категорії, дзеркало nationality)
+        side_tags = {
+            "attacker_nationality": {t.name.lower(): t for t in
+                                     Tag.objects.filter(category="attacker_nationality")},
+            "victim_nationality":   {t.name.lower(): t for t in
+                                     Tag.objects.filter(category="victim_nationality")},
+        }
 
-        def resolve(names_str):
-            """'дагестанець, росіянин' → [Tag, Tag]. Unknown names → skipped + warned."""
+        def resolve(names_str, category):
+            """'дагестанець, росіянин' → [Tag, Tag] категорії сторони. Unknown → skipped."""
             if not names_str or names_str.strip().upper() == "CLEAR":
                 return None, names_str.strip().upper() == "CLEAR"
             out, missing = [], []
             for n in [x.strip().lower() for x in names_str.split(",") if x.strip()]:
-                t = nat_tags.get(n)
+                t = side_tags[category].get(n)
                 if t:
                     out.append(t)
                 else:
                     missing.append(n)
             if missing:
-                self.stderr.write(f"  unknown nationality tags: {missing}")
+                self.stderr.write(f"  unknown {category} tags: {missing}")
             return out, False
+
+        def set_side(ev, category, new_tags):
+            """Замінити теги сторони у звичайному ev.tags (clear-then-add у межах категорії)."""
+            cur = [t for t in ev.tags.all() if t.category == category]
+            if cur:
+                ev.tags.remove(*cur)
+            if new_tags:
+                ev.tags.add(*new_tags)
 
         n_drop = n_attacker = n_victim = n_skip = 0
         with open(path) as f, transaction.atomic():
@@ -71,16 +87,16 @@ class Command(BaseCommand):
                                                "reviewed_at"])
                     n_drop += 1
 
-                att_tags, att_clear = resolve(row.get("attacker", ""))
-                vic_tags, vic_clear = resolve(row.get("victim", ""))
+                att_tags, att_clear = resolve(row.get("attacker", ""), "attacker_nationality")
+                vic_tags, vic_clear = resolve(row.get("victim", ""), "victim_nationality")
 
                 if att_tags is not None or att_clear:
                     if not dry:
-                        ev.attacker_tags.set(att_tags or [])
+                        set_side(ev, "attacker_nationality", att_tags or [])
                     n_attacker += 1
                 if vic_tags is not None or vic_clear:
                     if not dry:
-                        ev.victim_tags.set(vic_tags or [])
+                        set_side(ev, "victim_nationality", vic_tags or [])
                     n_victim += 1
 
             if dry:

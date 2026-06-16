@@ -41,6 +41,12 @@ class AnalysisTask(models.Model):
         default=False, verbose_name="Шукати по коментарях",
         help_text="Включати коментарі/повідомлення чатів",
     )
+    drop_linked_comments = models.BooleanField(
+        default=False, verbose_name="Відсівати linked-коментарі",
+        help_text="TeleZip повертає коментарі із закритих груп-обговорень з "
+                  "префіксом 'linked:' у назві каналу. Увімкни, щоб такі пости "
+                  "не потрапляли в конвеєр подій (відсіюються на стадії precluster).",
+    )
     collect_chunk_days = models.PositiveSmallIntegerField(
         default=1, verbose_name="Розмір чанка збору (днів)",
         help_text="Період дробиться на чанки для TeleZip (ліміт ~2 хв/запит). "
@@ -507,18 +513,10 @@ class Event(models.Model):
     )
     settlement = models.CharField(max_length=160, blank=True, verbose_name="Населений пункт")
     tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Сторони/теги")
-    # Hand-validated attacker / victim ethnic groups (subset of nationality tags).
-    # Empty for pre-2026 events; populated as the corpus is audited per-region.
-    attacker_tags = models.ManyToManyField(
-        Tag, blank=True, related_name="events_as_attacker",
-        verbose_name="Етнос — нападник",
-        help_text="Лише nationality-теги; задайте після ручної верифікації.",
-    )
-    victim_tags = models.ManyToManyField(
-        Tag, blank=True, related_name="events_as_victim",
-        verbose_name="Етнос — жертва",
-        help_text="Лише nationality-теги; задайте після ручної верифікації.",
-    )
+    # Сторони конфлікту (нападник/жертва) живуть у `tags` під ЗАКРИТИМИ
+    # категоріями attacker_nationality / victim_nationality (словник дзеркалить
+    # nationality). Колишні окремі M2M attacker_tags/victim_tags видалені —
+    # дані перенесені в tags міграційним скриптом 2026-06-12.
     summary = models.TextField(blank=True, verbose_name="Опис")
     post_count = models.PositiveIntegerField(default=0, verbose_name="Кількість постів")
     channel_count = models.PositiveIntegerField(
@@ -528,20 +526,6 @@ class Event(models.Model):
     reach = models.BigIntegerField(
         default=0, verbose_name="Охоплення",
         help_text="Сумарна к-сть підписників унікальних каналів події",
-    )
-    is_corroborated = models.BooleanField(
-        default=False, verbose_name="Підтверджено",
-        help_text="Підтверджено ≥2 каналами",
-    )
-    is_bot_farm = models.BooleanField(
-        default=False, db_index=True, verbose_name="Бот-ферма / інфо-операція",
-        help_text="Подія поширювалась SEO/бот-сіткою (URL-інжекти, дублювання тексту, "
-                  "розтяг у часі або шаблонна мікроваріація). Виявляється евристикою — "
-                  "див. `manage.py detect_bot_farms`.",
-    )
-    bot_farm_score = models.FloatField(
-        default=0.0, verbose_name="Бот-ферма score",
-        help_text="0..1: чим вище — тим більше бот-ознак (URL-інжекти, дублювання, спред).",
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 

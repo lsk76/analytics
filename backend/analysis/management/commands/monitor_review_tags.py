@@ -109,6 +109,7 @@ class Command(BaseCommand):
                 use_cat = cat or (src_tag.category if src_tag else "criticism_target")
                 dst_tag, _ = Tag.objects.get_or_create(name=dst, category=use_cat)
             n_moved = 0
+            from analysis.services.tags import add_alias
             for src_name in srcs:
                 src_tag = self._q(src_name, cat).first()
                 if not src_tag: continue
@@ -117,6 +118,9 @@ class Command(BaseCommand):
                     p.tags.add(dst_tag)
                     p.tags.remove(src_tag)
                     n_moved += 1
+                # аліас робить мердж незворотним: наступний інжест цього ж
+                # варіанта одразу резолвиться в dst, а не створює тег заново
+                add_alias(dst_tag.category, src_name, dst_tag)
                 if not Post.objects.filter(tags=src_tag).exists():
                     src_tag.delete()
             self.stdout.write(self.style.SUCCESS(
@@ -135,6 +139,8 @@ class Command(BaseCommand):
                 continue
             t.name = new
             t.save(update_fields=["name"])
+            from analysis.services.tags import add_alias
+            add_alias(t.category, old, t)   # стара назва назавжди веде на нову
             self.stdout.write(self.style.SUCCESS(f"  renamed {old} → {new}"))
 
     @transaction.atomic

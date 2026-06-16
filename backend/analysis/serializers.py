@@ -40,7 +40,7 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = ["id", "event_date", "region_subject", "settlement", "region",
-                  "tags", "summary", "post_count", "is_corroborated", "posts"]
+                  "tags", "summary", "post_count", "posts"]
 
     def get_posts(self, obj):
         posts = sorted(

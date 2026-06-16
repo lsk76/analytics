@@ -409,7 +409,6 @@ def _create_event(run, task, posts_in):
         region=region, region_subject=region_subject, settlement=settlement,
         summary=cls.get("summary") or head.text[:300],
         post_count=len(posts_in),
-        is_corroborated=len({p.channel_id for p in posts_in if p.channel_id}) >= 2,
     )
     # NOTE: legacy run-scoped pipeline (superseded by services/stages.py). Tag
     # resolution removed with resolve_tag/resolve_conflict_tag; not used by workers.
@@ -565,7 +564,7 @@ def dedup(run):
     logger.info("dedup(streaming): %d groups -> %d events, %d LLM judgments",
                 len(clusters), n_events, n_llm)
     run.events_total = Event.objects.filter(run=run).count()
-    run.events_corroborated = Event.objects.filter(run=run, is_corroborated=True).count()
+    run.events_corroborated = Event.objects.filter(run=run, channel_count__gte=2).count()
     run.save(update_fields=["events_total", "events_corroborated"])
 
 

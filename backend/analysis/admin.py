@@ -435,8 +435,8 @@ class MonitorChatInline(admin.TabularInline):
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "pipeline", "date_from", "date_to", "geo_enabled",
-                    "is_active", "monitor_chats_count")
-    list_filter = ("pipeline", "is_active")
+                    "is_active", "drop_linked_comments", "monitor_chats_count")
+    list_filter = ("pipeline", "is_active", "drop_linked_comments")
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
     filter_horizontal = ("tag_categories",)
@@ -497,9 +497,9 @@ class InterEthnicFilter(admin.SimpleListFilter):
       * inter  — ≥2 distinct tags with category='nationality' (the loose
         "inter-ethnic" heuristic — two ethnicities tagged on the same event)
       * mono   — exactly 1 nationality tag (intra-ethnic OR one side untagged)
-      * audit  — both `attacker_tags` and `victim_tags` non-empty (only the
-        ~hundred events we hand-audited; strictest signal of inter-ethnic
-        framing because sides are explicit, not co-occurrence)
+      * audit  — event has tags in BOTH closed categories attacker_nationality
+        and victim_nationality (hand-audited sides; strictest signal of
+        inter-ethnic framing because sides are explicit, not co-occurrence)
       * none   — no nationality tag at all (review/enrich gap)
     """
     title = "Етнічність сторін"
@@ -535,10 +535,43 @@ class InterEthnicFilter(admin.SimpleListFilter):
                                             distinct=True))
                     .filter(_n_nat=0))
         if v == "audit":
+            # сторони живуть у звичайних tags під закритими категоріями
+            # attacker_nationality / victim_nationality (окремі M2M-поля знято)
             return (queryset
-                    .annotate(_n_att=Count("attacker_tags", distinct=True),
-                              _n_vic=Count("victim_tags", distinct=True))
+                    .annotate(_n_att=Count("tags", distinct=True,
+                                           filter=Q(tags__category="attacker_nationality")),
+                              _n_vic=Count("tags", distinct=True,
+                                           filter=Q(tags__category="victim_nationality")))
                     .filter(_n_att__gte=1, _n_vic__gte=1))
+        return queryset
+
+
+class ReviewSourceFilter(admin.SimpleListFilter):
+    """Хто виніс вердикт: агент-рев'ю / ручне Claude-рев'ю / відновлені / аудит."""
+    title = "Джерело рев'ю"
+    parameter_name = "review_source"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("agent", "Агент-рев'ю"),
+            ("manual", "Ручне (Claude)"),
+            ("restored", "Відновлені"),
+            ("audit", "Аудит (CSV)"),
+            ("none", "Без нотатки"),
+        ]
+
+    def queryset(self, request, queryset):
+        v = self.value()
+        if v == "agent":
+            return queryset.filter(review_notes__icontains="agent review")
+        if v == "manual":
+            return queryset.filter(review_notes__icontains="manual Claude review")
+        if v == "restored":
+            return queryset.filter(review_notes__icontains="[restored]")
+        if v == "audit":
+            return queryset.filter(review_notes__icontains="audit")
+        if v == "none":
+            return queryset.filter(review_notes="")
         return queryset
 
 
@@ -828,11 +861,13 @@ class PostAdmin(admin.ModelAdmin):
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("event_date", "review_badge", "bot_farm_badge",
+    change_form_template = "admin/analysis/event/change_form.html"
+    list_display = ("event_date", "review_badge",
                     "region_subject", "settlement",
-                    "conflict_display", "tags_list", "count_short", "reach_display",
+                    "tags_list", "count_short", "reach_display",
                     "posts_preview", "summary")
-    readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at")
+    readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at",
+                       "review_locked_at")   # службовий claim-lock review-воркерів — лише читання
     date_hierarchy = "event_date"
     change_list_template = "admin/analysis/event/change_list.html"
 
@@ -1433,13 +1468,12 @@ class EventAdmin(admin.ModelAdmin):
                         or request.GET.get("event_date__lte", "")),
             "task": request.GET.get("task", ""),
             "review_status": request.GET.get("review_status", ""),
-            "is_corroborated": request.GET.get("is_corroborated__exact", ""),
             "regions": request.GET.getlist("region_id"),
         }
         any_filter_set = any([
             selected_filters["date_from"], selected_filters["date_to"],
             selected_filters["task"], selected_filters["review_status"],
-            selected_filters["is_corroborated"], selected_filters["regions"],
+            selected_filters["regions"],
             any(opt["selected"] for opt in tag_options),
             any(opt["selected_exclude"] for opt in tag_options),
         ])
@@ -1544,17 +1578,48 @@ class EventAdmin(admin.ModelAdmin):
             ("event_date", DateRangeFilterBuilder(title="Період")),
             TaskFilter,
             "review_status",
+            ReviewSourceFilter,
             InterEthnicFilter,
             SubjectFilter,
             *cat_filters,
             ChannelFilter,
             ("channel_count", ChannelCountFilter),
             ("reach", ReachFilter),
-            "is_corroborated",
-            "is_bot_farm",
         )
 
-    actions = ["approve_selected", "reject_selected"]
+    def response_change(self, request, obj):
+        from django.utils import timezone as djtz
+        verdict = None
+        if "_approve_event" in request.POST:
+            verdict = ("approved", "✅ Подію схвалено")
+        elif "_reject_event" in request.POST:
+            verdict = ("rejected", "❌ Подію відхилено")
+        if verdict:
+            status, msg = verdict
+            obj.review_status = status
+            obj.reviewed_at = djtz.now()
+            obj.review_locked_at = None
+            note = f"[manual admin] {'схвалено' if status == 'approved' else 'відхилено'} вручну"
+            obj.review_notes = (obj.review_notes + " | " + note) if obj.review_notes else note
+            obj.save(update_fields=["review_status", "reviewed_at",
+                                    "review_locked_at", "review_notes"])
+            self.message_user(request, msg)
+            from django.http import HttpResponseRedirect
+            return HttpResponseRedirect(request.path)
+        return super().response_change(request, obj)
+
+    actions = ["approve_selected", "reject_selected", "copy_links"]
+
+    @admin.action(description="🔗 Скопіювати посилання на вибрані події")
+    def copy_links(self, request, queryset):
+        from django.template.response import TemplateResponse
+        links = [request.build_absolute_uri(f"/admin/analysis/event/{e.id}/change/")
+                 for e in queryset.order_by("id")]
+        return TemplateResponse(request, "admin/analysis/event/copy_links.html", {
+            "links": links,
+            "opts": self.model._meta,
+            "title": "Посилання на події",
+        })
 
     @admin.action(description="✅ Схвалити вибрані події")
     def approve_selected(self, request, queryset):
@@ -1583,14 +1648,7 @@ class EventAdmin(admin.ModelAdmin):
         icon = {"approved": "✅", "pending": "⏳", "rejected": "🚫"}.get(obj.review_status, "•")
         return format_html('<span title="{}">{}</span>', obj.review_notes or "", icon)
 
-    @admin.display(description="🤖", ordering="-bot_farm_score")
-    def bot_farm_badge(self, obj):
-        if not obj.is_bot_farm:
-            return ""
-        return format_html('<span title="bot-farm score: {}">🤖</span>',
-                           f"{obj.bot_farm_score:.2f}")
-
-    search_fields = ("summary", "region", "settlement")
+    search_fields = ("summary", "region", "settlement", "review_notes")
     filter_horizontal = ("tags",)
     autocomplete_fields = ("region_subject", "tags", "task")
 

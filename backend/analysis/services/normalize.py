@@ -81,7 +81,12 @@ def resolve_in_category(raw: str, category: str, closed: bool) -> Optional[Tag]:
             best = max(seeded, key=lambda s: (_common_prefix(nl, s.lower()),
                                               token_set_ratio(nl, s.lower())))
             bl = best.lower()
-            if _common_prefix(nl, bl) >= 4 or token_set_ratio(nl, bl) >= 85:
+            # Префікс сам по собі НЕ доказ: у таксономіях зі спільним префіксом
+            # (крит_*) він тривіально >=4 для будь-якої пари і мапив усе підряд
+            # на випадковий канон. Префікс лише ПОМ'ЯКШУЄ поріг fuzzy (85->60),
+            # сам не вирішує.
+            tsr = token_set_ratio(nl, bl)
+            if tsr >= 85 or (_common_prefix(nl, bl) >= 4 and tsr >= 60):
                 obj = Tag.objects.filter(category=category, name__iexact=best).first()
         if not obj:
             return None

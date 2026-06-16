@@ -50,6 +50,21 @@ from .telezip import TelezipClient
 
 logger = logging.getLogger(__name__)
 
+# Маркери «хост НЕДОСЯЖНИЙ» (мережа/VPN/DNS лежить) — підмножина transient, але
+# на відміну від 500/timeout це НЕ вина дня: інфра тимчасово відпала. Такі чанки
+# не списуємо в failed ніколи — лишаємо pending з довгим backoff (див. _chunk_failure).
+_CONNECTION_MARKERS = (
+    "Cannot connect to host", "Connection reset", "Connection refused",
+    "ServerDisconnected", "ClientConnectorError", "ClientOSError",
+    "Name or service not known", "Temporary failure in name",
+)
+
+
+def _is_connection_error(e: Exception) -> bool:
+    msg = f"{type(e).__name__}: {e}"
+    return any(m in msg for m in _CONNECTION_MARKERS)
+
+
 # --- tick sizes / limits ----------------------------------------------------
 FILTER_BATCH = 1000            # regex-фільтр дешевий, можна великими пачками
 PRESCREEN_TICK = 600           # постів за тік prescreen-воркера
@@ -167,10 +182,15 @@ async def _fetch_chunk(task, dfrom, dto, channel_ids):
         async def fetch_one(cid):
             # Adaptive range-query: повне вікно за раз, а на 500/timeout (важкий
             # чат×день перевищує ~6год search-budget TeleZip) воно само ділиться
-            # навпіл →4→8… до підлоги 4год. Легкі дні = 1 запит; важкі — рівно
-            # стільки дроблення, скільки треба (мінімум зайвих запитів → менше 429).
+            # навпіл →4→8… Легкі дні = 1 запит; важкі — рівно стільки дроблення,
+            # скільки треба (мінімум зайвих запитів → менше 429).
+            # min_window=1h: дні-монстри (важка негація × завантажений день) навіть
+            # за 3год не вкладались у 2-хв бюджет TeleZip і таймаутили назавжди.
+            # Дроблення зупиняється на span < 2×min_window, тож 1h дозволяє йти аж
+            # до ~1-2год шматків. Якщо й це тайматиме — знизити до 30хв.
             return await tz.find_posts_range(q, dfrom, dto, langs, unique=True,
-                                             channel_ids=[cid])
+                                             channel_ids=[cid],
+                                             min_window=timedelta(hours=1))
         results = await asyncio.gather(*[fetch_one(c) for c in channel_ids])
     out, seen = [], set()
     for batch in results:
@@ -201,11 +221,24 @@ def _chunk_failure(chunk, e):
         logger.info("mon_collect: split chunk into %d daily chunks", n)
         return
     transient = _is_transient_error(e)
+    connection = _is_connection_error(e)
     chunk.locked_at = None
     chunk.error = str(e)[:1000]
-    if transient and chunk.attempts >= MAX_COLLECT_ATTEMPTS:
-        # Вічний retry на «отруйному» дні ніколи не зійдеться і блокує чергу
-        # (claim бере найранішу дату першою). Здаємось і пускаємо інші чанки.
+    if connection:
+        # Хост НЕДОСЯЖНИЙ (VPN/мережа лежить) — це НЕ «отруйний» день, а тимчасова
+        # інфра. День у цьому не винен, тому НІКОЛИ не списуємо його в failed:
+        # тримаємо pending з довгим backoff (5 хв). _claim_chunk поважає next_retry_at,
+        # тож воркер пропускає цей чанк і пробує інші (досяжні), а коли лінк
+        # повертається — збір сам докачує діру без ручних скидань.
+        chunk.status = "pending"
+        chunk.next_retry_at = djtz.now() + timedelta(seconds=300)
+        chunk.save(update_fields=["status", "locked_at", "error", "next_retry_at"])
+        logger.info("mon_collect %s: лінк недосяжний, лишаю pending, retry за 300с (attempt %d)",
+                    chunk.date_from, chunk.attempts)
+    elif transient and chunk.attempts >= MAX_COLLECT_ATTEMPTS:
+        # Вічний retry на «отруйному» дні (важкий запит -> 500/timeout) ніколи не
+        # зійдеться і блокує чергу (claim бере найранішу дату першою). Здаємось і
+        # пускаємо інші чанки. Connection-помилки сюди НЕ доходять (гілка вище).
         chunk.status = "failed"
         chunk.save(update_fields=["status", "locked_at", "error"])
         logger.warning("mon_collect %s: giving up after %d transient attempts -> failed",
@@ -446,12 +479,17 @@ async def _llm_tag(batches, region, model):
 
 
 def _get_tag(cache, category, name):
+    """ЄДИНИЙ шлях створення/пошуку тега — services.tags.resolve. Для closed-
+    категорій (criticism_target і т.д.) невідомий варіант повертає None і тег
+    ПРОСТО НЕ ДОДАЄТЬСЯ — раніше сліпий get_or_create наплодив ~450 варіантів
+    criticism_target замість 18 канонічних."""
+    from analysis.services import tags as tag_service
     name = (name or "").strip()
     if not name or category not in VALID_TAG_CATEGORIES:
         return None
     key = (category, name)
     if key not in cache:
-        cache[key], _ = Tag.objects.get_or_create(name=name, category=category)
+        cache[key] = tag_service.resolve(category, name)
     return cache[key]
 
 

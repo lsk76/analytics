@@ -23,7 +23,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         if task:
             qs = qs.filter(task__slug=task)
         if self.request.query_params.get("corroborated") == "1":
-            qs = qs.filter(is_corroborated=True)
+            qs = qs.filter(channel_count__gte=2)   # "підтверджено" = ≥2 каналів
         tag_cat = self.request.query_params.get("tag_category")
         if tag_cat:
             qs = qs.filter(tags__category=tag_cat).distinct()

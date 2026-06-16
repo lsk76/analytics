@@ -21,7 +21,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
-from django.db import transaction, IntegrityError
+from django.db import transaction, DatabaseError, IntegrityError
 from django.db.models import Q
 from django.utils import timezone as djtz
 
@@ -350,6 +350,15 @@ def precluster_once(task):
         scope = Q(channel__is_channel=False)
         antiscope = ~scope
 
+    # Optional opt-in (task.drop_linked_comments): TeleZip labels posts pulled from a
+    # channel's CLOSED linked discussion group with a "linked:" username prefix. These
+    # are comments/reactions, noise for an event pipeline — exclude them from scope and
+    # add them to antiscope so they finalize to DONE instead of clogging dedup.
+    if getattr(task, "drop_linked_comments", False):
+        linked = Q(channel__username__startswith="linked:")
+        scope = scope & ~linked
+        antiscope = linked if antiscope is None else (antiscope | linked)
+
     # finalize OUT-OF-SCOPE enriched posts so they never clog the dedup watermark
     finalized = 0
     if antiscope is not None:
@@ -588,17 +597,18 @@ def _create_event(task, posts_in):
         summary=cls.get("summary") or head.text[:300],
         post_count=len(posts_in),
         channel_count=len(uniq_channels),
-        is_corroborated=len(uniq_channels) >= 2,
     )
     # resolve tags per the task's chosen categories (values are lists)
     tag_objs = []
     cls_tags = cls.get("tags") or {}
+    from analysis.services import tags as tag_service
     for c in task.tag_categories.all():
         vals = cls_tags.get(c.key) or []
         if isinstance(vals, str):
             vals = [vals]
         for v in vals:
-            if v and (o := resolve_in_category(str(v), c.key, c.closed)):
+            # єдиний сервіс тегів: closed-флаг бере з TagCategory, а не з call-site
+            if v and (o := tag_service.resolve(c.key, str(v))):
                 tag_objs.append(o)
     if tag_objs:
         ev.tags.set(tag_objs)
@@ -618,8 +628,7 @@ def _attach_posts(ev, posts_in):
     ev.post_count = len(members)
     ev.channel_count = len(chans)
     ev.reach = sum(chans.values())
-    ev.is_corroborated = len(chans) >= 2
-    ev.save(update_fields=["post_count", "channel_count", "reach", "is_corroborated"])
+    ev.save(update_fields=["post_count", "channel_count", "reach"])
 
 
 def dedup_once(task):
@@ -633,6 +642,23 @@ def dedup_once(task):
                                posted_at__isnull=False)
     if settle_to is not None:
         relq = relq.filter(posted_at__date__lte=settle_to)
+
+    # PER-TICK DATE CAP: process at most DEDUP_BATCH_DAYS of the OLDEST eligible
+    # posts per tick. Live collection keeps each tick small naturally, but a bulk
+    # re-dedup (e.g. 84k posts re-queued at once after detaching event tails) would
+    # otherwise try to fuzzy+judge the whole backlog in ONE tick — pathological. The
+    # cap (>> dedup_window_days) keeps within-window cross-day merges intact while the
+    # worker marches forward day by day.
+    # NB: do NOT drop this below the typical viral-repost spread — at 1 day the anchor
+    # window (event_date ± dedup_window_days) ages a fresh event out after 2 days, so a
+    # repost 3+ days after the first mention spawns a DUPLICATE event instead of merging.
+    # Measured 2026-06-14: batch=1 fragmented the detached-tail backfill into ~8k events
+    # of which only ~1.5k were unique. Keep >= a week.
+    DEDUP_BATCH_DAYS = 7
+    oldest_day = relq.order_by("posted_at").values_list("posted_at", flat=True).first()
+    if oldest_day is not None:
+        cap_to = oldest_day.date() + timedelta(days=DEDUP_BATCH_DAYS)
+        relq = relq.filter(posted_at__date__lte=cap_to)
     rel = list(relq.select_related("channel").order_by("posted_at", "id"))
 
     # Non-relevant classified posts can be finalized WITHOUT the settle_to gate:
@@ -670,9 +696,17 @@ def dedup_once(task):
     new_clusters = sorted((P._cluster_of(g) for g in split_groups),
                           key=lambda c: c["dmin"])
 
-    # anchors: recent events (within win) we may still merge into
+    # anchors: events whose date overlaps THIS tick's window (±win) — the only ones
+    # a new cluster could merge into. The upper bound is essential: without it the
+    # filter is `event_date >= oldest` (unbounded), so backlog re-dedup oldest-first
+    # pulled EVERY event after `oldest` as an anchor (measured 3018 for one window) →
+    # 936×3018 ≈ 2.8M fuzzy comparisons + thousands of judge calls per tick → the
+    # worker hung. In live incremental runs oldest≈today so this was invisible.
     oldest = new_clusters[0]["dmin"] - win
-    recent_events = (Event.objects.filter(task=task, event_date__gte=oldest.date())
+    newest = max(c["dmax"] for c in new_clusters) + win
+    recent_events = (Event.objects.filter(task=task,
+                                          event_date__gte=oldest.date(),
+                                          event_date__lte=newest.date())
                      .prefetch_related("posts__channel"))
     active = []
     for ev in recent_events:
@@ -680,9 +714,21 @@ def dedup_once(task):
         if eposts:
             c = P._cluster_of(eposts)
             c["event"] = ev
+            # ATTACH-AGE GUARD: anchor the event at its EARLIEST mention instead of
+            # the rolling post span. _cluster_of() takes dmax from the latest attached
+            # post, so every new repost extended dmax and kept the event eligible for
+            # the next window — the snowball that grew 13k-post mega-events spanning
+            # months. With a fixed anchor a post can only join an event whose first
+            # mention is within `win` days — older events simply age out.
+            anchor = min(p.posted_at for p in eposts)
+            c["dmin"] = anchor
+            c["dmax"] = anchor + win
             active.append(c)
 
-    soft = max(35, task.dedup_cand_thresh - 20)
+    # Floors raised 35->50 and 45->60 (region branch below): with the old floors a
+    # same-city pair («Махачкала» + 35-45% summary overlap) reached the judge, which
+    # said ОДНА often enough to glue different incidents into one event.
+    soft = max(50, task.dedup_cand_thresh - 20)
     generic = task.generic_sides or None        # per-task umbrella terms
     pool = active + new_clusters
     base = len(active)
@@ -703,7 +749,7 @@ def dedup_once(task):
                 pairs.append((a, b))
             elif shared and sf >= soft:
                 pairs.append((a, b))
-            elif _same_region(pool[a], pool[b]) and sf >= max(45, soft):
+            elif _same_region(pool[a], pool[b]) and sf >= max(60, soft):
                 pairs.append((a, b))          # same place + moderate similarity
 
     same = []
@@ -751,7 +797,10 @@ def dedup_once(task):
                 try:
                     with transaction.atomic():
                         _attach_posts(target, new_posts)
-                except IntegrityError:
+                except (IntegrityError, DatabaseError):
+                    # IntegrityError: FK trips because the target Event was deleted
+                    # mid-attach. DatabaseError: same race, but caught later — the
+                    # recompute save() matches 0 rows. Either way: fresh Event.
                     _create_event(task, new_posts)
                     created += 1
         else:                                  # brand-new event

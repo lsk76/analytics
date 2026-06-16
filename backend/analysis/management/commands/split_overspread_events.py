@@ -100,7 +100,6 @@ class Command(BaseCommand):
                 region_subject=original.region_subject,
                 settlement=original.settlement,
                 summary=original.summary,
-                is_corroborated=original.is_corroborated,
                 review_status=original.review_status,
                 review_notes=original.review_notes,
                 reviewed_at=original.reviewed_at,
@@ -126,8 +125,7 @@ class Command(BaseCommand):
                 new_ev.post_count = len(members)
                 new_ev.channel_count = len(chans)
                 new_ev.reach = sum(chans.values())
-                new_ev.is_corroborated = len(chans) >= 2
-                new_ev.save(update_fields=["post_count", "channel_count", "reach", "is_corroborated"])
+                new_ev.save(update_fields=["post_count", "channel_count", "reach"])
 
             # recompute reach/post_count on the original (it lost members)
             members = list(Post.objects.filter(event=original).select_related("channel"))
@@ -135,5 +133,4 @@ class Command(BaseCommand):
             original.post_count = len(members)
             original.channel_count = len(chans)
             original.reach = sum(chans.values())
-            original.is_corroborated = len(chans) >= 2
-            original.save(update_fields=["post_count", "channel_count", "reach", "is_corroborated"])
+            original.save(update_fields=["post_count", "channel_count", "reach"])
