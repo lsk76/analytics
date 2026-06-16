@@ -1,5 +1,17 @@
 {% extends "admin/change_form.html" %}
 
+{% block object-tools-items %}
+  {% if original.pk %}
+  <li>
+    <a class="historylink"
+       href="{% url 'admin:analysis_event_posts' original.pk %}">
+      📋 Усі пости події ({{ original.post_count }})
+    </a>
+  </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
+
 {% block submit_buttons_bottom %}
 {{ block.super }}
 <div class="submit-row" style="display:flex;gap:10px;">

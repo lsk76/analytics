@@ -676,12 +676,24 @@ class PostAdmin(admin.ModelAdmin):
     search_fields = ("url", "text")
     readonly_fields = ("stage_locked_at", "stage_attempts", "stage_error", "created_at")
     list_per_page = 100
+    # The Post table is huge (300k+). Django's "X of N total" header runs an
+    # unfiltered COUNT(*) — measured ~11.5s — on EVERY filtered changelist (e.g.
+    # opening one event's posts). The filtered query itself is 9ms (event_id is
+    # indexed), so the whole wait was that header count. Skip it.
+    show_full_result_count = False
     change_list_template = "admin/analysis/post/change_list.html"
 
     def get_queryset(self, request):
         return (super().get_queryset(request)
                 .select_related("channel")
                 .prefetch_related("tags"))
+
+    def lookup_allowed(self, lookup, value, *args, **kwargs):
+        # Allow ?event__id__exact=<id> so the event page can deep-link to all its
+        # posts here (event is not a list_filter — too many events for a dropdown).
+        if lookup in ("event__id__exact", "event__id", "event"):
+            return True
+        return super().lookup_allowed(lookup, value, *args, **kwargs)
 
     # ---------- charts -------------------------------------------------------
     _CHART_PARAMS = ("gran", "tag_top", "region_top", "_fragment", "_ts")
@@ -879,8 +891,37 @@ class EventAdmin(admin.ModelAdmin):
                  name="analysis_event_charts"),
             path("conflicts/", self.admin_site.admin_view(self.conflicts_view),
                  name="analysis_event_conflicts"),
+            path("<int:event_id>/posts/", self.admin_site.admin_view(self.event_posts_view),
+                 name="analysis_event_posts"),
         ]
         return custom + super().get_urls()
+
+    def event_posts_view(self, request, event_id):
+        """Lightweight page listing ALL posts of ONE event. The Post changelist is
+        unusably slow here (heavy filter dropdowns + charts over the 300k-row table);
+        this view touches only this event's posts, so it opens instantly."""
+        from django.shortcuts import get_object_or_404
+        from django.template.response import TemplateResponse
+        ev = get_object_or_404(Event, pk=event_id)
+        posts = sorted(
+            ev.posts.select_related("channel").all(),
+            key=lambda p: -(p.channel.subscribers if p.channel and p.channel.subscribers else 0),
+        )
+        rows = [{
+            "posted_at": p.posted_at,
+            "channel": (p.channel_name or (p.channel.title if p.channel else "") or "приватний"),
+            "subs": (p.channel.subscribers if p.channel else None),
+            "url": p.url,
+            "text": (p.text or "").strip(),
+        } for p in posts]
+        ctx = {
+            **self.admin_site.each_context(request),
+            "title": f"Пости події #{ev.id}",
+            "opts": self.model._meta,
+            "event": ev,
+            "rows": rows,
+        }
+        return TemplateResponse(request, "admin/analysis/event/event_posts.html", ctx)
 
     PRESET_HOTSPOT_REGIONS = [
         "Бурятія", "Саха (Якутія)", "Тива", "Татарстан",

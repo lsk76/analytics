@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Адмін</a>
+  &rsaquo; <a href="{% url 'admin:analysis_event_changelist' %}">Події</a>
+  &rsaquo; <a href="{% url 'admin:analysis_event_change' event.id %}">#{{ event.id }}</a>
+  &rsaquo; Пости
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:14px">
+  <h1 style="margin:0 0 4px">Пости події #{{ event.id }} <small style="font-weight:normal;color:var(--body-quiet-color)">— {{ rows|length }} шт.</small></h1>
+  <div style="color:var(--body-quiet-color);max-width:900px">{{ event.event_date }} · {{ event.region|default:"—" }} · {{ event.summary }}</div>
+  <a class="button" href="{% url 'admin:analysis_event_change' event.id %}">&larr; Назад до події</a>
+</div>
+
+<table style="width:100%;border-collapse:collapse">
+  <thead>
+    <tr style="text-align:left;border-bottom:2px solid var(--border-color)">
+      <th style="padding:6px 8px">Дата</th>
+      <th style="padding:6px 8px">Канал</th>
+      <th style="padding:6px 8px;text-align:right">👥</th>
+      <th style="padding:6px 8px">Текст</th>
+      <th style="padding:6px 8px">TG</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr style="border-bottom:1px solid var(--border-color);vertical-align:top">
+      <td style="padding:6px 8px;white-space:nowrap">{{ r.posted_at|date:"Y-m-d H:i"|default:"—" }}</td>
+      <td style="padding:6px 8px;white-space:nowrap">{{ r.channel }}</td>
+      <td style="padding:6px 8px;text-align:right">{% if r.subs %}{{ r.subs }}{% else %}—{% endif %}</td>
+      <td style="padding:6px 8px;max-width:640px;white-space:pre-wrap">{{ r.text|truncatechars:400 }}</td>
+      <td style="padding:6px 8px;white-space:nowrap">{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">↗</a>{% endif %}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5" style="padding:12px">Постів немає.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
