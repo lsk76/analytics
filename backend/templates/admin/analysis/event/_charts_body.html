@@ -99,6 +99,10 @@
         <div class="chart-canvas-wrap"><canvas id="ch_events"></canvas></div>
       </div>
       <div class="chart-card full">
+        <h3>Публікації за день</h3>
+        <div class="chart-canvas-wrap"><canvas id="ch_posts"></canvas></div>
+      </div>
+      <div class="chart-card full">
         <h3>Охоплення (сумарне)</h3>
         <div class="chart-canvas-wrap"><canvas id="ch_reach"></canvas></div>
       </div>
@@ -296,6 +300,7 @@ function initCharts() {
     },
   });
   baseLine(document.getElementById('ch_events'),  'Події',  DATA.timeseries.map(r => r.events),  PALETTE[0]);
+  baseLine(document.getElementById('ch_posts'),   'Публікації', DATA.timeseries.map(r => r.posts), PALETTE[2]);
   baseLine(document.getElementById('ch_reach'),   'Охоплення', DATA.timeseries.map(r => r.reach),    PALETTE[1]);
 
   const horizBar = (ctx, rows, color, labelKey='name', valKey='count', extra=null) => {

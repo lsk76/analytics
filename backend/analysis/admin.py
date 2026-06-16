@@ -1170,7 +1170,7 @@ class EventAdmin(admin.ModelAdmin):
             qs.exclude(event_date__isnull=True)
               .annotate(bucket=trunc("event_date"))
               .values("bucket")
-              .annotate(events=Count("id"), reach=Sum("reach"))
+              .annotate(events=Count("id"), reach=Sum("reach"), posts=Sum("post_count"))
               .order_by("bucket")
         )
         # unique publishing channels per bucket (through posts)
@@ -1217,6 +1217,7 @@ class EventAdmin(admin.ModelAdmin):
             timeseries.append({
                 "date": bk.isoformat(),
                 "events": r["events"] if r else 0,
+                "posts": int(r["posts"] or 0) if r else 0,
                 "reach": int(r["reach"] or 0) if r else 0,
                 "channels": ch_by_bucket.get(bk, 0),
                 "url": url,
