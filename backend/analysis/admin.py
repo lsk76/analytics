@@ -1183,24 +1183,44 @@ class EventAdmin(admin.ModelAdmin):
                 .order_by("bucket")
         )
         ch_by_bucket = {r["bucket"]: r["channels"] for r in ts_channels}
+        ev_by_bucket = {r["bucket"]: r for r in ts_events}
+
+        # Fill EVERY bucket across [min, max] so the x-axis is continuous: days/weeks/
+        # months with zero events render as a real 0, instead of the line jumping the
+        # gap (which reads as "no data here" rather than the truth — "no events here").
+        def _next_bucket(d):
+            if gran == "day":
+                return d + _td(days=1)
+            if gran == "week":
+                return d + _td(days=7)
+            from datetime import date as _date
+            y, m = d.year, d.month
+            return _date(y + (m // 12), (m % 12) + 1, 1)  # 1st of next month
+
+        all_buckets = []
+        if ts_events:
+            cur, last = ts_events[0]["bucket"], ts_events[-1]["bucket"]
+            while cur <= last:
+                all_buckets.append(cur)
+                cur = _next_bucket(cur)
+
         timeseries = []
-        for r in ts_events:
-            d_from, d_to = bucket_range(r["bucket"])
-            url, samples = "", []
+        for bk in all_buckets:
+            r = ev_by_bucket.get(bk)
+            d_from, d_to = bucket_range(bk)
+            url = ""
             if d_from is not None:
                 # Use the rangefilter's canonical param names so the date inputs
                 # in the sidebar pre-fill correctly after the click-through.
                 url = drill_url({"event_date__range__gte": d_from.isoformat(),
                                  "event_date__range__lte": d_to.isoformat()})
-                samples = samples_for(qs.filter(event_date__gte=d_from,
-                                                event_date__lte=d_to))
             timeseries.append({
-                "date": r["bucket"].isoformat() if r["bucket"] else None,
-                "events": r["events"],
-                "reach": int(r["reach"] or 0),
-                "channels": ch_by_bucket.get(r["bucket"], 0),
+                "date": bk.isoformat(),
+                "events": r["events"] if r else 0,
+                "reach": int(r["reach"] or 0) if r else 0,
+                "channels": ch_by_bucket.get(bk, 0),
                 "url": url,
-                "samples": samples,
+                "samples": [],
             })
 
         # ---- breakdowns -------------------------------------------------------
