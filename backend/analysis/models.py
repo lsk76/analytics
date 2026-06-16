@@ -47,6 +47,12 @@ class AnalysisTask(models.Model):
                   "префіксом 'linked:' у назві каналу. Увімкни, щоб такі пости "
                   "не потрапляли в конвеєр подій (відсіюються на стадії precluster).",
     )
+    min_channel_subscribers = models.PositiveIntegerField(
+        default=0, verbose_name="Мін. підписників каналу",
+        help_text="0 = без фільтра. Якщо >0 — пости з ЕНРІЧЕНИХ каналів, де підписників "
+                  "менше за це число, відсіюються на precluster (не йдуть у classify/dedup). "
+                  "Прибирає бот-ферму: одну історію, накручену по тисячах мікроканалів.",
+    )
     collect_chunk_days = models.PositiveSmallIntegerField(
         default=1, verbose_name="Розмір чанка збору (днів)",
         help_text="Період дробиться на чанки для TeleZip (ліміт ~2 хв/запит). "

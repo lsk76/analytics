@@ -359,6 +359,19 @@ def precluster_once(task):
         scope = scope & ~linked
         antiscope = linked if antiscope is None else (antiscope | linked)
 
+    # Optional opt-in (task.min_channel_subscribers > 0): drop posts from MICRO channels
+    # (subscriber count below the threshold). This is the bot-farm amplification cloud —
+    # one story mass-reposted across ~1800 channels of ~50 subscribers each, which inflates
+    # post_count/reach without real audience. Only ENRICHED channels are filtered (we know
+    # their real size); unenriched/unknown (subscribers still default 0) are KEPT so a
+    # not-yet-enriched legit channel isn't dropped on missing data. Dropped -> antiscope ->
+    # finalized to DONE before the expensive classify/dedup, so micro spam is never LLM-analysed.
+    min_subs = getattr(task, "min_channel_subscribers", 0) or 0
+    if min_subs > 0:
+        micro = Q(channel__enriched=True, channel__subscribers__lt=min_subs)
+        scope = scope & ~micro
+        antiscope = micro if antiscope is None else (antiscope | micro)
+
     # finalize OUT-OF-SCOPE enriched posts so they never clog the dedup watermark
     finalized = 0
     if antiscope is not None:
