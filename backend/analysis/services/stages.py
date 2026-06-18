@@ -266,6 +266,38 @@ def _maybe_finish_job(job):
 
 # --------------------------------------------------------------------------- enrich
 
+def channel_post_hashes(hashes):
+    """Subset of `hashes` that ALSO exist as a CHANNEL (broadcast) post. Used to detect
+    chat messages that merely echo a channel post (linked-channel auto-forward or a
+    forwarded channel post) — those are not genuine member activity."""
+    hashes = list(hashes)
+    if not hashes:
+        return set()
+    return set(Post.objects.filter(content_hash__in=hashes, channel__chat_type="channel")
+               .values_list("content_hash", flat=True))
+
+
+def flag_channel_reposts(post_ids):
+    """Mark chat/discussion posts in this batch whose content_hash also exists as a
+    channel post as `is_channel_repost` (exclude from chat-activity analysis). Works
+    BOTH directions so collection order is irrelevant: chat posts that match a known
+    channel post, AND channel posts in the batch that retro-flag already-stored chat
+    echoes of the same hash. Cheap — content_hash is indexed."""
+    posts = list(Post.objects.filter(id__in=post_ids).select_related("channel"))
+    chat = [p for p in posts if p.channel and p.channel.chat_type in ("chat", "discussion")]
+    chan_hashes = [p.content_hash for p in posts
+                   if p.channel and p.channel.chat_type == "channel"]
+    if chat:
+        known = channel_post_hashes({p.content_hash for p in chat})
+        flag = [p.id for p in chat if p.content_hash in known]
+        if flag:
+            Post.objects.filter(id__in=flag).update(is_channel_repost=True)
+    if chan_hashes:
+        (Post.objects.filter(content_hash__in=chan_hashes, is_channel_repost=False,
+                             channel__chat_type__in=["chat", "discussion"])
+         .update(is_channel_repost=True))
+
+
 def enrich_once(task):
     """No TeleZip here (collector owns it) — link channel from cache + LLM region."""
     ids = _claim_posts(task, Post.STAGE_COLLECTED, ENRICH_BATCH)
@@ -295,6 +327,8 @@ def enrich_once(task):
             changed.append(p)
     if changed:
         Post.objects.bulk_update(changed, ["channel"], batch_size=500)
+
+    flag_channel_reposts(ids)          # channel echoes in chats -> is_channel_repost
 
     _advance(ids, Post.STAGE_ENRICHED)
     logger.info("enrich: +%d posts", len(ids))

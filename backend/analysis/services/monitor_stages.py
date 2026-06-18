@@ -305,6 +305,14 @@ def mon_collect_once(task):
             classification={"_monitor": True, "_collect_source": "mon_collect"},
         ))
     if to_create:
+        # flag chat messages that merely echo a channel post (same content_hash) so they
+        # are ignored in chat-activity analysis (is_channel_repost). Set pre-save.
+        from analysis.services.stages import channel_post_hashes
+        known = channel_post_hashes({p.content_hash for p in to_create})
+        for p in to_create:
+            if (p.content_hash in known and p.channel
+                    and p.channel.chat_type in ("chat", "discussion")):
+                p.is_channel_repost = True
         Post.objects.bulk_create(to_create, batch_size=1000, ignore_conflicts=True)
 
     chunk.status = "done"
