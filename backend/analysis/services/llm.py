@@ -1,4 +1,5 @@
 """Async OpenRouter (OpenAI-compatible) client + JSON helpers."""
+import asyncio
 import json
 import logging
 from typing import Any, List, Optional
@@ -10,10 +11,16 @@ logger = logging.getLogger(__name__)
 
 
 def make_client() -> AsyncOpenAI:
-    """One client per asyncio.run — pass it to many query() calls, then close it."""
+    """One client per asyncio.run — pass it to many query() calls, then close it.
+
+    max_retries=0: the SDK's default (2) silently triples the wall-clock of a bad
+    call (each attempt waits the full timeout) and, on a flapping VPN, made dedup
+    workers appear wedged for minutes. Callers tolerate a "" reply and retry on the
+    next tick, so failing fast is strictly better than retrying inside a hung socket."""
     return AsyncOpenAI(
         api_key=settings.OPENROUTER_API_KEY,
         base_url=settings.OPENROUTER_API_BASE_URL,
+        max_retries=0,
     )
 
 
@@ -40,9 +47,14 @@ async def query(messages: List[dict], model: Optional[str] = None, timeout: floa
                       max_tokens=max_tokens)
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        resp = await client.chat.completions.create(**kwargs)
+        # Hard asyncio ceiling ON TOP of the SDK's own `timeout`: a VPN that drops
+        # mid-request can leave httpx blocked on a half-open socket where the SDK
+        # read-timeout never fires — wait_for cancels the coroutine so a single bad
+        # call can NEVER wedge the worker. +10s lets the SDK timeout win normally.
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(**kwargs), timeout=timeout + 10)
         return (resp.choices[0].message.content or "").strip()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — incl. asyncio.TimeoutError
         logger.warning("LLM error (%s): %s", model, e)
         return ""
     finally:

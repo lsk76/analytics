@@ -708,6 +708,15 @@ def dedup_once(task):
         split_groups.append(cur)
     new_clusters = sorted((P._cluster_of(g) for g in split_groups),
                           key=lambda c: c["dmin"])
+    # CAP new clusters per tick. The pair-build below is O(new × (active+new)); with the
+    # low cand_thresh a bulk backfill window (e.g. 1500 re-queued orphan clusters) explodes
+    # to ~180k candidate pairs -> 180k judge calls -> the worker "hangs". Live incremental
+    # runs add ~tens of clusters/day, so this never bit them. Process the OLDEST N here;
+    # the rest stay `classified` and the next tick picks them up (its anchors are the events
+    # we just created at the boundary, so cross-window merges still happen).
+    MAX_NEW_CLUSTERS = 120
+    if len(new_clusters) > MAX_NEW_CLUSTERS:
+        new_clusters = new_clusters[:MAX_NEW_CLUSTERS]
 
     # anchors: events whose date overlaps THIS tick's window (±win) — the only ones
     # a new cluster could merge into. The upper bound is essential: without it the
@@ -766,9 +775,14 @@ def dedup_once(task):
                 pairs.append((a, b))          # same place + moderate similarity
 
     same = []
+    logger.info("dedup pair-build: pool=%d new=%d -> pairs=%d forced=%d",
+                len(pool), len(pool) - base, len(pairs), len(forced))
     if pairs:
-        pairs_text = [(P._judge_text(pool[a]["rep"]), P._judge_text(pool[b]["rep"]))
-                      for a, b in pairs]
+        # memoize _judge_text per cluster: a cluster can appear in thousands of pairs
+        # (cand_thresh is low), and _judge_text runs regex normalisation — recomputing it
+        # per pair turned a dense backfill window into a multi-million regex hang.
+        _jt = {i: P._judge_text(pool[i]["rep"]) for i in {x for pr in pairs for x in pr}}
+        pairs_text = [(_jt[a], _jt[b]) for a, b in pairs]
         same = asyncio.run(P._judge_pairs(pairs_text, system=task.dedup_judge_prompt or None))
 
     parent = list(range(len(pool)))

@@ -28,7 +28,9 @@ from .normalize import resolve_region
 logger = logging.getLogger(__name__)
 
 CLASSIFY_BATCH = 8   # smaller batch => less cross-item summary contamination
-CONCURRENCY = 20
+CONCURRENCY = 40     # parallel LLM calls; dense dedup windows make THOUSANDS of judge
+                     # calls per tick — 20 made a tick ~25min, 40 ~halves it. Raise if
+                     # OpenRouter doesn't 429.
 
 
 # --------------------------------------------------------------------------- helpers
@@ -364,7 +366,7 @@ async def _judge_pairs(pairs_text, system=None):
             # dedup judge replies "ОДНА" or "РІЗНІ" — 16 tokens is more than enough
             r = await llm.query([{"role": "system", "content": system},
                                  {"role": "user", "content": f"A: {a[:280]}\nB: {b[:280]}"}],
-                                client=client, max_tokens=16)
+                                client=client, max_tokens=16, timeout=12)
             same[k] = (r or "").strip().lower().startswith(("одна", "одно", "так", "да", "yes"))
 
     try:
