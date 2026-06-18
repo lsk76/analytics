@@ -182,12 +182,50 @@ class Channel(models.Model):
     fetched_at = models.DateTimeField(null=True, blank=True, verbose_name="Отримано")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
+    # --- Директорія каналів/чатів РФ (регіон + теми + аналіз) ---
+    CHAT_TYPE_CHOICES = [
+        ("channel", "Канал (мовлення)"),
+        ("chat", "Чат/група (обговорення)"),
+        ("discussion", "Група-обговорення каналу (linked)"),
+        ("unknown", "Невідомо"),
+    ]
+    region_subject = models.ForeignKey(
+        "Region", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="channels", verbose_name="Суб'єкт РФ (канонічний)",
+    )
+    chat_type = models.CharField(
+        max_length=16, choices=CHAT_TYPE_CHOICES, blank=True, db_index=True,
+        verbose_name="Тип",
+    )
+    topics = models.JSONField(
+        default=list, blank=True, verbose_name="Теми",
+        help_text="Список тем (новини, етнічне, політика, локал-чат, барахолка…)",
+    )
+    discusses_problems = models.BooleanField(
+        null=True, blank=True, db_index=True, verbose_name="Обговорює проблеми РФ",
+        help_text="Чи реально обговорюють суспільні/політичні/етнічні проблеми РФ",
+    )
+    directory_focus = models.CharField(
+        max_length=300, blank=True, verbose_name="Фокус (1 речення)",
+    )
+    directory_meta = models.JSONField(
+        default=dict, blank=True, verbose_name="Метадані класифікації",
+        help_text="Сире рішення агента: confidence, reason, сирі region/topics.",
+    )
+    directory_classified_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Класифіковано (директорія)",
+    )
+
     class Meta:
         verbose_name = "Канал"
         verbose_name_plural = "Канали"
         constraints = [
             models.UniqueConstraint(fields=["tg_id"], name="uniq_channel_tgid",
                                     condition=models.Q(tg_id__isnull=False)),
+        ]
+        indexes = [
+            models.Index(fields=["region_subject", "discusses_problems"]),
+            models.Index(fields=["chat_type", "subscribers"]),
         ]
 
     def __str__(self):
@@ -470,6 +508,12 @@ class Post(models.Model):
         default=list, blank=True, verbose_name="Також у чатах",
         help_text="Список username чатів, де той самий автор написав ідентичний текст "
                   "(збираємо як 1 Post замість N).",
+    )
+    is_channel_repost = models.BooleanField(
+        default=False, db_index=True, verbose_name="Репост каналу в чаті",
+        help_text="True = це повідомлення з КАНАЛУ (авто-форвард linked-каналу або "
+                  "переслане), а не оригінальна репліка учасника. ІГНОРУВАТИ при аналізі "
+                  "активності чату. Визначається збігом content_hash з постом каналу.",
     )
     tags = models.ManyToManyField(
         Tag, blank=True, related_name="posts", verbose_name="Теги",

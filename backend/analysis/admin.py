@@ -461,11 +461,90 @@ class MonitorChatAdmin(admin.ModelAdmin):
     list_editable = ("is_active", "is_critical_source", "priority")
 
 
+from rangefilter.filters import NumericRangeFilterBuilder as _NRFB
+SubscribersRangeFilter = _NRFB(title="Підписники")
+
+
+class ChannelTopicFilter(admin.SimpleListFilter):
+    """Filter by a value inside the JSON `topics` list (Postgres @> contains)."""
+    title = "Тема"
+    parameter_name = "topic"
+    TOPICS = ["новини", "локал-чат", "барахолка/оголошення", "авто/ДТП",
+              "етнічне/міжнаціональне", "політика/опозиція", "влада/силовики",
+              "релігія", "кримінал/ЧП", "знайомства/дозвілля", "інше"]
+
+    def lookups(self, request, model_admin):
+        return [(t, t) for t in self.TOPICS]
+
+    def queryset(self, request, qs):
+        return qs.filter(topics__contains=[self.value()]) if self.value() else qs
+
+
+class ClassifiedFilter(admin.SimpleListFilter):
+    """Has the directory classifier processed this channel yet?"""
+    title = "Класифіковано (директорія)"
+    parameter_name = "classified"
+
+    def lookups(self, request, model_admin):
+        return [("yes", "Так"), ("no", "Ні")]
+
+    def queryset(self, request, qs):
+        if self.value() == "yes":
+            return qs.filter(directory_classified_at__isnull=False)
+        if self.value() == "no":
+            return qs.filter(directory_classified_at__isnull=True)
+        return qs
+
+
+class ChannelSubjectFilter(SubjectFilter):
+    """Same select2 faceted RF-subject filter as EventAdmin, but faceted by CHANNEL
+    counts (aggregated directly on the filtered set — no pk__in over 108k rows)."""
+
+    def lookups(self, request, model_admin):
+        return [(str(r.id), r.name) for r in
+                Region.objects.filter(channels__isnull=False).distinct().order_by("name")]
+
+    def choices(self, changelist):
+        selected = self.request.GET.getlist(self.parameter_name)
+        yield {
+            "selected": len(selected) == 0,
+            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+            "display": _("All"),
+            "value": "__all__",
+        }
+        base = facet_base(changelist, self.request, self)
+        rows = (base.filter(region_subject__isnull=False)
+                .values("region_subject__id", "region_subject__name")
+                .annotate(n=Count("pk")).order_by())
+        present = {str(r["region_subject__id"]): (r["region_subject__name"], r["n"])
+                   for r in rows}
+        for rid in selected:
+            if rid not in present:
+                r = Region.objects.filter(id=rid).first()
+                if r:
+                    present[rid] = (r.name, 0)
+        for rid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
+            yield {"selected": rid in selected, "query_string": "",
+                   "display": f"{name} ({n})", "value": rid}
+
+
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
-    list_display = ("username", "title", "subscribers", "inferred_region", "is_channel", "enriched")
-    search_fields = ("username", "title")
-    list_filter = ("is_channel", "enriched")
+    list_display = ("username", "title", "subscribers", "region_subject", "chat_type",
+                    "discusses_problems", "topics_display", "directory_focus")
+    list_filter = (ChannelSubjectFilter, "chat_type", "discusses_problems", ChannelTopicFilter,
+                   ("subscribers", SubscribersRangeFilter), ClassifiedFilter,
+                   "enriched", "is_channel", "language")
+    search_fields = ("username", "title", "description")
+    ordering = ("-subscribers",)
+    list_select_related = ("region_subject",)
+    list_per_page = 50
+    show_full_result_count = False          # 108k rows — skip the slow full COUNT(*)
+    autocomplete_fields = ("region_subject",)
+
+    @admin.display(description="Теми")
+    def topics_display(self, obj):
+        return ", ".join(obj.topics) if obj.topics else "—"
 
 
 class TagAliasInline(admin.TabularInline):
