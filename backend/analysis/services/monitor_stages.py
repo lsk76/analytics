@@ -81,7 +81,7 @@ MAX_COLLECT_ATTEMPTS = 8       # cap на ТРАНЗІЄНТНІ ретраї з
                                # (важкий запит / TeleZip давиться однією датою) що
                                # вічно 500-ить, не має блокувати чергу — після
                                # стількох спроб лишаємо failed і йдемо далі.
-MIN_LEN, MAX_LEN = 15, 800     # довжини як у monitor_filter
+MIN_LEN, MAX_LEN = 25, 600     # довжини як у monitor_filter
 
 VALID_TAG_CATEGORIES = {"criticism_target", "topic", "opinion"}
 

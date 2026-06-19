@@ -1,10 +1,13 @@
 import json
 
 from django.contrib import admin, messages
+from django.core.paginator import Paginator
+from django.db import connection
 from django.db.models import Count, Sum, F
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
 from django.shortcuts import render
 from django.urls import path
+from django.utils.functional import cached_property
 from django.utils import timezone as djtz
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
@@ -738,8 +741,36 @@ def _region_population_map():
     return out, norm
 
 
+class EstimatedCountPaginator(Paginator):
+    """Pagination COUNT(*) over the multi-million-row Post table takes seconds.
+    When the changelist is UNFILTERED, use Postgres' `reltuples` planner estimate
+    (instant) instead of a real COUNT. Filtered queries still get an exact count —
+    they're fast because the filtered columns (event_id, task, stage) are indexed."""
+
+    @cached_property
+    def count(self):
+        qs = self.object_list
+        try:
+            has_filter = bool(qs.query.where)
+        except Exception:
+            has_filter = True
+        if not has_filter:
+            with connection.cursor() as cur:
+                cur.execute("SELECT reltuples::bigint FROM pg_class WHERE relname = %s",
+                            [qs.model._meta.db_table])
+                row = cur.fetchone()
+            if row and row[0] and row[0] > 0:
+                return int(row[0])
+        return super().count
+
+
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
+    # Default model ordering is `posted_at` (unindexed) → full-sort of millions of
+    # rows on every unfiltered changelist. Order by the PK (indexed) instead for an
+    # instant default load; column headers still let you sort by posted_at on demand.
+    ordering = ("-id",)
+    paginator = EstimatedCountPaginator
     list_display = ("posted_at", "channel_name", "criticism_targets",
                     "topics", "opinions", "text_preview", "tg_link",
                     "is_relevant")

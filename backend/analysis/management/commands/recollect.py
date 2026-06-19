@@ -32,6 +32,8 @@ class Command(BaseCommand):
                        help="re-run pipeline on existing posts (no TeleZip)")
         g.add_argument("--fresh", action="store_true",
                        help="wipe period and collect again from TeleZip")
+        g.add_argument("--incremental", action="store_true",
+                       help="additive re-collect: keep existing data, add only new posts")
 
     def handle(self, *args, **o):
         task = AnalysisTask.objects.filter(slug=o["slug"]).first()
@@ -46,6 +48,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 f"reprocess {a}…{b}: -{n_ev} подій, скинуто {n_posts} постів → collected. "
                 f"Воркери доведуть назад до подій."))
+        elif o["incremental"]:
+            job = ResearchRun.objects.create(
+                task=task, title=f"recollect-add {djtz.now():%Y-%m-%d %H:%M}",
+                date_from=a, date_to=b, chunk_days=task.collect_chunk_days or 1,
+                status="collecting")
+            n_chunks = stages.recollect_incremental(task, a, b, job=job)
+            self.stdout.write(self.style.SUCCESS(
+                f"incremental {a}…{b}: +{n_chunks} чанків (additive, без витирання), job #{job.id}. "
+                f"Колектор додасть лише нові url; воркери доженуть лише нові пости."))
         else:
             job = ResearchRun.objects.create(
                 task=task, title=f"recollect {djtz.now():%Y-%m-%d %H:%M}",

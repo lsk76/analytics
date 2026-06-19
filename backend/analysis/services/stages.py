@@ -928,6 +928,25 @@ def recollect_fresh(task, date_from, date_to, job=None):
     return n_ev, n_posts, n_chunks
 
 
+def recollect_incremental(task, date_from, date_to, job=None):
+    """ADDITIVE re-collection: keep all existing posts+events, just re-run TeleZip collection
+    for the period and add ONLY posts not already in the DB.
+
+    The collector keys on (task, url) via `update_or_create`, so already-known posts are merely
+    updated in place — they keep their stage and event linkage (stay `done`/attached) — while
+    genuinely new urls are inserted at the default stage ('collected') and flow through the
+    pipeline. dedup then attaches the new clusters to existing event anchors in-window or mints
+    new events. We only clear the period's CollectChunks (collection bookkeeping; posts/events
+    untouched) so `enqueue_collection` won't skip the ranges as 'already done'.
+    Returns chunks_added."""
+    CollectChunk.objects.filter(task=task, date_from__gte=date_from,
+                                date_to__lte=date_to).delete()
+    n_chunks = enqueue_collection(task, date_from, date_to, job=job)
+    logger.info("recollect-incremental %s..%s: +%d chunks (additive, no wipe)",
+                date_from, date_to, n_chunks)
+    return n_chunks
+
+
 # --------------------------------------------------------------------------- registry
 
 def review_once(task):

@@ -543,6 +543,9 @@ class Post(models.Model):
         indexes = [
             models.Index(fields=["task", "stage"]),
             models.Index(fields=["task", "stage", "posted_at"]),
+            # Covering index for the admin charts GROUP BY (filtered by task+stage,
+            # bucketed by posted_at, grouped by channel) — lets it run index-only.
+            models.Index(fields=["task", "stage", "posted_at", "channel"]),
         ]
 
     def __str__(self):
