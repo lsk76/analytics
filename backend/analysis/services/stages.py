@@ -659,6 +659,10 @@ def _create_event(task, posts_in):
                 tag_objs.append(o)
     if tag_objs:
         ev.tags.set(tag_objs)
+    # Гео як тег (спільна категорія events+monitor): місто → settlement-тег.
+    # Дзеркалить Event.settlement (поле лишається legacy до Фази 3).
+    if settlement and (st := tag_service.resolve("settlement", settlement)):
+        ev.tags.add(st)
     _attach_posts(ev, posts_in)
     return ev
 
