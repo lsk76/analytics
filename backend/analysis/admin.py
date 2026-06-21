@@ -676,29 +676,6 @@ class JobPeriodFilter(admin.SimpleListFilter):
         return queryset
 
 
-class TagCategoryFilter(admin.SimpleListFilter):
-    title = "Категорія тегів"
-    parameter_name = "tag_cat"
-
-    def lookups(self, request, model_admin):
-        return [
-            ("criticism_target", "має об'єкт критики"),
-            ("topic", "має тему"),
-            ("opinion", "має тип думки"),
-            ("any", "має будь-який тег"),
-            ("none", "без тегів"),
-        ]
-
-    def queryset(self, request, qs):
-        v = self.value()
-        if not v: return qs
-        if v == "none":
-            return qs.filter(tags__isnull=True).distinct()
-        if v == "any":
-            return qs.filter(tags__isnull=False).distinct()
-        return qs.filter(tags__category=v).distinct()
-
-
 class PrescreenFilter(admin.SimpleListFilter):
     title = "Prescreen"
     parameter_name = "prescreen"
@@ -781,7 +758,7 @@ class PostAdmin(admin.ModelAdmin):
         tag_category_filter("criticism_target", "Об'єкт критики"),
         tag_category_filter("topic", "Тема"),
         tag_category_filter("opinion", "Тип думки"),
-        TagCategoryFilter, PrescreenFilter,
+        PrescreenFilter,
     )
     search_fields = ("url", "text")
     readonly_fields = ("stage_locked_at", "stage_attempts", "stage_error", "created_at")

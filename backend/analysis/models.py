@@ -683,3 +683,35 @@ class TelezipSlot(models.Model):
 
     def __str__(self):
         return f"slot {self.slot} (until {self.leased_until})"
+
+
+class ChannelDailyStat(models.Model):
+    """Денний агрегат повідомлень по (задача, канал, день).
+
+    Зберігає знаменник «усіх повідомлень» ПІСЛЯ видалення сирих не-релевантних
+    постів: % критики = relevant/total лишається рахованим на будь-якому зрізі
+    (канал→регіон через Channel.region_subject; день→тиждень/місяць/рік).
+    """
+    task = models.ForeignKey("AnalysisTask", on_delete=models.CASCADE,
+                             related_name="daily_stats")
+    channel = models.ForeignKey("Channel", on_delete=models.CASCADE,
+                                related_name="daily_stats")
+    date = models.DateField(db_index=True, verbose_name="День")
+    total = models.IntegerField(default=0, verbose_name="Усіх повідомлень")
+    relevant = models.IntegerField(default=0, verbose_name="Критика")
+    reposts = models.IntegerField(default=0, verbose_name="Авто-репости каналу")
+
+    class Meta:
+        verbose_name = "Денна статистика каналу"
+        verbose_name_plural = "Денні статистики каналів"
+        constraints = [
+            models.UniqueConstraint(fields=["task", "channel", "date"],
+                                    name="uniq_chan_daily_stat"),
+        ]
+        indexes = [
+            models.Index(fields=["task", "date"]),
+            models.Index(fields=["channel", "date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.task_id}/{self.channel_id} {self.date}: {self.relevant}/{self.total}"
