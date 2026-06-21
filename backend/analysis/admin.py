@@ -19,7 +19,7 @@ from .services import stages
 from .models import (
     AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
-    Region, RegionAlias, MonitorChat,
+    Region, RegionAlias, MonitorChat, ChannelDailyStat,
 )
 from .multiselect_filter import (
     multiselect_filter, autocomplete_filter, MultiSelectFilter,
@@ -793,18 +793,12 @@ class PostAdmin(admin.ModelAdmin):
         return custom + super().get_urls()
 
     def charts_view(self, request):
-        """Графіки коментарів — відображають ТІ САМІ фільтри changelist.
-        Час = posted_at, охоплення = channel.subscribers, субʼєкт = channel.inferred_region."""
+        """Графіки критики: коментарі в часі по республіках (region_subject),
+        % критики (÷ усі повідомлення з ChannelDailyStat), розподіл по об'єктах
+        критики й темах. Гранулярність (день/тиждень/місяць) і вмикання/вимикання
+        республік — на клієнті. Фільтри беруться з changelist."""
         from django.http import QueryDict
         is_fragment = request.GET.get("_fragment") == "1"  # до стрипу _CHART_PARAMS
-        gran = request.GET.get("gran", "day")
-        if gran not in ("day", "week", "month"):
-            gran = "day"
-        trunc = {"day": TruncDate, "week": TruncWeek, "month": TruncMonth}[gran]
-        try: tag_top = max(3, min(60, int(request.GET.get("tag_top", 20))))
-        except (TypeError, ValueError): tag_top = 20
-        try: region_top = max(3, min(100, int(request.GET.get("region_top", 25))))
-        except (TypeError, ValueError): region_top = 25
 
         # apply changelist filters (strip our own params first)
         get_clean = QueryDict(request.GET.urlencode(), mutable=True)
@@ -824,110 +818,78 @@ class PostAdmin(admin.ModelAdmin):
                 qd.setlist(k, v if isinstance(v, (list, tuple)) else [str(v)])
             return f"{cl_base}?{qd.urlencode()}" if qd else cl_base
 
-        # ---- SINGLE-PASS aggregation: GROUP BY (день, канал) — один скан
-        # 2.28М+ рядків замість трьох. Канал у ключі дає і регіон, і підписників,
-        # тож з однієї сітки виводимо timeseries, by_region (з охопленням як
-        # сумою підписників РІЗНИХ чатів регіону) і region_timeseries.
-        grid = list(qs.exclude(posted_at__isnull=True)
-                    .order_by()
-                    .annotate(b=trunc("posted_at"))
-                    .values("b", "channel_id", "channel__inferred_region",
-                            "channel__subscribers")
-                    .annotate(n=Count("id")))
+        # Республіка = курований channel.region_subject (а не рядок inferred_region).
+        # Лише МОНІТОРИНГ-критика (events-пости мають свої графіки в EventAdmin),
+        # інакше у вибірку без фільтра лізуть ~90 регіонів інцидентів.
+        REL = (qs.filter(is_relevant=True, task__pipeline=AnalysisTask.PIPELINE_MONITOR)
+               .exclude(posted_at__isnull=True))
+        RKEY = "channel__region_subject__name"
 
-        # timeseries: коментарі по bucket
-        ts_acc = {}
-        for r in grid:
-            ts_acc[r["b"]] = ts_acc.get(r["b"], 0) + r["n"]
-        timeseries = [{
-            "date": b.isoformat() if b else None, "count": n,
-            "url": link({"posted_at__range__gte": b.isoformat(),
-                         "posted_at__range__lte": b.isoformat()}) if gran == "day" and b else "",
-        } for b, n in sorted(ts_acc.items(), key=lambda kv: (kv[0] is None, kv[0]))]
+        def rname(v):
+            return v or "(без субʼєкта)"
 
-        # by_region: групуємо по КАНОНІЧНІЙ назві субʼєкта (щоб «Дагестан» і
-        # «Республика Дагестан» злились в один). Охоплення = сума підписників
-        # РІЗНИХ чатів субʼєкта; населення — з Region/RegionAlias.
-        pop_map, norm = _region_population_map()
+        # 1) КРИТИКА по (республіка, день) + 2) УСІ повідомлення (знаменник) із
+        #    ChannelDailyStat у тому ж обсязі задач. Гранулярність робить клієнт.
+        task_ids = list(REL.values_list("task_id", flat=True).distinct())
+        # .order_by() ОБОВ'ЯЗКОВО: changelist несе ordering=(-id), яке інакше
+        # підмішується у GROUP BY і вибухає (рядок на кожну пару пост-тег).
+        crit_rows = (REL.order_by().annotate(d=TruncDate("posted_at"))
+                     .values("d", RKEY).annotate(n=Count("id")))
+        tot_rows = (ChannelDailyStat.objects.order_by().filter(task_id__in=task_ids)
+                    .values("date", "channel__region_subject__name")
+                    .annotate(t=Sum("total")))
 
-        def canon_of(reg):
-            return pop_map.get(norm(reg), (reg, None))  # (canonical_name, population)
+        daily = {}          # (reg, iso_day) -> [crit, total]
+        reg_crit = {}       # reg -> сумарна критика (для сортування/відбору)
+        for r in crit_rows:
+            reg, d = rname(r[RKEY]), r["d"].isoformat()
+            daily.setdefault((reg, d), [0, 0])[0] += r["n"]
+            reg_crit[reg] = reg_crit.get(reg, 0) + r["n"]
+        for r in tot_rows:
+            reg, d = rname(r["channel__region_subject__name"]), r["date"].isoformat()
+            daily.setdefault((reg, d), [0, 0])[1] += r["t"] or 0
 
-        reg_n = {}                       # canon -> к-сть коментарів
-        reg_chan_subs = {}               # canon -> {channel_id: subscribers} (distinct чати)
-        reg_pop = {}                     # canon -> населення
-        for r in grid:
-            reg = r["channel__inferred_region"]
-            if not reg:
-                continue
-            canon, pop = canon_of(reg)
-            reg_pop[canon] = pop
-            reg_n[canon] = reg_n.get(canon, 0) + r["n"]
-            reg_chan_subs.setdefault(canon, {})[r["channel_id"]] = r["channel__subscribers"] or 0
-        by_region_sorted = sorted(reg_n.items(), key=lambda kv: -kv[1])[:region_top]
-        by_region = []
-        for canon, n in by_region_sorted:
-            pop = reg_pop.get(canon)
-            reach = sum(reg_chan_subs.get(canon, {}).values())  # сума підписників чатів
-            per_reach = (n / reach) if reach else 0             # коментарі / охоплення
-            per_reach_pop = (per_reach / pop) if pop else 0     # / населення
-            by_region.append({
-                "name": canon, "count": n, "reach": reach, "population": pop,
-                "per_reach": round(per_reach, 6),
-                "per_reach_pop": per_reach_pop,
-                "url": "",  # нема per-region фільтра на Post-адмінці — без drill
-            })
+        regions = sorted(reg_crit, key=lambda k: -reg_crit[k])
+        daily_series = [{"r": reg, "d": d, "c": c, "t": t}
+                        for (reg, d), (c, t) in daily.items() if reg in reg_crit]
 
-        # region_timeseries: сітка для топ-8 канонічних субʼєктів
-        top_regions = [canon for canon, _ in by_region_sorted[:8]]
-        buckets = sorted({r["b"] for r in grid if r["b"]})
-        cell = {}                        # (bucket, canon) -> к-сть
-        for r in grid:
-            if not r["channel__inferred_region"] or r["b"] is None:
-                continue
-            canon, _ = canon_of(r["channel__inferred_region"])
-            cell[(r["b"], canon)] = cell.get((r["b"], canon), 0) + r["n"]
-        region_timeseries = []
-        for b in buckets:
-            entry = {"date": b.isoformat()}
-            for canon in top_regions:
-                entry[canon] = cell.get((b, canon), 0)
-            region_timeseries.append(entry)
-        region_lines = list(top_regions)
+        # 3) об'єкти критики × республіка; 4) теми × республіка.
+        def by_cat_region(cat):
+            rows = (REL.order_by().filter(tags__category=cat)
+                    .values(RKEY, "tags__name", "tags__id")
+                    .annotate(n=Count("id", distinct=True)))
+            return [{"r": rname(x[RKEY]), "name": x["tags__name"], "n": x["n"],
+                     "url": link({f"tag_{cat}": x["tags__id"]})} for x in rows]
 
-        # ---- 4) розподіл по тегах (per category, top-N) ----
-        by_tag = []
-        for c in TagCategory.objects.order_by("order", "key"):
-            raw = list(qs.filter(tags__category=c.key)
-                       .values("tags__id", "tags__name")
-                       .annotate(n=Count("id", distinct=True))
-                       .order_by("-n")[:tag_top])
-            if not raw:
-                continue
-            by_tag.append({
-                "category": c.key, "label": c.label,
-                "rows": [{"name": r["tags__name"], "count": r["n"],
-                          "url": link({f"tag_{c.key}": r["tags__id"]})} for r in raw],
-            })
+        targets = by_cat_region("criticism_target")
+        topics = by_cat_region("topic")
 
-        total = qs.count()
+        # 5+6) ті самі категорії, але в ЧАСІ (на кожен об'єкт/тему — лінія).
+        def by_cat_region_day(cat):
+            rows = (REL.order_by().filter(tags__category=cat)
+                    .annotate(d=TruncDate("posted_at"))
+                    .values("d", RKEY, "tags__name")
+                    .annotate(n=Count("id", distinct=True)))
+            return [{"d": x["d"].isoformat(), "r": rname(x[RKEY]),
+                     "name": x["tags__name"], "n": x["n"]} for x in rows]
+
+        targets_day = by_cat_region_day("criticism_target")
+        topics_day = by_cat_region_day("topic")
+
         ctx = {
             **self.admin_site.each_context(request),
-            "title": "Графіки коментарів",
+            "title": "Графіки критики",
             "opts": self.model._meta,
-            "gran": gran, "tag_top": tag_top, "region_top": region_top,
-            "total": total,
+            "total": REL.count(),
             "preserved_qs": base_q,
-            "qs_no_gran": "&".join(p for p in base_q.split("&") if not p.startswith("gran=")),
-            "timeseries_json": json.dumps(timeseries, ensure_ascii=False),
-            "by_region_json": json.dumps(by_region, ensure_ascii=False),
-            "region_ts_json": json.dumps(region_timeseries, ensure_ascii=False),
-            "region_lines_json": json.dumps(region_lines, ensure_ascii=False),
-            "by_tag": by_tag,
-            "by_tag_json": json.dumps(by_tag, ensure_ascii=False),
+            "regions_json": json.dumps(regions, ensure_ascii=False),
+            "daily_json": json.dumps(daily_series, ensure_ascii=False),
+            "targets_json": json.dumps(targets, ensure_ascii=False),
+            "topics_json": json.dumps(topics, ensure_ascii=False),
+            "targets_day_json": json.dumps(targets_day, ensure_ascii=False),
+            "topics_day_json": json.dumps(topics_day, ensure_ascii=False),
         }
-        # _fragment=1 → лише тіло (для inline-toggle #charts у change_list);
-        # інакше повна сторінка (прямий доступ до /charts/).
+        # _fragment=1 → лише тіло (inline #charts); інакше повна сторінка.
         tmpl = ("admin/analysis/post/_charts_body.html" if is_fragment
                 else "admin/analysis/post/charts.html")
         return render(request, tmpl, ctx)

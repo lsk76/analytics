@@ -5,147 +5,251 @@
            margin:10px 0; background:var(--darkened-bg); border:1px solid var(--border-color);
            border-radius:8px; color:var(--body-fg); }
   .cmeta strong { font-size:18px; }
-  .gran a { padding:4px 10px; border-radius:6px; text-decoration:none;
+  .gran button, .gran .seg { padding:4px 10px; border-radius:6px; cursor:pointer;
             border:1px solid var(--border-color); color:var(--body-fg);
-            background:var(--body-bg); margin-right:4px; }
-  .gran a.active { background:var(--link-fg); color:var(--button-fg); border-color:transparent; }
-  .grid { display:grid; gap:16px; grid-template-columns:1fr 1fr; }
+            background:var(--body-bg); margin-right:4px; font-size:13px; }
+  .gran button.active { background:var(--link-fg); color:var(--button-fg); border-color:transparent; }
+  .regs { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 14px; margin:8px 0;
+          background:var(--body-bg); border:1px solid var(--border-color); border-radius:8px; }
+  .regs label { display:inline-flex; align-items:center; gap:5px; font-size:13px; cursor:pointer;
+                color:var(--body-fg); }
+  .regs .sw { width:11px; height:11px; border-radius:2px; display:inline-block; }
+  .regs .allbtn { font-size:12px; padding:2px 8px; border:1px solid var(--border-color);
+                  border-radius:6px; background:var(--body-bg); color:var(--body-fg); cursor:pointer; }
   .card { background:var(--body-bg); border:1px solid var(--border-color);
-          border-radius:8px; padding:14px; }
-  .card.full { grid-column:1 / -1; }
+          border-radius:8px; padding:14px; margin:14px 0; }
   .card h3 { margin:0 0 10px; font-size:15px; color:var(--body-fg); }
-  .cwrap { position:relative; height:300px; }
-  .cwrap.tall { height:380px; }
+  .cwrap { position:relative; height:320px; }
+  .cwrap.tall { height:420px; }
   .empty { color:var(--body-quiet-color); padding:20px; text-align:center; }
   .hint { color:var(--body-quiet-color); font-size:12px; }
 </style>
 
 <div class="cw">
   <div class="cmeta">
-    <strong>{{ total }}</strong> коментарів у поточному фільтрі
+    <strong>{{ total }}</strong> коментарів критики у поточному фільтрі
     <span class="gran">
       Гранулярність:
-      <a href="?{{ qs_no_gran }}&gran=day"   class="{% if gran == 'day' %}active{% endif %}">день</a>
-      <a href="?{{ qs_no_gran }}&gran=week"  class="{% if gran == 'week' %}active{% endif %}">тиждень</a>
-      <a href="?{{ qs_no_gran }}&gran=month" class="{% if gran == 'month' %}active{% endif %}">місяць</a>
+      <button type="button" data-gran="day"   class="active">день</button>
+      <button type="button" data-gran="week">тиждень</button>
+      <button type="button" data-gran="month">місяць</button>
     </span>
-    <span class="hint">клік по графіку → пости у новій вкладці</span>
   </div>
 
-  <div class="grid">
-    <div class="card full">
-      <h3>Коментарі в часі</h3>
-      <div class="cwrap"><canvas id="ch-time"></canvas></div>
-    </div>
+  <div class="regs" id="reg-toggles">
+    <button type="button" class="allbtn" data-all="1">усі</button>
+    <button type="button" class="allbtn" data-all="0">жодної</button>
+    <span class="hint">республіки:</span>
   </div>
 
-  <h2 style="color:var(--body-fg);margin:18px 0 8px;">По субʼєктах</h2>
-  <div class="grid">
-    <div class="card">
-      <h3>Коментарі</h3>
-      <div class="cwrap"><canvas id="ch-region-count"></canvas></div>
-    </div>
-    <div class="card">
-      <h3>Коментарі / охоплення <small class="hint">(÷ підписники чатів)</small></h3>
-      <div class="cwrap"><canvas id="ch-region-perreach"></canvas></div>
-    </div>
-    <div class="card full">
-      <h3>Коментарі / охоплення / населення <small class="hint">(÷ підписники ÷ населення регіону)</small></h3>
-      <div class="cwrap"><canvas id="ch-region-perreachpop"></canvas></div>
-    </div>
+  <div class="card">
+    <h3>Критика в часі — по республіках</h3>
+    <div class="cwrap tall"><canvas id="ch-time"></canvas></div>
   </div>
 
-  <div class="grid">
-    <div class="card full">
-      <h3>Субʼєкти: коментарі по часу</h3>
-      <div class="cwrap tall"><canvas id="ch-region-time"></canvas></div>
-    </div>
+  <div class="card">
+    <h3>% критики від усіх повідомлень — по республіках
+        <small class="hint">(критика ÷ усі повідомлення за період)</small></h3>
+    <div class="cwrap tall"><canvas id="ch-pct"></canvas></div>
   </div>
 
-  <h2 style="color:var(--body-fg);margin:18px 0 8px;">Розподіл по тегах</h2>
-  <div class="grid">
-    {% for cat in by_tag %}
-      <div class="card">
-        <h3>{{ cat.label }} <small class="hint">({{ cat.rows|length }})</small></h3>
-        {# висота пропорційна к-сті тегів — кожен label отримує ~26px, інакше тиснуться #}
-        <div class="cwrap" style="height: {% widthratio cat.rows|length 1 26 %}px; min-height: 220px;">
-          <canvas id="ch-tag-{{ cat.category }}"></canvas>
-        </div>
-      </div>
-    {% empty %}
-      <div class="card full empty">Немає тегів у поточному фільтрі.</div>
-    {% endfor %}
+  <div class="card">
+    <h3>Об'єкти критики — по республіках
+        <small class="hint">(стек по республіках; клік по сегменту → пости)</small></h3>
+    <div class="cwrap tall"><canvas id="ch-targets"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h3>Теми — по республіках</h3>
+    <div class="cwrap tall"><canvas id="ch-topics"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h3>Об'єкти критики — в часі
+        <small class="hint">(лінія на об'єкт; клік у легенді — показати/сховати; топ-8 видно одразу)</small></h3>
+    <div class="cwrap tall"><canvas id="ch-targets-time"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h3>Теми — в часі
+        <small class="hint">(лінія на тему; клік у легенді — показати/сховати)</small></h3>
+    <div class="cwrap tall"><canvas id="ch-topics-time"></canvas></div>
   </div>
 </div>
 
-<script id="d-time" type="application/json">{{ timeseries_json|safe }}</script>
-<script id="d-region" type="application/json">{{ by_region_json|safe }}</script>
-<script id="d-region-ts" type="application/json">{{ region_ts_json|safe }}</script>
-<script id="d-region-lines" type="application/json">{{ region_lines_json|safe }}</script>
-<script id="d-tags" type="application/json">{{ by_tag_json|safe }}</script>
+<script id="d-regions" type="application/json">{{ regions_json|safe }}</script>
+<script id="d-daily"   type="application/json">{{ daily_json|safe }}</script>
+<script id="d-targets" type="application/json">{{ targets_json|safe }}</script>
+<script id="d-topics"  type="application/json">{{ topics_json|safe }}</script>
+<script id="d-targets-day" type="application/json">{{ targets_day_json|safe }}</script>
+<script id="d-topics-day"  type="application/json">{{ topics_day_json|safe }}</script>
 <script>
 (function () {
   if (typeof Chart === 'undefined') return;
   var css = getComputedStyle(document.body);
   Chart.defaults.color = css.getPropertyValue('--body-fg') || '#333';
   Chart.defaults.borderColor = css.getPropertyValue('--border-color') || '#ddd';
-  var PAL = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
-  var J = function (id) { var n=document.getElementById(id); try { return JSON.parse(n.textContent); } catch (e) { return null; } };
-  var open = function (url) { if (url) window.open(url, '_blank'); };
+  var PAL = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1',
+             '#ff9da7','#9c755f','#bab0ac','#8cd17d','#b6992d','#499894','#d37295'];
+  var J = function (id){ var n=document.getElementById(id); try{return JSON.parse(n.textContent);}catch(e){return null;} };
+  var open = function (u){ if(u) window.open(u,'_blank'); };
 
-  // 1) коментарі в часі
-  var t = J('d-time') || [];
-  new Chart(document.getElementById('ch-time'), {
-    type:'bar',
-    data: { labels: t.map(function (r) { return r.date; }),
-      datasets: [{ label:'Коментарі', data:t.map(function(r){return r.count;}), backgroundColor:PAL[0] }] },
-    options: { maintainAspectRatio:false, plugins:{legend:{display:false}},
-      onClick:function(e,el){ if(el.length){ open(t[el[0].index].url); } },
-      scales:{ y:{title:{display:true,text:'коментарі'}} } }
+  var regions = J('d-regions') || [];
+  var daily   = J('d-daily')   || [];   // [{r,d,c,t}]
+  var targets = J('d-targets') || [];   // [{r,name,n,url}]
+  var topics  = J('d-topics')  || [];   // [{r,name,n,url}]
+  var targetsDay = J('d-targets-day') || [];  // [{d,r,name,n}]
+  var topicsDay  = J('d-topics-day')  || [];  // [{d,r,name,n}]
+
+  var colorOf = {}; regions.forEach(function(r,i){ colorOf[r]=PAL[i%PAL.length]; });
+  var visible = {}; regions.forEach(function(r){ visible[r]=true; });
+  var gran = 'day';
+
+  // ---- date bucketing (client-side gran) ----
+  function bucket(iso){
+    if (gran==='month') return iso.slice(0,7);
+    if (gran==='week'){
+      var d=new Date(iso+'T00:00:00Z'); var wd=d.getUTCDay(); var diff=(wd===0?6:wd-1);
+      d.setUTCDate(d.getUTCDate()-diff); return d.toISOString().slice(0,10);
+    }
+    return iso;
+  }
+  function vis(){ return regions.filter(function(r){ return visible[r]; }); }
+
+  // ---- region toggle UI ----
+  var box = document.getElementById('reg-toggles');
+  regions.forEach(function(r){
+    var lab=document.createElement('label');
+    lab.innerHTML='<span class="sw" style="background:'+colorOf[r]+'"></span>'+
+                  '<input type="checkbox" checked data-reg="'+r.replace(/"/g,'&quot;')+'"> '+r;
+    box.appendChild(lab);
+  });
+  box.addEventListener('change', function(e){
+    var cb=e.target.closest('input[type=checkbox]'); if(!cb) return;
+    visible[cb.dataset.reg]=cb.checked; renderAll();
+  });
+  box.addEventListener('click', function(e){
+    var b=e.target.closest('.allbtn'); if(!b) return;
+    var on=b.dataset.all==='1';
+    regions.forEach(function(r){ visible[r]=on; });
+    box.querySelectorAll('input[type=checkbox]').forEach(function(cb){ cb.checked=on; });
+    renderAll();
   });
 
-  // 2) по субʼєктах — ТРИ окремі графіки
-  var rg = J('d-region') || [];
-  var rgLabels = rg.map(function(r){return r.name;});
-  function regionBar(id, getter, color, axisTitle, fmt) {
-    var el = document.getElementById(id); if (!el) return;
-    new Chart(el, {
-      type:'bar',
-      data:{ labels:rgLabels, datasets:[{ data:rg.map(getter), backgroundColor:color }] },
-      options:{ maintainAspectRatio:false, plugins:{ legend:{display:false},
-        tooltip:{ callbacks:{ label:function(c){ return fmt ? fmt(rg[c.dataIndex]) : c.parsed.y; } } } },
-        onClick:function(e,el2){ if(el2.length){ open(rg[el2[0].index].url); } },
-        scales:{ y:{ title:{display:true,text:axisTitle} } } }
+  // ---- gran toggle UI ----
+  document.querySelectorAll('.gran button').forEach(function(b){
+    b.addEventListener('click', function(){
+      gran=b.dataset.gran;
+      document.querySelectorAll('.gran button').forEach(function(x){ x.classList.toggle('active', x===b); });
+      renderTime(); renderPct();
+      renderNameTime('ch-targets-time', targetsDay); renderNameTime('ch-topics-time', topicsDay);
+    });
+  });
+
+  // ---- chart instances ----
+  var charts={};
+  function mk(id, cfg){ if(charts[id]) charts[id].destroy(); charts[id]=new Chart(document.getElementById(id), cfg); }
+
+  // 1) criticism over time, per republic
+  function timeAgg(valFn){
+    var keys={}, per={};                       // per[region][bucket]=acc
+    vis().forEach(function(r){ per[r]={}; });
+    daily.forEach(function(row){
+      if(!visible[row.r]) return;
+      var b=bucket(row.d); keys[b]=1;
+      per[row.r][b]=per[row.r][b]||[0,0];
+      per[row.r][b][0]+=row.c; per[row.r][b][1]+=row.t;
+    });
+    var labels=Object.keys(keys).sort();
+    var ds=vis().map(function(r){
+      return { label:r, borderColor:colorOf[r], backgroundColor:colorOf[r], tension:.25, pointRadius:1, spanGaps:true,
+        data:labels.map(function(b){ var v=per[r][b]; return v?valFn(v[0],v[1]):null; }) };
+    });
+    return {labels:labels, datasets:ds};
+  }
+  function renderTime(){
+    var d = timeAgg(function (c, t) { return c; });
+    mk('ch-time', {
+      type: 'line', data: d,
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: { y: { title: { display: true, text: 'коментарі критики' } } }
+      }
     });
   }
-  regionBar('ch-region-count', function(r){return r.count;}, PAL[0], 'коментарі',
-            function(r){ return 'Коментарі: ' + r.count; });
-  regionBar('ch-region-perreach', function(r){return r.per_reach;}, PAL[1], 'коментарі / підписника',
-            function(r){ return 'Коментарі/охоплення: ' + r.per_reach.toFixed(4) + '  (' + r.count + ' / ' + r.reach + ' підписників)'; });
-  regionBar('ch-region-perreachpop', function(r){return r.per_reach_pop;}, PAL[4], 'коментарі / підписника / особу',
-            function(r){ return 'Коментарі/охоплення/населення: ' + r.per_reach_pop.toExponential(3) + '  (населення ' + (r.population || '—') + ')'; });
-
-  // 3) субʼєкти в часі
-  var rts = J('d-region-ts') || [], lines = J('d-region-lines') || [];
-  new Chart(document.getElementById('ch-region-time'), {
-    type:'line',
-    data:{ labels:rts.map(function(r){return r.date;}),
-      datasets:lines.map(function(name,i){ return {
-        label:name, data:rts.map(function(r){return r[name]||0;}),
-        borderColor:PAL[i%PAL.length], backgroundColor:PAL[i%PAL.length], tension:.25, pointRadius:1 }; }) },
-    options:{ maintainAspectRatio:false, interaction:{mode:'index',intersect:false} }
-  });
-
-  // 4) розподіл по тегах
-  (J('d-tags') || []).forEach(function (cat) {
-    var el = document.getElementById('ch-tag-' + cat.category); if (!el) return;
-    new Chart(el, {
-      type:'bar',
-      data:{ labels:cat.rows.map(function(r){return r.name;}),
-        datasets:[{ label:cat.label, data:cat.rows.map(function(r){return r.count;}), backgroundColor:PAL[1] }] },
-      options:{ indexAxis:'y', maintainAspectRatio:false, plugins:{legend:{display:false}},
-        onClick:function(e,elx){ if(elx.length){ open(cat.rows[elx[0].index].url); } } }
+  function renderPct(){
+    var d = timeAgg(function (c, t) { return t > 0 ? +(100 * c / t).toFixed(2) : null; });
+    mk('ch-pct', {
+      type: 'line', data: d,
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { tooltip: { callbacks: { label: function (c) {
+          return c.dataset.label + ': ' + (c.parsed.y == null ? '—' : c.parsed.y + '%');
+        } } } },
+        scales: { y: { title: { display: true, text: '% критики' },
+                       ticks: { callback: function (v) { return v + '%'; } } } }
+      }
     });
-  });
+  }
+
+  // 3+4) stacked bar: x = tag name (top), stacked by republic
+  function stacked(id, rows){
+    var totByName={}, byRN={}, urlRN={};
+    rows.forEach(function(x){
+      if(!visible[x.r]) return;
+      totByName[x.name]=(totByName[x.name]||0)+x.n;
+      (byRN[x.r]=byRN[x.r]||{})[x.name]=x.n;
+      (urlRN[x.r]=urlRN[x.r]||{})[x.name]=x.url;
+    });
+    var names=Object.keys(totByName).sort(function(a,b){ return totByName[b]-totByName[a]; });
+    var ds=vis().map(function(r){
+      return { label:r, backgroundColor:colorOf[r],
+        data:names.map(function(n){ return (byRN[r]&&byRN[r][n])||0; }),
+        _urls:names.map(function(n){ return (urlRN[r]&&urlRN[r][n])||''; }) };
+    });
+    mk(id, { type:'bar', data:{labels:names, datasets:ds}, options:{ maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      onClick:function(e,el){ if(el.length){ var d=ds[el[0].datasetIndex]; open(d._urls[el[0].index]); } },
+      scales:{ x:{ stacked:true }, y:{ stacked:true, title:{display:true,text:'коментарі критики'} } } } });
+  }
+
+  // 5+6) per-object / per-topic over time (one line per name; legend toggles)
+  function nameTime(rows){
+    var keys={}, per={}, tot={};
+    rows.forEach(function(x){
+      if(!visible[x.r]) return;
+      var b=bucket(x.d); keys[b]=1;
+      (per[x.name]=per[x.name]||{})[b]=((per[x.name]||{})[b]||0)+x.n;
+      tot[x.name]=(tot[x.name]||0)+x.n;
+    });
+    var labels=Object.keys(keys).sort();
+    var names=Object.keys(tot).sort(function(a,b){ return tot[b]-tot[a]; });
+    var ds=names.map(function(nm,i){
+      return { label:nm, borderColor:PAL[i%PAL.length], backgroundColor:PAL[i%PAL.length],
+        tension:.25, pointRadius:0, spanGaps:true, hidden:i>=8,
+        data:labels.map(function(b){ return (per[nm]&&per[nm][b])||0; }) };
+    });
+    return {labels:labels, datasets:ds};
+  }
+  function renderNameTime(id, rows){
+    mk(id, {
+      type: 'line', data: nameTime(rows),
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+        scales: { y: { title: { display: true, text: 'коментарі критики' } } }
+      }
+    });
+  }
+
+  function renderAll(){
+    renderTime(); renderPct();
+    stacked('ch-targets', targets); stacked('ch-topics', topics);
+    renderNameTime('ch-targets-time', targetsDay); renderNameTime('ch-topics-time', topicsDay);
+  }
+  renderAll();
 })();
 </script>
