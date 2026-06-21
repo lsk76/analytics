@@ -697,9 +697,14 @@ class ChannelDailyStat(models.Model):
     channel = models.ForeignKey("Channel", on_delete=models.CASCADE,
                                 related_name="daily_stats")
     date = models.DateField(db_index=True, verbose_name="День")
-    total = models.IntegerField(default=0, verbose_name="Усіх повідомлень")
+    total = models.IntegerField(default=0, verbose_name="Усіх повідомлень (із зібраних постів)")
     relevant = models.IntegerField(default=0, verbose_name="Критика")
     reposts = models.IntegerField(default=0, verbose_name="Авто-репости каналу")
+    # Авторитетна кількість УСІХ повідомлень за день із TeleZip (не з наших
+    # зібраних/відфільтрованих постів). Знаменник «% критики» бере її, бо `total`
+    # для деяких періодів = лише відфільтровані/кандидати, не всі повідомлення.
+    telezip_total = models.IntegerField(null=True, blank=True,
+                                        verbose_name="Усіх повідомлень (TeleZip, авторитетно)")
 
     class Meta:
         verbose_name = "Денна статистика каналу"

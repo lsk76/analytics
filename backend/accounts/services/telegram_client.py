@@ -69,6 +69,8 @@ class TelegramUserClient:
             try:
                 sent = await client.send_code_request(account.phone_number)
                 return {"success": True, "phone_code_hash": sent.phone_code_hash,
+                        "code_type": type(sent.type).__name__,
+                        "next_type": type(sent.next_type).__name__ if sent.next_type else None,
                         "session_string": client.session.save()}
             finally:
                 await client.disconnect()

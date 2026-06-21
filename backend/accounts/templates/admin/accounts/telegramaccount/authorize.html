@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">{{ account.name }}</a> ›
+  Авторизація
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:520px">
+  <p><b>Акаунт:</b> {{ account.name }} &nbsp; <b>Телефон:</b> {{ account.phone_number }}</p>
+  <p><b>Стан:</b>
+    {% if account.is_authenticated %}<span style="color:#16a34a">✓ авторизовано</span>
+    {% else %}<span style="color:#b91c1c">не авторизовано</span>{% endif %}
+  </p>
+
+  {% if account.is_authenticated %}
+    <p>Акаунт уже авторизовано. Переавторизація потрібна лише якщо сесія злетіла.</p>
+  {% endif %}
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <h3 style="margin-top:0">Крок 1 — надіслати код</h3>
+    <p class="help">Telegram надішле код у застосунок / SMS на {{ account.phone_number }}.</p>
+    <form method="post">{% csrf_token %}
+      <button type="submit" name="action" value="send_code" class="button">📩 Надіслати код</button>
+    </form>
+  </div>
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px;
+              {% if not code_sent %}opacity:.5{% endif %}">
+    <h3 style="margin-top:0">Крок 2 — ввести код</h3>
+    {% if not code_sent %}
+      <p class="help">Спершу натисни «Надіслати код».</p>
+    {% endif %}
+    <form method="post">{% csrf_token %}
+      <p><label>Код із Telegram:<br><input type="text" name="code" inputmode="numeric"
+           autocomplete="one-time-code" {% if not code_sent %}disabled{% endif %} autofocus></label></p>
+      <p><label>Пароль 2FA (лише якщо увімкнений):<br>
+           <input type="password" name="password" {% if not code_sent %}disabled{% endif %}></label></p>
+      <button type="submit" name="action" value="verify" class="button default"
+              {% if not code_sent %}disabled{% endif %}>✅ Підтвердити</button>
+    </form>
+  </div>
+
+  <p><a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a></p>
+</div>
+{% endblock %}

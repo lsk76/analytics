@@ -83,6 +83,7 @@
 <script id="d-topics"  type="application/json">{{ topics_json|safe }}</script>
 <script id="d-targets-day" type="application/json">{{ targets_day_json|safe }}</script>
 <script id="d-topics-day"  type="application/json">{{ topics_day_json|safe }}</script>
+<script id="d-cfg"         type="application/json">{{ drill_cfg_json|safe }}</script>
 <script>
 (function () {
   if (typeof Chart === 'undefined') return;
@@ -98,8 +99,9 @@
   var daily   = J('d-daily')   || [];   // [{r,d,c,t}]
   var targets = J('d-targets') || [];   // [{r,name,n,url}]
   var topics  = J('d-topics')  || [];   // [{r,name,n,url}]
-  var targetsDay = J('d-targets-day') || [];  // [{d,r,name,n}]
-  var topicsDay  = J('d-topics-day')  || [];  // [{d,r,name,n}]
+  var targetsDay = J('d-targets-day') || [];  // [{d,r,name,n,id}]
+  var topicsDay  = J('d-topics-day')  || [];  // [{d,r,name,n,id}]
+  var CFG = J('d-cfg') || { clBase: '', baseQ: '' };
 
   var colorOf = {}; regions.forEach(function(r,i){ colorOf[r]=PAL[i%PAL.length]; });
   var visible = {}; regions.forEach(function(r){ visible[r]=true; });
@@ -115,6 +117,42 @@
     return iso;
   }
   function vis(){ return regions.filter(function(r){ return visible[r]; }); }
+
+  // ---- drill-down: chart point/segment -> filtered Post list (new tab) ----
+  function bucketRange(key){            // [gte, lte] for the clicked bucket
+    if (gran==='month'){ var p=key.split('-'), y=+p[0], m=+p[1];
+      var last=new Date(Date.UTC(y, m, 0)).getUTCDate();
+      return [key+'-01', key+'-'+String(last).padStart(2,'0')]; }
+    if (gran==='week'){ var d=new Date(key+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+6);
+      return [key, d.toISOString().slice(0,10)]; }
+    return [key, key];
+  }
+  function drillUrl(extra){
+    var p=new URLSearchParams(CFG.baseQ||'');
+    Object.keys(extra).forEach(function(k){ var v=extra[k]; if(v!=null && v!=='') p.set(k, v); });
+    return (CFG.clBase||'') + '?' + p.toString();
+  }
+  function drillTime(region, key){
+    var rg=bucketRange(key), e={'posted_at__range__gte':rg[0], 'posted_at__range__lte':rg[1]};
+    if(region) e['channel__region_subject__name__exact']=region;
+    open(drillUrl(e));
+  }
+  function drillTag(cat, tagId, region){
+    var e={}; e['tag_'+cat]=tagId;
+    if(region) e['channel__region_subject__name__exact']=region;
+    open(drillUrl(e));
+  }
+  function drillTagTime(cat, tagId, key){
+    var rg=bucketRange(key), e={'posted_at__range__gte':rg[0], 'posted_at__range__lte':rg[1]};
+    e['tag_'+cat]=tagId;
+    if(vis().length===1) e['channel__region_subject__name__exact']=vis()[0];
+    open(drillUrl(e));
+  }
+  // pick the specific clicked line/segment (not the whole index group)
+  function picked(chart, ev, intersect){
+    var p=chart.getElementsAtEventForMode(ev, 'nearest', {intersect:intersect}, true);
+    return p.length ? p[0] : null;
+  }
 
   // ---- region toggle UI ----
   var box = document.getElementById('reg-toggles');
@@ -142,7 +180,8 @@
       gran=b.dataset.gran;
       document.querySelectorAll('.gran button').forEach(function(x){ x.classList.toggle('active', x===b); });
       renderTime(); renderPct();
-      renderNameTime('ch-targets-time', targetsDay); renderNameTime('ch-topics-time', topicsDay);
+      renderNameTime('ch-targets-time', targetsDay, 'criticism_target');
+      renderNameTime('ch-topics-time', topicsDay, 'topic');
     });
   });
 
@@ -174,6 +213,8 @@
       options: {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        onClick: function (e, _els, chart) { var p = picked(chart, e, false);
+          if (p) drillTime(chart.data.datasets[p.datasetIndex].label, chart.data.labels[p.index]); },
         scales: { y: { title: { display: true, text: 'коментарі критики' } } }
       }
     });
@@ -185,6 +226,8 @@
       options: {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        onClick: function (e, _els, chart) { var p = picked(chart, e, false);
+          if (p) drillTime(chart.data.datasets[p.datasetIndex].label, chart.data.labels[p.index]); },
         plugins: { tooltip: { callbacks: { label: function (c) {
           return c.dataset.label + ': ' + (c.parsed.y == null ? '—' : c.parsed.y + '%');
         } } } },
@@ -195,30 +238,31 @@
   }
 
   // 3+4) stacked bar: x = tag name (top), stacked by republic
-  function stacked(id, rows){
-    var totByName={}, byRN={}, urlRN={};
+  function stacked(elId, rows, cat){
+    var totByName={}, byRN={}, idByName={};
     rows.forEach(function(x){
+      idByName[x.name]=x.id;
       if(!visible[x.r]) return;
       totByName[x.name]=(totByName[x.name]||0)+x.n;
       (byRN[x.r]=byRN[x.r]||{})[x.name]=x.n;
-      (urlRN[x.r]=urlRN[x.r]||{})[x.name]=x.url;
     });
     var names=Object.keys(totByName).sort(function(a,b){ return totByName[b]-totByName[a]; });
     var ds=vis().map(function(r){
       return { label:r, backgroundColor:colorOf[r],
-        data:names.map(function(n){ return (byRN[r]&&byRN[r][n])||0; }),
-        _urls:names.map(function(n){ return (urlRN[r]&&urlRN[r][n])||''; }) };
+        data:names.map(function(n){ return (byRN[r]&&byRN[r][n])||0; }) };
     });
-    mk(id, { type:'bar', data:{labels:names, datasets:ds}, options:{ maintainAspectRatio:false,
+    mk(elId, { type:'bar', data:{labels:names, datasets:ds}, options:{ maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
-      onClick:function(e,el){ if(el.length){ var d=ds[el[0].datasetIndex]; open(d._urls[el[0].index]); } },
+      onClick:function(e,_els,chart){ var p=picked(chart,e,true);
+        if(p){ drillTag(cat, idByName[chart.data.labels[p.index]], chart.data.datasets[p.datasetIndex].label); } },
       scales:{ x:{ stacked:true }, y:{ stacked:true, title:{display:true,text:'коментарі критики'} } } } });
   }
 
   // 5+6) per-object / per-topic over time (one line per name; legend toggles)
   function nameTime(rows){
-    var keys={}, per={}, tot={};
+    var keys={}, per={}, tot={}, nameId={};
     rows.forEach(function(x){
+      nameId[x.name]=x.id;
       if(!visible[x.r]) return;
       var b=bucket(x.d); keys[b]=1;
       (per[x.name]=per[x.name]||{})[b]=((per[x.name]||{})[b]||0)+x.n;
@@ -231,14 +275,17 @@
         tension:.25, pointRadius:0, spanGaps:true, hidden:i>=8,
         data:labels.map(function(b){ return (per[nm]&&per[nm][b])||0; }) };
     });
-    return {labels:labels, datasets:ds};
+    return {labels:labels, datasets:ds, nameId:nameId};
   }
-  function renderNameTime(id, rows){
+  function renderNameTime(id, rows, cat){
+    var d=nameTime(rows);
     mk(id, {
-      type: 'line', data: nameTime(rows),
+      type: 'line', data: { labels:d.labels, datasets:d.datasets },
       options: {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        onClick: function (e, _els, chart) { var p = picked(chart, e, false);
+          if (p) drillTagTime(cat, d.nameId[chart.data.datasets[p.datasetIndex].label], chart.data.labels[p.index]); },
         plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
         scales: { y: { title: { display: true, text: 'коментарі критики' } } }
       }
@@ -247,8 +294,9 @@
 
   function renderAll(){
     renderTime(); renderPct();
-    stacked('ch-targets', targets); stacked('ch-topics', topics);
-    renderNameTime('ch-targets-time', targetsDay); renderNameTime('ch-topics-time', topicsDay);
+    stacked('ch-targets', targets, 'criticism_target'); stacked('ch-topics', topics, 'topic');
+    renderNameTime('ch-targets-time', targetsDay, 'criticism_target');
+    renderNameTime('ch-topics-time', topicsDay, 'topic');
   }
   renderAll();
 })();

@@ -1,10 +1,14 @@
+import datetime
 import json
+from collections import OrderedDict
 
+from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.widgets import AdminDateWidget
 from django.core.paginator import Paginator
 from django.db import connection
 from django.db.models import Count, Sum, F
-from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
+from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, Coalesce
 from django.shortcuts import render
 from django.urls import path
 from django.utils.functional import cached_property
@@ -12,7 +16,35 @@ from django.utils import timezone as djtz
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
-from rangefilter.filters import DateRangeFilterBuilder
+from rangefilter.filters import DateRangeFilterBuilder, DateRangeFilter
+
+
+# --- date range filter that speaks YYYY-MM-DD (not the uk-locale DD.MM.YYYY) ---
+# The whole app standardises on ISO dates: chart drill-down URLs build
+# ?posted_at__range__gte=YYYY-MM-DD, and the manual picker must parse/display the
+# same. localize=False + explicit ISO input_formats/widget format bypass the locale.
+_ISO_FMT = "%Y-%m-%d"
+
+
+class ISODateRangeFilter(DateRangeFilter):
+    def _get_form_fields(self):
+        def field(initial):
+            return forms.DateField(
+                label="", required=False, initial=initial, localize=False,
+                input_formats=[_ISO_FMT, "%d.%m.%Y"],   # ISO first; accept legacy too
+                widget=AdminDateWidget(format=_ISO_FMT, attrs={"placeholder": "YYYY-MM-DD"}),
+            )
+        return OrderedDict((
+            (self.lookup_kwarg_gte, field(self.default_gte)),
+            (self.lookup_kwarg_lte, field(self.default_lte)),
+        ))
+
+
+def ISODateRangeFilterBuilder(title=None, default_start=None, default_end=None):
+    return type(str("ISODateRangeFilter"), (ISODateRangeFilter,), {
+        "__from_builder": True, "default_title": title,
+        "default_start": default_start, "default_end": default_end,
+    })
 
 from .services import stages
 
@@ -753,7 +785,7 @@ class PostAdmin(admin.ModelAdmin):
                     "is_relevant")
     list_filter = (
         "task", JobPeriodFilter,
-        ("posted_at", DateRangeFilterBuilder()),
+        ("posted_at", ISODateRangeFilterBuilder()),
         "stage", "is_relevant",
         tag_category_filter("criticism_target", "Об'єкт критики"),
         tag_category_filter("topic", "Тема"),
@@ -776,9 +808,14 @@ class PostAdmin(admin.ModelAdmin):
                 .prefetch_related("tags"))
 
     def lookup_allowed(self, lookup, value, *args, **kwargs):
-        # Allow ?event__id__exact=<id> so the event page can deep-link to all its
-        # posts here (event is not a list_filter — too many events for a dropdown).
-        if lookup in ("event__id__exact", "event__id", "event"):
+        # Allow deep-links from charts/events: ?event__id__exact, region drill-down
+        # (channel.region_subject), and the posted_at range (chart point -> posts).
+        if lookup in ("event__id__exact", "event__id", "event",
+                      "channel__region_subject__name__exact",
+                      "channel__region_subject__name",
+                      "channel__region_subject__id__exact",
+                      "posted_at__range__gte", "posted_at__range__lte",
+                      "posted_at__gte", "posted_at__lt", "posted_at__lte"):
             return True
         return super().lookup_allowed(lookup, value, *args, **kwargs)
 
@@ -835,9 +872,25 @@ class PostAdmin(admin.ModelAdmin):
         # підмішується у GROUP BY і вибухає (рядок на кожну пару пост-тег).
         crit_rows = (REL.order_by().annotate(d=TruncDate("posted_at"))
                      .values("d", RKEY).annotate(n=Count("id")))
-        tot_rows = (ChannelDailyStat.objects.order_by().filter(task_id__in=task_ids)
-                    .values("date", "channel__region_subject__name")
-                    .annotate(t=Sum("total")))
+        # знаменник «усіх повідомлень»: авторитетний TeleZip-лік (telezip_total)
+        # де він є, інакше — старий total. ВАЖЛИВО: той самий діапазон дат, що й у
+        # changelist (інакше знаменник тягне весь рік і вісь розтягується).
+        def _pdate(s):
+            for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+                try:
+                    return datetime.datetime.strptime(s, fmt).date()
+                except (ValueError, TypeError):
+                    continue
+            return None
+        d_gte = _pdate(get_clean.get("posted_at__range__gte"))
+        d_lte = _pdate(get_clean.get("posted_at__range__lte"))
+        tot_qs = ChannelDailyStat.objects.order_by().filter(task_id__in=task_ids)
+        if d_gte:
+            tot_qs = tot_qs.filter(date__gte=d_gte)
+        if d_lte:
+            tot_qs = tot_qs.filter(date__lte=d_lte)
+        tot_rows = (tot_qs.values("date", "channel__region_subject__name")
+                    .annotate(t=Sum(Coalesce("telezip_total", "total"))))
 
         daily = {}          # (reg, iso_day) -> [crit, total]
         reg_crit = {}       # reg -> сумарна критика (для сортування/відбору)
@@ -859,7 +912,7 @@ class PostAdmin(admin.ModelAdmin):
                     .values(RKEY, "tags__name", "tags__id")
                     .annotate(n=Count("id", distinct=True)))
             return [{"r": rname(x[RKEY]), "name": x["tags__name"], "n": x["n"],
-                     "url": link({f"tag_{cat}": x["tags__id"]})} for x in rows]
+                     "id": x["tags__id"]} for x in rows]
 
         targets = by_cat_region("criticism_target")
         topics = by_cat_region("topic")
@@ -868,10 +921,10 @@ class PostAdmin(admin.ModelAdmin):
         def by_cat_region_day(cat):
             rows = (REL.order_by().filter(tags__category=cat)
                     .annotate(d=TruncDate("posted_at"))
-                    .values("d", RKEY, "tags__name")
+                    .values("d", RKEY, "tags__name", "tags__id")
                     .annotate(n=Count("id", distinct=True)))
             return [{"d": x["d"].isoformat(), "r": rname(x[RKEY]),
-                     "name": x["tags__name"], "n": x["n"]} for x in rows]
+                     "name": x["tags__name"], "n": x["n"], "id": x["tags__id"]} for x in rows]
 
         targets_day = by_cat_region_day("criticism_target")
         topics_day = by_cat_region_day("topic")
@@ -882,6 +935,7 @@ class PostAdmin(admin.ModelAdmin):
             "opts": self.model._meta,
             "total": REL.count(),
             "preserved_qs": base_q,
+            "drill_cfg_json": json.dumps({"clBase": cl_base, "baseQ": base_q}, ensure_ascii=False),
             "regions_json": json.dumps(regions, ensure_ascii=False),
             "daily_json": json.dumps(daily_series, ensure_ascii=False),
             "targets_json": json.dumps(targets, ensure_ascii=False),
@@ -1686,7 +1740,7 @@ class EventAdmin(admin.ModelAdmin):
         cat_filters = [tag_category_filter(c.key, c.label)
                        for c in TagCategory.objects.all()]
         return (
-            ("event_date", DateRangeFilterBuilder(title="Період")),
+            ("event_date", ISODateRangeFilterBuilder(title="Період")),
             TaskFilter,
             "review_status",
             ReviewSourceFilter,
