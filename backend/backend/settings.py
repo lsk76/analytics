@@ -16,6 +16,18 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-change-me")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
+# When served behind a TLS-terminating reverse proxy (e.g. nginx), trust the
+# forwarded scheme so request.is_secure() / CSRF / secure cookies work.
+if os.getenv("DJANGO_SECURE_PROXY_SSL_HEADER", "true").lower() == "true":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Origins allowed for unsafe (POST) requests over HTTPS — required for the admin
+# login form when accessed via a proxied https:// host. Comma-separated, each
+# value must include the scheme, e.g. "https://analytics.example.com".
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
