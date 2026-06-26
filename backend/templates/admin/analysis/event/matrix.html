@@ -1,0 +1,83 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:analysis_event_changelist' %}">Події</a>
+  &rsaquo; Матриця
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mx-wrap { overflow-x: auto; }
+  table.mx { border-collapse: collapse; font-size: 10px; width: max-content; }
+  table.mx th, table.mx td { border: 1px solid var(--border-color, #ccc); padding: 2px 3px; text-align: center; }
+  table.mx td { white-space: nowrap; }
+  table.mx thead th { background: var(--darkened-bg, #f6f6f6); vertical-align: bottom; font-size: 10px; }
+  table.mx thead th.sub-th { white-space: normal; max-width: 100px; min-width: 50px; font-weight: 600; line-height: 1.15; }
+  table.mx thead th.sub-th.metric { font-style: italic; }
+  table.mx thead th.sub-th .sub { display:block; margin-top:2px; font-weight: 400; font-style: normal; font-size: 9px; color: var(--body-quiet-color,#888); }
+  table.mx td.reg { text-align: left; font-weight: 600; background: var(--darkened-bg, #f6f6f6); position: sticky; left: 0; z-index: 1; white-space: nowrap; }
+  table.mx .g0 { background: rgba(59,130,246,.10); }
+  table.mx .g1 { background: rgba(16,185,129,.10); }
+  table.mx .g2 { background: rgba(168,85,247,.10); }
+  table.mx td.metric { font-style: italic; }
+  table.mx td.zero { color: var(--body-quiet-color, #999); }
+  table.mx td a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border-color,#bbb); }
+  table.mx td a:hover { color: var(--link-fg, #447e9b); border-bottom-color: currentColor; }
+  .mx-note { color: var(--body-quiet-color,#777); font-size: 12px; margin: 8px 0 16px; max-width: 1000px; line-height:1.5; }
+</style>
+
+<p class="mx-note" style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.5);border-radius:6px;padding:8px 12px">
+  ⚠️ Колонка <b>«Сутички рос↔меншина»</b>: дані за 2026 — лише <b>по травень</b> включно (червень у джерелі ще не зібрано).
+</p>
+<p class="mx-note">
+  Порядок колонок — як у Google-таблиці, три розділи: <b>ФУР</b> (етнічні), <b>ГЕР</b> (економічні), <b>ПОЛ</b> (політичні).
+  Числа наживо з БД: <b>події</b> — кількість approved Event(task=6) <b>за 2026 рік</b> (ручні відхилення враховуються миттєво);
+  <i>курсивом</i> — метрики з коментарів/сутичок: «Сутички» — кількість інцидентів рос↔меншина <b>2025 / 2026</b> (task=1);
+  «Критика / Негат. згадки» — частка <b>за 2026</b> від критичних коментарів <b>з визначеною темою</b> (task=3; знаменник без тем-нетегованих).
+</p>
+
+<div class="mx-wrap">
+<table class="mx">
+  <thead>
+    <tr>
+      <th rowspan="2" class="reg">Республіка</th>
+      {% for s in sections %}
+        <th colspan="{{ s.span }}" class="g{{ s.g }}">{{ s.name }}</th>
+      {% endfor %}
+    </tr>
+    <tr>
+      {% for s in sections %}
+        {% for sc in s.subcols %}
+          <th class="g{{ sc.g }} sub-th{% if sc.kind != 'event' %} metric{% endif %}">{{ sc.label }}<span class="sub">{{ sc.period }}</span></th>
+        {% endfor %}
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td class="reg">{{ row.region }}</td>
+      {% for cell in row.cells %}
+        {% if cell.kind == 'event' %}
+          <td class="g{{ cell.g }}{% if cell.zero %} zero{% endif %}"><a href="{{ cell.url }}">{{ cell.n }}</a></td>
+        {% elif cell.kind == 'clash' %}
+          <td class="g{{ cell.g }} metric{% if cell.zero %} zero{% endif %}"><a href="{{ cell.url_a }}">{{ cell.a }}</a> / <a href="{{ cell.url_b }}">{{ cell.b }}</a></td>
+        {% else %}
+          {% if cell.c and cell.c.y2026 != None %}
+            <td class="g{{ cell.g }} metric"><a href="{{ cell.url_b }}">{{ cell.c.y2026|floatformat:1 }}%</a></td>
+          {% else %}
+            <td class="g{{ cell.g }} metric zero">н/д</td>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

@@ -660,6 +660,31 @@ class InterEthnicFilter(admin.SimpleListFilter):
         return queryset
 
 
+class RosMinorityClashFilter(admin.SimpleListFilter):
+    """Events where росіянин is one side and ≥1 non-Russian nationality the other —
+    the «росіяни ↔ нацменшини» slice the indicator matrix counts (task=1)."""
+    title = "Сутички рос ↔ меншина"
+    parameter_name = "ros_clash"
+    NAT_CATS = ("attacker_nationality", "victim_nationality", "nationality")
+
+    def lookups(self, request, model_admin):
+        return [("1", "росіянин ↔ нацменшина")]
+
+    def queryset(self, request, queryset):
+        from django.db.models import Q
+        if self.value() != "1":
+            return queryset
+        ros = list(Tag.objects.filter(category__in=self.NAT_CATS, name="росіянин")
+                   .values_list("id", flat=True))
+        # two conditional Counts over the SAME (unfiltered) tags join — filtering the
+        # join with .filter(tags__in=ros) would collapse the other-nationality count to 0.
+        return (queryset.annotate(
+                    _has_ros=Count("tags", distinct=True, filter=Q(tags__id__in=ros)),
+                    _other_nat=Count("tags", distinct=True,
+                                     filter=Q(tags__category__in=self.NAT_CATS) & ~Q(tags__name="росіянин")))
+                .filter(_has_ros__gte=1, _other_nat__gte=1))
+
+
 class ReviewSourceFilter(admin.SimpleListFilter):
     """Хто виніс вердикт: агент-рев'ю / ручне Claude-рев'ю / відновлені / аудит."""
     title = "Джерело рев'ю"
@@ -994,6 +1019,8 @@ class EventAdmin(admin.ModelAdmin):
                  name="analysis_event_charts"),
             path("conflicts/", self.admin_site.admin_view(self.conflicts_view),
                  name="analysis_event_conflicts"),
+            path("matrix/", self.admin_site.admin_view(self.matrix_view),
+                 name="analysis_event_matrix"),
             path("<int:event_id>/posts/", self.admin_site.admin_view(self.event_posts_view),
                  name="analysis_event_posts"),
         ]
@@ -1030,6 +1057,223 @@ class EventAdmin(admin.ModelAdmin):
         "Бурятія", "Саха (Якутія)", "Тива", "Татарстан",
         "Башкортостан", "Чечня", "Інгушетія", "Дагестан",
     ]
+
+    # ---------- 8-republic indicator matrix (auto dashboard) ----------
+    # Columns grouped into 3 sections in the SAME order as the Google Sheet. Each column:
+    #   ("clash", label, None)        — task=1 росіянин↔меншина, 2025 / 2026
+    #   ("event", code, tag_id)       — approved Event(task=6) count за 2026 (live, реагує на чистку)
+    #   ("crit",  label, crit_key)    — частка від усіх критичних коментарів, 2025 / 2026
+    MATRIX_SECTIONS = [
+        ("Етнічні (ФУР)", [
+            ("clash", "Сутички рос↔меншина", None),
+            ("event", "C2", 2363), ("event", "C3", 2364), ("event", "C4", 2365),
+        ]),
+        ("Економічні (ГЕР)", [
+            ("crit", "Критика фед. влади (економіка)", "econ"),
+            ("event", "E1", 2366), ("event", "E2", 2367),
+            ("event", "E3", 2368), ("event", "E4", 2369),
+        ]),
+        ("Політичні (ПОЛ)", [
+            ("crit", "Критика фед. влади (упередж. до меншин)", "ethnic"),
+            ("event", "P1", 2370), ("event", "P2", 2371), ("event", "P3", 2372),
+            ("crit", "Негат. згадки фед.+місц. влади (політика)", "polit"),
+        ]),
+    ]
+    MATRIX_CODE_LABEL = {
+        "C2": "Відкриті протести проти етнічної дискримінації (мовної, релігійної, культурної)",
+        "C3": "Активізація або ознаки активізації націоналістичних рухів",
+        "C4": "Публічні висловлювання діаспор, культурні форуми та ініціативи підтримки етноспільнот",
+        "E1": "Економічні суперечки між регіоном і федеральним урядом (субсидії, квоти, ресурси)",
+        "E2": "Унікальні корупційні економічні скандали в республіці",
+        "E3": "Протестна активність та економічні страйки",
+        "E4": "Заяви місцевої адміністрації про економічну дискримінацію республіки",
+        "P1": "Суперечки між регіональним і федеральним урядом щодо політичних рішень",
+        "P2": "Протестна активність етнічних груп проти політичних рішень федеральної влади",
+        "P3": "Протестна активність російських шовіністичних рухів проти місцевої влади",
+    }
+    # comment-based criticism columns (task=3 is_relevant, 2026): share of all criticism + Δpp
+    MATRIX_FED_TARGETS = ['крит_путін', 'крит_кремль', 'крит_уряду', 'крит_думи', 'крит_МО',
+                          'крит_ФСБ', 'крит_МВД', 'крит_росгвардії', 'крит_совбезу',
+                          'крит_єдиної_росії', 'крит_рішень_центру_щодо_регіону']
+    MATRIX_LOCAL_TARGETS = ['крит_глави_регіону', 'крит_рег_правит', 'крит_мера', 'крит_місц_депутата']
+    MATRIX_CRIT_COLS = [
+        # key, label, targets-attr, topics
+        ("econ", "Критика фед. влади — економіка", "fed",
+         ['тема_економіки', 'тема_корупції', 'тема_інфраструктури']),
+        ("ethnic", "Критика фед. влади — упереджене ставлення до меншин", "fed",
+         ['тема_етнічна']),
+        ("polit", "Негативні згадки фед.+місц. влади (політика)", "fedlocal",
+         ['тема_СВО', 'тема_мобілізації', 'тема_репресій']),
+    ]
+    MATRIX_NAT_CATS = ("attacker_nationality", "victim_nationality", "nationality")
+
+    def matrix_view(self, request):
+        """Auto-aggregated 8-republic ethnic-tension indicator matrix. All numbers
+        come live from the DB: event columns from approved Event(task=6) by tag,
+        criticism % from Post(task=3, is_relevant), clashes from task=1."""
+        from django.template.response import TemplateResponse
+        from .models import Event as Ev, Post as Po, AnalysisTask as Task, Tag, Region as Reg
+
+        EV_TASK, MON_TASK, CLASH_SLUG = 6, 3, "ethnic-clashes"
+        regions = self.PRESET_HOTSPOT_REGIONS
+        id2code = {ref: lbl for _s, cols in self.MATRIX_SECTIONS
+                   for ctype, lbl, ref in cols if ctype == "event"}
+        all_codes = list(id2code.values())
+
+        # ---- event columns: single count, all of 2026 ----
+        ev_cells = {r: {c: 0 for c in all_codes} for r in regions}
+        evq = (Ev.objects.filter(task_id=EV_TASK, review_status="approved",
+                                 tags__id__in=list(id2code), region_subject__name__in=regions)
+               .distinct().prefetch_related("tags"))
+        for ev in evq:
+            rname = ev.region_subject.name if ev.region_subject else None
+            cell = ev_cells.get(rname)
+            if cell is None:
+                continue
+            for tg in ev.tags.all():
+                code = id2code.get(tg.id)
+                if code:
+                    cell[code] += 1
+
+        # ---- comment-based criticism columns ----
+        targets_map = {"fed": self.MATRIX_FED_TARGETS,
+                       "fedlocal": self.MATRIX_FED_TARGETS + self.MATRIX_LOCAL_TARGETS}
+
+        def crit(region, targets, topics, year):
+            b = Po.objects.filter(is_relevant=True, posted_at__year=year, task_id=MON_TASK,
+                                  channel__region_subject__name=region)
+            # denominator = criticism WITH a topic tag (not all criticism) — removes the
+            # year-over-year topic-tagging-coverage bias (2026 is ~46% tagged vs 2025 ~64%).
+            denom = b.filter(tags__category="topic").distinct().count()
+            num = (b.filter(tags__name__in=targets).filter(tags__name__in=topics).distinct().count())
+            return denom, num
+
+        monitored = set(Po.objects.filter(is_relevant=True, posted_at__year__in=[2025, 2026],
+                                          task_id=MON_TASK)
+                        .values_list("channel__region_subject__name", flat=True).distinct())
+        crit_cells = {r: {} for r in regions}
+        for r in regions:
+            for key, _lbl, tattr, topics in self.MATRIX_CRIT_COLS:
+                if r not in monitored:
+                    crit_cells[r][key] = None
+                    continue
+                tgts = targets_map[tattr]
+                d25, n25 = crit(r, tgts, topics, 2025)
+                d26, n26 = crit(r, tgts, topics, 2026)
+                crit_cells[r][key] = {
+                    "y2025": (100.0 * n25 / d25) if d25 else None,
+                    "y2026": (100.0 * n26 / d26) if d26 else None,
+                }
+
+        # ---- clash column (task=1 росіянин↔minority, by canonical region_subject) ----
+        # Mirrors RosMinorityClashFilter so the cell number == the filtered changelist.
+        from django.db.models import Q
+        clash_cells = {r: [0, 0] for r in regions}   # [2025, 2026]
+        try:
+            ct = Task.objects.get(slug=CLASH_SLUG)
+            ros_ids = list(Tag.objects.filter(category__in=self.MATRIX_NAT_CATS, name="росіянин")
+                           .values_list("id", flat=True))
+
+            def rosmin_count(region, year):
+                return (Ev.objects.filter(task=ct, review_status="approved",
+                                          region_subject__name=region, event_date__year=year)
+                        .annotate(_h=Count("tags", distinct=True, filter=Q(tags__id__in=ros_ids)),
+                                  _o=Count("tags", distinct=True,
+                                           filter=Q(tags__category__in=self.MATRIX_NAT_CATS)
+                                           & ~Q(tags__name="росіянин")))
+                        .filter(_h__gte=1, _o__gte=1).count())
+            for r in regions:
+                clash_cells[r] = [rosmin_count(r, 2025), rosmin_count(r, 2026)]
+        except Task.DoesNotExist:
+            pass
+
+        # ---- header descriptor + per-row cells, ordered exactly like the sheet ----
+        sections = []
+        for sidx, (sname, cols) in enumerate(self.MATRIX_SECTIONS):
+            subcols = []
+            for ctype, lbl, _ref in cols:
+                if ctype == "event":
+                    label, period = self.MATRIX_CODE_LABEL.get(lbl, lbl), "2026"
+                elif ctype == "clash":
+                    label, period = lbl, "2025 / 2026"
+                else:  # crit — single 2026 number
+                    label, period = lbl, "2026"
+                subcols.append({"label": label, "period": period, "kind": ctype, "g": sidx})
+            sections.append({"name": sname, "g": sidx, "span": len(cols), "subcols": subcols})
+
+        # ---- direct changelist links (same convention as charts_view: reverse + QueryDict) ----
+        from django.urls import reverse
+        from django.http import QueryDict
+        ev_cl = reverse("admin:analysis_event_changelist")
+        po_cl = reverse("admin:analysis_post_changelist")
+        reg_pk = {x.name: x.id for x in Reg.objects.filter(name__in=regions)}
+        sec_cat = {0: "ethnic_event", 1: "econ_event", 2: "political_event"}
+        cn = {t.name: t.id for t in Tag.objects.filter(category__in=["criticism_target", "topic"])}
+        fed_ids = [cn[n] for n in self.MATRIX_FED_TARGETS if n in cn]
+        local_ids = [cn[n] for n in self.MATRIX_LOCAL_TARGETS if n in cn]
+        crit_topic_ids = {k: [cn[n] for n in topics if n in cn]
+                          for k, _l, _t, topics in self.MATRIX_CRIT_COLS}
+        crit_tattr = {k: tattr for k, _l, tattr, _top in self.MATRIX_CRIT_COLS}
+
+        def mkurl(base, params):
+            qd = QueryDict("", mutable=True)
+            for k, v in params.items():
+                if isinstance(v, (list, tuple)):
+                    qd.setlist(k, [str(x) for x in v])
+                else:
+                    qd[k] = str(v)
+            return f"{base}?{qd.urlencode()}"
+
+        def ev_url(cat, tagid, region):
+            p = {"tag_" + cat: [tagid], "review_status__exact": "approved",
+                 "event_date__year": 2026}
+            if region in reg_pk:
+                p["region_id"] = [reg_pk[region]]
+            return mkurl(ev_cl, p)
+
+        def clash_url(region, year):
+            p = {"ros_clash": 1, "event_date__year": year, "review_status__exact": "approved"}
+            if region in reg_pk:
+                p["region_id"] = [reg_pk[region]]
+            return mkurl(ev_cl, p)
+
+        def crit_url(region, key, year):
+            p = {"task": 3, "is_relevant__exact": 1, "posted_at__year": year,
+                 "tag_criticism_target": fed_ids + (local_ids if crit_tattr[key] == "fedlocal" else []),
+                 "tag_topic": crit_topic_ids[key]}
+            if region in reg_pk:
+                p["channel__region_subject__id__exact"] = [reg_pk[region]]
+            return mkurl(po_cl, p)
+
+        rows = []
+        for r in regions:
+            cells = []
+            for sidx, (_sname, cols) in enumerate(self.MATRIX_SECTIONS):
+                for ctype, lbl, ref in cols:
+                    if ctype == "clash":
+                        a, b = clash_cells[r]
+                        cells.append({"g": sidx, "kind": "clash", "a": a, "b": b,
+                                      "zero": a == 0 and b == 0,
+                                      "url_a": clash_url(r, 2025), "url_b": clash_url(r, 2026)})
+                    elif ctype == "event":
+                        n = ev_cells[r].get(lbl, 0)
+                        cells.append({"g": sidx, "kind": "event", "n": n, "zero": n == 0,
+                                      "url": ev_url(sec_cat[sidx], ref, r)})
+                    else:  # crit
+                        cells.append({"g": sidx, "kind": "crit", "c": crit_cells[r].get(ref),
+                                      "url_a": crit_url(r, ref, 2025),
+                                      "url_b": crit_url(r, ref, 2026)})
+            rows.append({"region": r, "cells": cells})
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "title": "Матриця етнічної напруги — 8 республік",
+            "opts": self.model._meta,
+            "rows": rows,
+            "sections": sections,
+            "code_label_items": list(self.MATRIX_CODE_LABEL.items()),
+        }
+        return TemplateResponse(request, "admin/analysis/event/matrix.html", ctx)
 
     def conflicts_view(self, request):
         """Inter-ethnic tension explorer. Builds a co-occurrence matrix of
@@ -1745,6 +1989,7 @@ class EventAdmin(admin.ModelAdmin):
             "review_status",
             ReviewSourceFilter,
             InterEthnicFilter,
+            RosMinorityClashFilter,
             SubjectFilter,
             *cat_filters,
             ChannelFilter,
