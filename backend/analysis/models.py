@@ -482,6 +482,12 @@ class Post(models.Model):
         related_name="posts", verbose_name="Канал",
     )
     channel_name = models.CharField(max_length=128, blank=True, verbose_name="Назва каналу")
+    region_subject = models.ForeignKey(
+        "Region", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="posts", verbose_name="Суб'єкт РФ (денормалізовано)",
+        help_text="Копія channel.region_subject для прямого GROUP BY і per-100k без JOIN "
+                  "(спільний аналітичний контракт подій і критики — див. services/metrics.py).",
+    )
     posted_at = models.DateTimeField(
         null=True, blank=True, verbose_name="Дата публікації",
         help_text="Надійна дата (Telethon/TeleZip, UTC)",

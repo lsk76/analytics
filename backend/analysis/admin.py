@@ -880,12 +880,15 @@ class PostAdmin(admin.ModelAdmin):
                 qd.setlist(k, v if isinstance(v, (list, tuple)) else [str(v)])
             return f"{cl_base}?{qd.urlencode()}" if qd else cl_base
 
-        # Республіка = курований channel.region_subject (а не рядок inferred_region).
-        # Лише МОНІТОРИНГ-критика (events-пости мають свої графіки в EventAdmin),
-        # інакше у вибірку без фільтра лізуть ~90 регіонів інцидентів.
-        REL = (qs.filter(is_relevant=True, task__pipeline=AnalysisTask.PIPELINE_MONITOR)
-               .exclude(posted_at__isnull=True))
-        RKEY = "channel__region_subject__name"
+        # Республіка = денормалізований Post.region_subject (Ф2 unify: пряме поле
+        # без JOIN, той самий контракт, що в подій). Лише МОНІТОРИНГ-критика
+        # (events-пости мають свої графіки в EventAdmin). PostSource додає краї:
+        # is_relevant=True + exclude(is_channel_repost) — авто-форвард каналу
+        # більше не рахується як «думка людини».
+        from .services.metrics import PostSource
+        REL = PostSource(qs.filter(task__pipeline=AnalysisTask.PIPELINE_MONITOR)
+                         .exclude(posted_at__isnull=True)).qs
+        RKEY = "region_subject__name"
 
         def rname(v):
             return v or "(без субʼєкта)"
@@ -1553,14 +1556,11 @@ class EventAdmin(admin.ModelAdmin):
             return []
 
         # ---- time series ------------------------------------------------------
-        # events + total reach per bucket
-        ts_events = list(
-            qs.exclude(event_date__isnull=True)
-              .annotate(bucket=trunc("event_date"))
-              .values("bucket")
-              .annotate(events=Count("id"), reach=Sum("reach"), posts=Sum("post_count"))
-              .order_by("bucket")
-        )
+        # Агрегації йдуть через спільний адаптер (services/metrics.py): та сама
+        # математика для подій і критики; view лишає собі drill-URL і шаблон.
+        from .services.metrics import EventSource
+        src = EventSource(qs, gran)
+        ts_events = src.timeseries()   # {bucket, count, reach, posts}
         # unique publishing channels per bucket (through posts)
         ts_channels = list(
             Post.objects.filter(event__in=qs, channel__isnull=False,
@@ -1604,7 +1604,7 @@ class EventAdmin(admin.ModelAdmin):
                                  "event_date__range__lte": d_to.isoformat()})
             timeseries.append({
                 "date": bk.isoformat(),
-                "events": r["events"] if r else 0,
+                "events": r["count"] if r else 0,
                 "posts": int(r["posts"] or 0) if r else 0,
                 "reach": int(r["reach"] or 0) if r else 0,
                 "channels": ch_by_bucket.get(bk, 0),
@@ -1613,46 +1613,12 @@ class EventAdmin(admin.ModelAdmin):
             })
 
         # ---- breakdowns -------------------------------------------------------
-        # RF subjects (ALL with events, not just top-N): events count +
-        # summed reach + per-100k normalised by Region.population. The old
-        # standalone per-100k bar chart was folded into this one, so the
-        # single chart now carries all three metrics side-by-side.
-        # `.order_by()` clears the changelist's default sort so it doesn't
-        # leak into GROUP BY (otherwise we'd get 1 row per event with
-        # count=1 — same bug we hit on rep_totals_map).
-        by_region_raw = list(
-            qs.exclude(region_subject__isnull=True)
-              .order_by()
-              .values("region_subject_id", "region_subject__name")
-              .annotate(count=Count("id", distinct=True),
-                        reach=Sum("reach"))
-              .order_by("-count")
-        )
-        pops = dict(
-            Region.objects.filter(id__in=[r["region_subject_id"] for r in by_region_raw],
-                                   population__isnull=False)
-                          .values_list("id", "population")
-        )
+        # RF subjects (усі, не top-N): count + reach + per-100k — рахує спільний
+        # адаптер (одна формула для подій і критики); view додає drill-URL.
         by_region = []
-        for r in by_region_raw:
-            rid = r.pop("region_subject_id")
-            name = r.pop("region_subject__name")
-            pop = pops.get(rid)
-            reach_v = int(r["reach"] or 0)
-            per_100k = round(100000.0 * r["count"] / pop, 2) if pop else 0
-            # Reach normalised by population — comparable across regions of
-            # very different sizes (e.g. Buryatia 970k vs Moscow 13M).
-            reach_per_100k = int(100000.0 * reach_v / pop) if pop else 0
-            row = {
-                "id": rid, "name": name,
-                "count": r["count"],
-                "reach": reach_v,
-                "per_100k": per_100k,
-                "reach_per_100k": reach_per_100k,
-                "population": pop,
-            }
-            row["url"] = drill_url({"region_id": [rid]})
-            row["samples"] = samples_for(qs.filter(region_subject_id=rid))
+        for row in src.by_region():
+            row["url"] = drill_url({"region_id": [row["id"]]})
+            row["samples"] = samples_for(qs.filter(region_subject_id=row["id"]))
             by_region.append(row)
 
         # Republic-focused breakdown: time series PER region + per-100k normalised.
@@ -1668,39 +1634,14 @@ class EventAdmin(admin.ModelAdmin):
         # in qs (still gated by `population IS NOT NULL` below).
         rep_ids_param = [int(x) for x in request.GET.getlist("republic_id") if x.isdigit()]
         rep_ids = rep_ids_param or rep_ids_in_qs
-        republics = list(Region.objects.filter(id__in=rep_ids, population__isnull=False)
-                         .order_by("name").values("id", "name", "population"))
-        # ts: (bucket, region_id) → count (distinct for the same JOIN reason)
-        rep_ts_rows = list(
-            qs.filter(region_subject_id__in=rep_ids)
-              .exclude(event_date__isnull=True)
-              .annotate(bucket=trunc("event_date"))
-              .values("bucket", "region_subject_id")
-              .annotate(events=Count("id", distinct=True))
-              .order_by("bucket")
-        )
-        # totals per republic (events overall + per-100k). distinct=True because
-        # `qs` may already have JOINs from changelist tag filters; without it,
-        # M2M tag rows multiply each event into its number of tags. `.order_by()`
-        # is critical: the changelist passes its own ordering (event_date, id)
-        # which Django silently appends to GROUP BY → one row per event with
-        # COUNT=1. Clearing ordering makes the GROUP BY honour only our keys.
-        rep_totals_map = {}
-        for row in (qs.filter(region_subject_id__in=rep_ids)
-                      .order_by()
-                      .values("region_subject_id")
-                      .annotate(events=Count("id", distinct=True))):
-            rep_totals_map[row["region_subject_id"]] = row["events"]
-
-        by_republic_total = []
-        for r in republics:
-            total = rep_totals_map.get(r["id"], 0)
-            per_100k = (100000.0 * total / r["population"]) if r["population"] else 0
-            by_republic_total.append({
-                "id": r["id"], "name": r["name"], "population": r["population"],
-                "count": total, "per_100k": round(per_100k, 2),
-                "url": drill_url({"region_id": [r["id"]]}),
-            })
+        # totals + серії по республіках — через спільний адаптер (per-100k та
+        # distinct-краї всередині metrics.py; view додає лише drill-URL).
+        rep_ts_rows = src.republic_timeseries(rep_ids)   # {bucket, region_subject_id, count}
+        by_republic_total = src.republic_totals(rep_ids)
+        for r in by_republic_total:
+            r["url"] = drill_url({"region_id": [r["id"]]})
+        republics = [{"id": r["id"], "name": r["name"], "population": r["population"]}
+                     for r in by_republic_total]
 
         # republic timeseries: assemble {bucket → {name → count, name_per_100k → ...}}
         # Each (republic, bucket) cell also carries a drill-down URL combining
@@ -1713,7 +1654,7 @@ class EventAdmin(admin.ModelAdmin):
             d_from, d_to = bucket_range(b)
             entry = {"date": b.isoformat()}
             for rid, rep in rep_by_id.items():
-                cnt = next((row["events"] for row in rep_ts_rows
+                cnt = next((row["count"] for row in rep_ts_rows
                             if row["bucket"] == b and row["region_subject_id"] == rid), 0)
                 entry[rep["name"]] = cnt
                 if rep["population"]:
@@ -1730,21 +1671,15 @@ class EventAdmin(admin.ModelAdmin):
         for c in all_cats:
             if c.key not in tag_cats_selected:
                 continue
-            raw = list(
-                qs.filter(tags__category=c.key)
-                  .values("tags__id", "tags__name")
-                  .annotate(count=Count("id", distinct=True))
-                  .order_by("-count")[:tag_top]
-            )
+            raw = src.by_tag(c.key, tag_top)
             if not raw:
                 continue
             rows = []
             for r in raw:
-                tid = r["tags__id"]; name = r["tags__name"]
                 rows.append({
-                    "id": tid, "name": name, "count": r["count"],
-                    "url": drill_url({f"tag_{c.key}": [tid]}),
-                    "samples": samples_for(qs.filter(tags__id=tid)),
+                    **r,
+                    "url": drill_url({f"tag_{c.key}": [r["id"]]}),
+                    "samples": samples_for(qs.filter(tags__id=r["id"])),
                 })
             by_tag.append({"category": c.key, "label": c.label, "rows": rows})
 
