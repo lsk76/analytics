@@ -26,6 +26,14 @@
 </style>
 
 <div class="cw">
+  {% if total == 0 %}
+  <div class="empty" style="border:1px dashed var(--border-color,#ccc); border-radius:8px; margin:14px 0; padding:22px">
+    Це <b>графіки критики</b> — вони рахують лише коментарі monitor-задач
+    (<i>republics-criticism-monitor</i> тощо). У поточному фільтрі таких коментарів немає.<br>
+    Якщо ти дивишся пости <b>подієвої</b> задачі (напр. ethnic-clashes) — її графіки на сторінці
+    <a href="/admin/analysis/event/charts/">Подій → 📊 Графіки</a>.
+  </div>
+  {% endif %}
   <div class="cmeta">
     <strong>{{ total }}</strong> коментарів критики у поточному фільтрі
     <span class="gran">
