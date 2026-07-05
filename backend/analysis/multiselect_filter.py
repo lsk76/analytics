@@ -90,10 +90,15 @@ class MultiSelectFilter(admin.SimpleListFilter):
         - Subclasses only need to implement lookups() and filter_queryset()
     """
     template = 'admin/filters/multi_select.html'
-    
+
     def __init__(self, request, params, model, model_admin):
         super().__init__(request, params, model, model_admin)
         self.request = request  # Store request for later use in choices()
+
+    def filter_is_active(self) -> bool:
+        """True, якщо у фільтрі щось вибрано — шаблон тримає <details> відкритим
+        (згорнуті фільтри в сайдбарі, як у стокових Django-фільтрів)."""
+        return any(self.request.GET.getlist(p) for p in self.expected_parameters())
     
     def choices(self, changelist):
         """Generate choices with multi-select support"""
@@ -295,11 +300,15 @@ class AutocompleteFilter(admin.SimpleListFilter):
     admin_autocomplete_field: str = ''  # Field name for Django admin autocomplete
     placeholder: str = 'Пошук...'
     
+    def filter_is_active(self) -> bool:
+        """True, якщо у фільтрі щось вибрано (див. MultiSelectFilter)."""
+        return any(self.request.GET.getlist(p) for p in self.expected_parameters())
+
     def __init__(self, request, params, model, model_admin):
         self.request = request
         self.model = model
         self.model_admin = model_admin
-        
+
         # Resolve autocomplete URL
         if self.admin_autocomplete_field:
             # Use Django admin's built-in autocomplete

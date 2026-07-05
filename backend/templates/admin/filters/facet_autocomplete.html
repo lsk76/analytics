@@ -1,5 +1,6 @@
 {% load i18n static %}
-<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+<details data-filter-title="{{ title }}"{% if spec.filter_is_active %} open{% endif %}>
+<summary>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</summary>
 
 <script>
 if (!document.getElementById('select2-css-loaded')) {
@@ -89,3 +90,4 @@ if (!document.getElementById('select2-css-loaded')) {
     else window.addEventListener('load', function() { setTimeout(start, 100); });
 })();
 </script>
+</details>

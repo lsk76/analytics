@@ -1,5 +1,6 @@
 {% load i18n %}
-<h3>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</h3>
+<details data-filter-title="{{ title }}"{% if spec.filter_is_active %} open{% endif %}>
+<summary>{% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}</summary>
 
 <style>
 #changelist-filter .filter-mxe { padding: 0; margin: 0; list-style: none; }
@@ -107,3 +108,4 @@
     });
 })();
 </script>
+</details>
