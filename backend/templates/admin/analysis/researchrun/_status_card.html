@@ -49,7 +49,7 @@
 
   {# 4. Quick links #}
   <div class="row" style="margin-top:10px; font-size:12px;">
-    <a href="{% url 'admin:analysis_event_charts' %}?event_date__range__gte={{ c.job.date_from|date:'Y-m-d' }}&event_date__range__lte={{ c.job.date_to|date:'Y-m-d' }}">📊 Графіки</a>
+    <a href="{% url 'admin:analysis_event_changelist' %}?event_date__range__gte={{ c.job.date_from|date:'Y-m-d' }}&event_date__range__lte={{ c.job.date_to|date:'Y-m-d' }}#charts">📊 Графіки</a>
     <a href="{% url 'admin:analysis_collectchunk_changelist' %}?job__id__exact={{ c.job.id }}">Чанки</a>
     {% if c.last_running %}<span class="small" style="margin-left:auto">остання активність: {{ c.last_running.locked_at|timesince }} тому</span>{% endif %}
   </div>

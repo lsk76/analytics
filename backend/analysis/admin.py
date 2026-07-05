@@ -1469,6 +1469,17 @@ class EventAdmin(admin.ModelAdmin):
             tag_cols=1|2|3               (per-category grid columns)
         """
         is_fragment = request.GET.get("_fragment") == "1"
+        if not is_fragment:
+            # Окремої сторінки графіків більше немає: канонічний шлях — вбудований
+            # режим #charts на списку подій (той самий фрагмент вантажиться JS-ом).
+            # Старі посилання (закладки, researchrun тощо) редіректимо туди,
+            # зберігаючи всі фільтри/параметри.
+            from django.http import HttpResponseRedirect
+            from django.urls import reverse
+            q = request.GET.urlencode()
+            return HttpResponseRedirect(
+                reverse("admin:analysis_event_changelist")
+                + (f"?{q}" if q else "") + "#charts")
         gran = request.GET.get("gran", "day")
         if gran not in ("day", "week", "month"):
             gran = "day"
@@ -1956,9 +1967,8 @@ class EventAdmin(admin.ModelAdmin):
         # changes + template edits both invalidate). Without this, browsers
         # sometimes serve a stale fragment when only the layout (template)
         # changed but the URL stayed the same.
-        tmpl = ("admin/analysis/event/charts_fragment.html" if is_fragment
-                else "admin/analysis/event/charts.html")
-        resp = render(request, tmpl, ctx)
+        # standalone-режим редіректиться вище — сюди доходить лише фрагмент
+        resp = render(request, "admin/analysis/event/charts_fragment.html", ctx)
         resp["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return resp
 

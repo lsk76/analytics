@@ -67,7 +67,7 @@
     <span class="right">Оновлюється автоматично кожні 30с · {{ now|date:"H:i:s" }}</span>
     <a href="{% url 'admin:analysis_researchrun_changelist' %}">← Усі джоби</a>
     <a href="{% url 'admin:analysis_event_changelist' %}">Події</a>
-    <a href="{% url 'admin:analysis_event_charts' %}">📊 Графіки</a>
+    <a href="{% url 'admin:analysis_event_changelist' %}#charts">📊 Графіки</a>
   </div>
 
   <div class="st-section">
