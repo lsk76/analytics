@@ -571,7 +571,7 @@ class Event(models.Model):
         related_name="events", verbose_name="Суб'єкт РФ",
     )
     settlement = models.CharField(max_length=160, blank=True, verbose_name="Населений пункт")
-    tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Сторони/теги")
+    tags = models.ManyToManyField(Tag, blank=True, related_name="events", verbose_name="Теги")
     # Сторони конфлікту (нападник/жертва) живуть у `tags` під ЗАКРИТИМИ
     # категоріями attacker_nationality / victim_nationality (словник дзеркалить
     # nationality). Колишні окремі M2M attacker_tags/victim_tags видалені —
