@@ -153,18 +153,9 @@
       </div>
     </div>
 
-    {# Універсальні зрізи (успадковані з пост-графіків): тег × республіки, тег × час. #}
-    <div class="tag-section tagx-section" id="tagx-region-sec" style="display:none">
-      <h2>Теги × республіки <small style="font-weight:normal;color:var(--body-quiet-color)">(стек; клік по сегменту → список)</small></h2>
-      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tagx-region-grid"></div>
-    </div>
-    <div class="tag-section tagx-section" id="tagx-time-sec" style="display:none">
-      <h2>Теги в часі <small style="font-weight:normal;color:var(--body-quiet-color)">(лінія на тег; клік у легенді ховає/показує)</small></h2>
-      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tagx-time-grid"></div>
-    </div>
-
+    {# Спільний контрол: «Категорії» керують УСІМА трьома тег-секціями нижче #}
     <div class="tag-section">
-      <h2>Розподіл по тегах</h2>
+      <h2>Теги <small style="font-weight:normal;color:var(--body-quiet-color)">— вибір категорій діє на всі три секції нижче</small></h2>
       <form method="get" class="tag-config">
         {# зберігаємо поточні фільтри/гран сторінки #}
         {% for k, vals in passthrough_pairs %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endfor %}
@@ -196,6 +187,21 @@
         </label>
         <button type="submit" class="default">Застосувати</button>
       </form>
+    </div>
+
+    {# Універсальні зрізи (успадковані з пост-графіків): тег × республіки, тег × час. #}
+    <div class="tag-section tagx-section" id="tagx-region-sec" style="display:none">
+      <h2>Теги × республіки <small style="font-weight:normal;color:var(--body-quiet-color)">(стек; клік по сегменту → список)</small></h2>
+      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tagx-region-grid"></div>
+    </div>
+    <div class="tag-section tagx-section" id="tagx-time-sec" style="display:none">
+      <h2>Теги в часі <small style="font-weight:normal;color:var(--body-quiet-color)">(лінія на тег; клік у легенді ховає/показує)</small></h2>
+      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tagx-time-grid"></div>
+    </div>
+
+    <div class="tag-section">
+      <h2>Розподіл по тегах</h2>
+      
       <div class="charts-grid tag-grid-{{ tag_cols }}" id="tag-grid"></div>
     </div>
 
