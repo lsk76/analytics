@@ -104,6 +104,50 @@ def _parse_dt(s):
         return None
 
 
+def sync_comment_event(post) -> str | None:
+    """Єдина структура моделей: relevant monitor-коментар <=> Event (1:1, БЕЗ дедупу —
+    коментар = думка окремої людини, подія = одиниця сигналу; графіки будуються
+    лише по Event).
+
+    * is_relevant=True і події нема  -> створити Event (approved, summary=text[:300],
+      теги = дзеркало тегів поста) і прив'язати post.event.
+    * is_relevant=True і подія є     -> оновити дзеркало тегів/summary.
+    * is_relevant=False і подія є    -> видалити подію (post.event -> NULL через SET_NULL).
+
+    Повертає "created" | "updated" | "removed" | None (нічого не робилось).
+    """
+    from analysis.models import Event
+    if post.task.pipeline != post.task.PIPELINE_MONITOR:
+        return None
+    if not post.is_relevant:
+        if post.event_id:
+            Event.objects.filter(id=post.event_id).delete()   # SET_NULL відв'яже пост
+            return "removed"
+        return None
+    if post.event_id:
+        ev = Event.objects.filter(id=post.event_id).first()
+        if ev:
+            ev.summary = (post.text or "")[:300]
+            ev.save(update_fields=["summary"])
+            ev.tags.set(post.tags.all())
+            return "updated"
+    ev = Event.objects.create(
+        task=post.task,
+        event_date=post.posted_at.date() if post.posted_at else None,
+        region=(post.region_subject.name if post.region_subject_id else ""),
+        region_subject_id=post.region_subject_id,
+        summary=(post.text or "")[:300],
+        post_count=1,
+        channel_count=1 if post.channel_id else 0,
+        reach=(post.channel.subscribers if post.channel_id and post.channel else 0) or 0,
+        review_status=Event.REVIEW_APPROVED,
+    )
+    ev.tags.set(post.tags.all())
+    post.event = ev
+    post.save(update_fields=["event"])
+    return "created"
+
+
 def _parse_object(text: str):
     """JSON-ОБ'ЄКТ з відповіді моделі (толерує ``` fences). Не llm.extract_json —
     той хапає перший `[...]`, і {"positive": []} перетворюється на порожній list."""

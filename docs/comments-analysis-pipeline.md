@@ -18,8 +18,25 @@ collapsing exact same-author copies (`content_hash` / `also_in_chats`).
 ## The flow
 
 ```
-mon_collect → mon_filter → mon_prescreen (OpenRouter, cheap) → [AGENT: tag+validate, ONE pass] → done
+mon_collect → mon_filter → mon_prescreen (OpenRouter, cheap) → [AGENT: tag+validate, ONE pass] → Event 1:1 → done
 ```
+
+### Єдина структура моделей (рішення 2026-07-05)
+
+**Кожен відфільтрований (is_relevant) коментар матеріалізується як Event** — 1 коментар =
+1 подія, БЕЗ дедупу (коментар = думка окремої людини; лічильник «скільки людей» священний).
+Event: `event_date` = дата коментаря, `region_subject` = з поста (денормалізовано з каналу),
+`tags` = дзеркало тегів поста, `summary` = перші 300 символів, `post_count=1`,
+`reach` = підписники каналу, `review_status=approved` (валідація вже пройдена агентом).
+**Усі графіки/матриця будуються ЛИШЕ по Event** — обидві природи (інциденти й критика)
+живуть в одній моделі, розрізняються `task.pipeline`.
+
+Механіка: `analysis.services.monitor_stages.sync_comment_event(post)` —
+створює/оновлює/знімає подію за фактичним `is_relevant`; викликається з
+`monitor_ingest_tags` (після вердикту агента) і `monitor_validate --ingest`
+(downgrade → подія видаляється, `Post.event` → NULL через SET_NULL).
+Разова матеріалізація історії: `_dir/materialize_comment_events.py`
+(ідемпотентний — бере лише пости без події).
 
 | # | Stage | Tool | Prompt | Effect |
 |---|-------|------|--------|--------|

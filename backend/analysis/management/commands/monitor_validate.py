@@ -35,6 +35,7 @@ from django.db import transaction
 
 from analysis.models import AnalysisTask, Post, Tag
 from analysis.pilot.logging import open_log
+from analysis.services.monitor_stages import sync_comment_event
 from analysis.pilot.prompts import VALIDATOR_SYSTEM_PROMPT
 
 
@@ -148,6 +149,9 @@ class Command(BaseCommand):
                         invalid += 1
                     p.classification = cl
                     p.save(update_fields=["classification", "is_relevant"])
+                    # єдина структура: подія-дзеркало коментаря слідує за вердиктом
+                    # (downgrade -> подію видалено; valid -> теги події оновлено)
+                    sync_comment_event(p)
             log(f"  {f.name}: {len(data.get('items') or [])} items")
         log(f"DONE: {n} judged | valid={valid} | invalid(downgraded)={invalid} "
             f"| skipped={skip}")

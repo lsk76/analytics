@@ -42,6 +42,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from analysis.models import AnalysisTask, Post, Tag
+from analysis.services.monitor_stages import sync_comment_event
 
 
 VALID_CATEGORIES = {"criticism_target", "topic", "opinion"}
@@ -147,6 +148,9 @@ class Command(BaseCommand):
                     post.classification = cl
                     post.save(update_fields=["classification", "is_classified",
                                              "is_relevant"])
+                    # єдина структура моделей: relevant коментар <=> Event 1:1
+                    # (створює/оновлює/знімає подію за фактичним is_relevant)
+                    sync_comment_event(post)
                 n_applied += 1
             self.stdout.write(f"  {f.name}: {len(items)} items")
 
