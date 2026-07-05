@@ -25,7 +25,7 @@
         </label>
         <label>Аудит
           <select name="review_status">
-            <option value="">— всі —</option>
+            <option value="all" {% if selected_filters.review_status == "all" %}selected{% endif %}>— всі —</option>
             {% for code, lbl in review_status_choices %}
               <option value="{{ code }}" {% if selected_filters.review_status == code %}selected{% endif %}>{{ lbl }}</option>
             {% endfor %}

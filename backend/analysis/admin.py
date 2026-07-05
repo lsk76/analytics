@@ -685,6 +685,32 @@ class RosMinorityClashFilter(admin.SimpleListFilter):
                 .filter(_has_ros__gte=1, _other_nat__gte=1))
 
 
+class ReviewStatusDefaultFilter(admin.SimpleListFilter):
+    """Статус аудиту з дефолтом «Схвалено»: без параметра список показує лише
+    approved-події; «Всі» — явний вибір (?review_status=all)."""
+    title = "Статус аудиту"
+    parameter_name = "review_status"
+
+    def lookups(self, request, model_admin):
+        return [("all", "Всі")] + list(Event.REVIEW_CHOICES)
+
+    def queryset(self, request, queryset):
+        v = self.value() or Event.REVIEW_APPROVED   # дефолт = схвалено
+        if v == "all":
+            return queryset
+        return queryset.filter(review_status=v)
+
+    def choices(self, changelist):
+        # без стокового «All» першим рядком: дефолтний вибір = «Схвалено»
+        current = self.value() or Event.REVIEW_APPROVED
+        for lookup, title in self.lookup_choices:
+            yield {
+                "selected": current == str(lookup),
+                "query_string": changelist.get_query_string({self.parameter_name: lookup}),
+                "display": title,
+            }
+
+
 class ReviewSourceFilter(admin.SimpleListFilter):
     """Хто виніс вердикт: агент-рев'ю / ручне Claude-рев'ю / відновлені / аудит."""
     title = "Джерело рев'ю"
@@ -1228,14 +1254,14 @@ class EventAdmin(admin.ModelAdmin):
             return f"{base}?{qd.urlencode()}"
 
         def ev_url(cat, tagid, region):
-            p = {"tag_" + cat: [tagid], "review_status__exact": "approved",
+            p = {"tag_" + cat: [tagid], "review_status": "approved",
                  "event_date__year": 2026}
             if region in reg_pk:
                 p["region_id"] = [reg_pk[region]]
             return mkurl(ev_cl, p)
 
         def clash_url(region, year):
-            p = {"ros_clash": 1, "event_date__year": year, "review_status__exact": "approved"}
+            p = {"ros_clash": 1, "event_date__year": year, "review_status": "approved"}
             if region in reg_pk:
                 p["region_id"] = [reg_pk[region]]
             return mkurl(ev_cl, p)
@@ -1888,7 +1914,7 @@ class EventAdmin(admin.ModelAdmin):
             "date_to": (request.GET.get("event_date__range__lte")
                         or request.GET.get("event_date__lte", "")),
             "task": request.GET.get("task", ""),
-            "review_status": request.GET.get("review_status", ""),
+            "review_status": request.GET.get("review_status", "approved"),
             "regions": request.GET.getlist("region_id"),
         }
         any_filter_set = any([
@@ -1993,6 +2019,13 @@ class EventAdmin(admin.ModelAdmin):
             request.GET = clean
         return super().changelist_view(request, extra_context=extra_context)
 
+    def lookup_allowed(self, lookup, value, *args, **kwargs):
+        # back-compat: старі посилання/закладки з ?review_status__exact=… мають
+        # працювати і після заміни стокового фільтра на ReviewStatusDefaultFilter
+        if lookup in ("review_status__exact", "review_status"):
+            return True
+        return super().lookup_allowed(lookup, value, *args, **kwargs)
+
     def get_list_filter(self, request):
         # build one faceted multiselect per tag category, dynamically from the registry
         cat_filters = [tag_category_filter(c.key, c.label)
@@ -2000,7 +2033,7 @@ class EventAdmin(admin.ModelAdmin):
         return (
             ("event_date", ISODateRangeFilterBuilder(title="Період")),
             TaskFilter,
-            "review_status",
+            ReviewStatusDefaultFilter,
             ReviewSourceFilter,
             InterEthnicFilter,
             RosMinorityClashFilter,
