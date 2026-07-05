@@ -61,6 +61,21 @@ from .multiselect_filter import (
 TaskFilter = multiselect_filter(AnalysisTask, "Задача", "task", ordering="name")
 
 
+class TaskSingleFilter(admin.SimpleListFilter):
+    """Задача: ОДИНОЧНИЙ вибір (стокові лінки — клік на іншу задачу замінює
+    вибір). Параметр лишається ?task=<id>, тож усі наявні посилання
+    (матриця, графіки, закладки) працюють без змін."""
+    title = "Задача"
+    parameter_name = "task"
+
+    def lookups(self, request, model_admin):
+        return [(str(t.id), t.name) for t in AnalysisTask.objects.order_by("name")]
+
+    def queryset(self, request, queryset):
+        v = self.value()
+        return queryset.filter(task_id=v) if v else queryset
+
+
 def facet_base(changelist, request, exclude_spec):
     """Queryset with every OTHER filter (and search) applied, but not exclude_spec —
     the base for computing faceted option counts."""
@@ -2032,7 +2047,7 @@ class EventAdmin(admin.ModelAdmin):
                        for c in TagCategory.objects.all()]
         return (
             ("event_date", ISODateRangeFilterBuilder(title="Період")),
-            TaskFilter,
+            TaskSingleFilter,
             ReviewStatusDefaultFilter,
             ReviewSourceFilter,
             InterEthnicFilter,
@@ -2127,7 +2142,7 @@ class EventAdmin(admin.ModelAdmin):
         names = [t.name for t in obj.tags.all() if t.category == "conflict"]
         return ", ".join(names) or "—"
 
-    @admin.display(description="Сторони/теги")
+    @admin.display(description="Теги")
     def tags_list(self, obj):
         # sides only — the conflict type has its own column
         return ", ".join(t.name for t in obj.tags.all() if t.category != "conflict")
