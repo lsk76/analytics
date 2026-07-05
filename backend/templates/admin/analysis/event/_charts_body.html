@@ -142,6 +142,25 @@
         <h3>Суб'єкти: події по часу</h3>
         <div class="chart-canvas-wrap tall"><canvas id="ch_rep_ts"></canvas></div>
       </div>
+
+      {# % від усіх повідомлень — лише коли є знаменник (monitor-задачі/критика); #}
+      {# JS показує картку тільки якщо DATA.coverage непорожній. #}
+      <div class="chart-card full" id="coverage-card" style="display:none">
+        <h3>% від усіх повідомлень — по республіках
+          <small style="font-weight:normal;color:var(--body-quiet-color)">
+            (події ÷ всі повідомлення чатів за період; є лише для критики)</small></h3>
+        <div class="chart-canvas-wrap tall"><canvas></canvas></div>
+      </div>
+    </div>
+
+    {# Універсальні зрізи (успадковані з пост-графіків): тег × республіки, тег × час. #}
+    <div class="tag-section tagx-section" id="tagx-region-sec" style="display:none">
+      <h2>Теги × республіки <small style="font-weight:normal;color:var(--body-quiet-color)">(стек; клік по сегменту → список)</small></h2>
+      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tagx-region-grid"></div>
+    </div>
+    <div class="tag-section tagx-section" id="tagx-time-sec" style="display:none">
+      <h2>Теги в часі <small style="font-weight:normal;color:var(--body-quiet-color)">(лінія на тег; клік у легенді ховає/показує)</small></h2>
+      <div class="charts-grid tag-grid-{{ tag_cols }}" id="tagx-time-grid"></div>
     </div>
 
     <div class="tag-section">
@@ -582,6 +601,138 @@ function initCharts() {
           },
         });
       }
+    });
+  }
+
+  // ---- універсальні зрізи (успадковані з пост-графіків критики) ----------
+
+  // click-handler для датасетів із власними _urls на кожну точку/сегмент
+  const dsNav = (evt, els, chart) => {
+    if (!els.length) return;
+    const el = els[0];
+    const ds = chart.data.datasets[el.datasetIndex];
+    const u = ds && ds._urls ? ds._urls[el.index] : '';
+    if (u) window.open(u, '_blank', 'noopener');
+  };
+  const hoverCursor = (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : ''; };
+  const K = '\u0001';  // роздільник складеного ключа (не трапляється в назвах)
+
+  // Теги × республіки — стек по республіках, картка на категорію
+  const txr = document.getElementById('tagx-region-grid');
+  if (txr && DATA.tag_region && DATA.tag_region.length) {
+    document.getElementById('tagx-region-sec').style.display = '';
+    DATA.tag_region.forEach((cat) => {
+      const totals = {};
+      cat.rows.forEach(r => { totals[r.region] = (totals[r.region] || 0) + r.count; });
+      const regions = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+      const tags = [...new Set(cat.rows.map(r => r.name))];
+      const cell = {}, urls = {};
+      cat.rows.forEach(r => { cell[r.name + K + r.region] = r.count;
+                              urls[r.name + K + r.region] = r.url || ''; });
+      const datasets = tags.map((t, i) => ({
+        label: trunc(t), _full: t,
+        data: regions.map(g => cell[t + K + g] || 0),
+        _urls: regions.map(g => urls[t + K + g] || ''),
+        backgroundColor: PALETTE[i % PALETTE.length], stack: 's',
+      }));
+      const card = document.createElement('div');
+      card.className = 'chart-card';
+      card.innerHTML = '<h3>' + cat.label + ' × республіки</h3>' +
+                       '<div class="chart-canvas-wrap tall"><canvas></canvas></div>';
+      txr.appendChild(card);
+      new Chart(card.querySelector('canvas'), {
+        type: 'bar',
+        data: { labels: regions.map(trunc), datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          onClick: dsNav, onHover: hoverCursor,
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 11 }, color: text } },
+            tooltip: { callbacks: {
+              label: (it) => ` ${it.dataset._full || it.dataset.label}: ${it.formattedValue}`,
+            } },
+          },
+          scales: { x: { stacked: true, ticks: { autoSkip: false } },
+                    y: { stacked: true, beginAtZero: true } },
+        },
+      });
+    });
+  }
+
+  // Теги в часі — лінія на тег, картка на категорію (топ-8 видимі одразу)
+  const txt2 = document.getElementById('tagx-time-grid');
+  if (txt2 && DATA.tag_time && DATA.tag_time.length) {
+    document.getElementById('tagx-time-sec').style.display = '';
+    DATA.tag_time.forEach((cat) => {
+      const dates = [...new Set(cat.rows.map(r => r.date))].sort();
+      const tagTotals = {};
+      cat.rows.forEach(r => { tagTotals[r.name] = (tagTotals[r.name] || 0) + r.count; });
+      const tags = Object.keys(tagTotals).sort((a, b) => tagTotals[b] - tagTotals[a]);
+      const cell = {}, urls = {};
+      cat.rows.forEach(r => { cell[r.name + K + r.date] = r.count;
+                              urls[r.name + K + r.date] = r.url || ''; });
+      const datasets = tags.map((t, i) => ({
+        label: trunc(t), _full: t,
+        data: dates.map(d => cell[t + K + d] || 0),
+        _urls: dates.map(d => urls[t + K + d] || ''),
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: PALETTE[i % PALETTE.length] + '20',
+        borderWidth: 2, pointRadius: 1.5, pointHoverRadius: 5,
+        tension: 0.25, fill: false, hidden: i >= 8,
+      }));
+      const card = document.createElement('div');
+      card.className = 'chart-card';
+      card.innerHTML = '<h3>' + cat.label + ' — у часі</h3>' +
+                       '<div class="chart-canvas-wrap tall"><canvas></canvas></div>';
+      txt2.appendChild(card);
+      new Chart(card.querySelector('canvas'), {
+        type: 'line',
+        data: { labels: dates, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          onClick: dsNav, onHover: hoverCursor,
+          interaction: { mode: 'nearest', intersect: true },
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 11 }, color: text } },
+            tooltip: { callbacks: {
+              label: (it) => ` ${it.dataset._full || it.dataset.label}: ${it.formattedValue}`,
+            } },
+          },
+          scales: { x: { ticks: { maxRotation: 0, autoSkip: true } },
+                    y: { beginAtZero: true } },
+        },
+      });
+    });
+  }
+
+  // % від усіх повідомлень (рендер лише коли є знаменник — критика)
+  const covCard = document.getElementById('coverage-card');
+  if (covCard && DATA.coverage && DATA.coverage.length) {
+    covCard.style.display = '';
+    const dates = [...new Set(DATA.coverage.map(r => r.date))].sort();
+    const regs = [...new Set(DATA.coverage.map(r => r.region))];
+    const cell = {};
+    DATA.coverage.forEach(r => { cell[r.region + K + r.date] = r.pct; });
+    const datasets = regs.map((g, i) => ({
+      label: g,
+      data: dates.map(d => { const v = cell[g + K + d]; return v == null ? null : v; }),
+      borderColor: PALETTE[i % PALETTE.length],
+      backgroundColor: PALETTE[i % PALETTE.length] + '20',
+      borderWidth: 2, pointRadius: 1.5, pointHoverRadius: 5,
+      tension: 0.25, spanGaps: true, fill: false,
+    }));
+    new Chart(covCard.querySelector('canvas'), {
+      type: 'line',
+      data: { labels: dates, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11 }, color: text } },
+          tooltip: { callbacks: { label: (it) => ` ${it.dataset.label}: ${it.formattedValue}%` } },
+        },
+        scales: { x: { ticks: { maxRotation: 0, autoSkip: true } },
+                  y: { beginAtZero: true, ticks: { callback: (v) => v + '%' } } },
+      },
     });
   }
 }

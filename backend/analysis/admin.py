@@ -1683,6 +1683,84 @@ class EventAdmin(admin.ModelAdmin):
                 })
             by_tag.append({"category": c.key, "label": c.label, "rows": rows})
 
+        # ---- універсальні зрізи (успадковані з пост-графіків критики) --------
+        # тег × регіон (стек по республіках) і тег × час (лінія на тег).
+        # Для критики: об'єкти/теми × республіки/час; для інцидентів: типи
+        # конфліктів, етно-теги тощо. Рахує спільний адаптер.
+        tag_region, tag_time = [], []
+        for c in all_cats:
+            if c.key not in tag_cats_selected:
+                continue
+            rows_r = src.tag_by_region(c.key, tag_top)
+            if rows_r:
+                for r in rows_r:
+                    r["url"] = drill_url({f"tag_{c.key}": [r["id"]],
+                                          "region_id": [r["region_id"]]})
+                tag_region.append({"category": c.key, "label": c.label, "rows": rows_r})
+            rows_t = src.tag_timeseries(c.key, tag_top)
+            if rows_t:
+                out_t = []
+                for r in rows_t:
+                    d_from, d_to = bucket_range(r["bucket"])
+                    out_t.append({
+                        "date": r["bucket"].isoformat(), "name": r["name"],
+                        "count": r["count"],
+                        "url": (drill_url({f"tag_{c.key}": [r["id"]],
+                                           "event_date__range__gte": d_from.isoformat(),
+                                           "event_date__range__lte": d_to.isoformat()})
+                                if d_from else ""),
+                    })
+                tag_time.append({"category": c.key, "label": c.label, "rows": out_t})
+
+        # ---- % подій від усіх повідомлень (знаменник — ChannelDailyStat) -----
+        # Є лише для monitor-задач (критика): частка критичних коментарів серед
+        # УСІХ повідомлень чатів. Для подієвих задач знаменника немає — блок
+        # порожній і картка не рендериться.
+        coverage = []
+        cov_task_ids = list(qs.order_by().values_list("task_id", flat=True).distinct())
+        if cov_task_ids:
+            tot_qs = ChannelDailyStat.objects.order_by().filter(task_id__in=cov_task_ids)
+
+            def _pd(s):
+                for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+                    try:
+                        return datetime.datetime.strptime(s, fmt).date()
+                    except (TypeError, ValueError):
+                        continue
+                return None
+            d_gte = _pd(get_clean.get("event_date__range__gte") or get_clean.get("event_date__gte"))
+            d_lte = _pd(get_clean.get("event_date__range__lte") or get_clean.get("event_date__lte"))
+            if d_gte:
+                tot_qs = tot_qs.filter(date__gte=d_gte)
+            if d_lte:
+                tot_qs = tot_qs.filter(date__lte=d_lte)
+            tot_rows = list(tot_qs.values("date", "channel__region_subject__name")
+                            .annotate(t=Sum(Coalesce("telezip_total", "total"))))
+            if tot_rows:
+                def _bstart(d):
+                    if gran == "week":
+                        return d - _td(days=d.weekday())
+                    if gran == "month":
+                        return d.replace(day=1)
+                    return d
+                den = {}
+                for r in tot_rows:
+                    key = (r["channel__region_subject__name"] or "", _bstart(r["date"]))
+                    den[key] = den.get(key, 0) + (r["t"] or 0)
+                num_rows = (src.qs.exclude(region_subject__isnull=True)
+                            .exclude(**{f"{src.date_field}__isnull": True})
+                            .annotate(bucket=src.trunc(src.date_field))
+                            .values("bucket", "region_subject__name")
+                            .annotate(n=Count("id", distinct=True)))
+                for r in num_rows:
+                    t = den.get((r["region_subject__name"], r["bucket"]))
+                    if t:
+                        coverage.append({"date": r["bucket"].isoformat(),
+                                         "region": r["region_subject__name"],
+                                         "pct": round(100.0 * r["n"] / t, 2),
+                                         "n": r["n"], "t": t})
+                coverage.sort(key=lambda x: (x["region"], x["date"]))
+
         # Distribution by reach buckets (vertical bar): how many events fall into
         # each reach band? Useful to see if data is dominated by viral big-reach or
         # by local low-reach incidents. Same idea for channel_count buckets.
@@ -1866,6 +1944,9 @@ class EventAdmin(admin.ModelAdmin):
                 "republics": [r["name"] for r in republics],
                 "republic_timeseries": republic_timeseries,
                 "by_republic_total": by_republic_total,
+                "tag_region": tag_region,
+                "tag_time": tag_time,
+                "coverage": coverage,
                 "gran": gran,
                 "tag_chart": tag_chart,
                 "label_max": label_max,

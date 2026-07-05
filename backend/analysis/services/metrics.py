@@ -109,6 +109,39 @@ class _BaseSource:
                     .annotate(count=Count("id", distinct=True))
                     .order_by("-count")[:top]]
 
+    def _top_tag_ids(self, category: str, top: int):
+        return [r["id"] for r in self.by_tag(category, top)]
+
+    # ---- універсальні зрізи (успадковані з пост-графіків критики) ------------
+    # Для критики це «об'єкти/теми × республіки/час»; для інцидентів — «типи
+    # конфліктів × республіки/час». Обмежуємось top-N тегами категорії, щоб
+    # стек/легенда не вибухали.
+    def tag_by_region(self, category: str, top: int = 12):
+        ids = self._top_tag_ids(category, top)
+        if not ids:
+            return []
+        return [{"region": r["region_subject__name"], "region_id": r["region_subject_id"],
+                 "id": r["tags__id"], "name": r["tags__name"], "count": r["count"]}
+                for r in self.qs.filter(tags__id__in=ids)
+                    .exclude(region_subject__isnull=True)
+                    .values("region_subject_id", "region_subject__name",
+                            "tags__id", "tags__name")
+                    .annotate(count=Count("id", distinct=True))
+                    .order_by("-count")]
+
+    def tag_timeseries(self, category: str, top: int = 12):
+        ids = self._top_tag_ids(category, top)
+        if not ids:
+            return []
+        return [{"bucket": r["bucket"], "id": r["tags__id"], "name": r["tags__name"],
+                 "count": r["count"]}
+                for r in self.qs.filter(tags__id__in=ids)
+                    .exclude(**{f"{self.date_field}__isnull": True})
+                    .annotate(bucket=self.trunc(self.date_field))
+                    .values("bucket", "tags__id", "tags__name")
+                    .annotate(count=Count("id", distinct=True))
+                    .order_by("bucket")]
+
     # ---- перевизначається підкласами ----------------------------------------
     def _reach_by_region(self, region_ids) -> dict:
         raise NotImplementedError
