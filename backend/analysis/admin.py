@@ -551,6 +551,17 @@ class MonitorChatInline(admin.TabularInline):
     fields = ("channel", "is_active")
     ordering = ("channel__username",)
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        ff = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        # прибрати «+ додати / олівець-редагувати / видалити / око» біля каналу —
+        # канал лише ОБИРАЄМО зі списку, не створюємо й не правимо звідси
+        if db_field.name == "channel" and hasattr(ff.widget, "can_add_related"):
+            ff.widget.can_add_related = False
+            ff.widget.can_change_related = False
+            ff.widget.can_delete_related = False
+            ff.widget.can_view_related = False
+        return ff
+
 
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
