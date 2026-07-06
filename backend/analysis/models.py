@@ -17,6 +17,25 @@ from django.db import models
 # Конфігурація задачі — параметризує весь пайплайн
 # ---------------------------------------------------------------------------
 
+def _default_prescreen_prompt():
+    """Текст за замовчуванням для нових задач — щоб промпт було ВИДНО і можна
+    було правити в адмінці, а не шукати у коді."""
+    from analysis.pilot.prompts import PRESCREEN_SYSTEM_PROMPT_COMPACT
+    return PRESCREEN_SYSTEM_PROMPT_COMPACT
+
+
+def _default_tagger_prompt():
+    from analysis.pilot.prompts import TAGGER_SYSTEM_PROMPT
+    return TAGGER_SYSTEM_PROMPT
+
+
+def _default_agent_review_prompt():
+    from pathlib import Path
+    import analysis.pilot as _pilot
+    f = Path(_pilot.__file__).parent / "EVENT_REVIEW_PROMPT.md"
+    return f.read_text() if f.exists() else ""
+
+
 class AnalysisTask(models.Model):
     name = models.CharField(max_length=200, verbose_name="Назва")
     slug = models.SlugField(unique=True, verbose_name="Ідентифікатор (slug)")
@@ -134,10 +153,10 @@ class AnalysisTask(models.Model):
         help_text="Системний промпт авто-аудитора. Порожньо — дефолтний.",
     )
     agent_review_prompt = models.TextField(
-        blank=True, verbose_name="Агент-аудит: промпт",
-        help_text="Іде агентам у SYSTEM_PROMPT.md рев'ю-батчів запуску "
-                  "(статус «Чекає агента»). Порожньо — стандартний "
-                  "EVENT_REVIEW_PROMPT.md із analysis/pilot/.",
+        blank=True, default=_default_agent_review_prompt,
+        verbose_name="Агент-аудит: промпт",
+        help_text="Зберігається в задачі й береться звідси при запуску аудиту. "
+                  "Порожньо — стандартний EVENT_REVIEW_PROMPT.md (запасний варіант).",
     )
 
     # --- конфіг monitor-стадій (реюзабельність: усе редагується з адмінки, ---
@@ -155,13 +174,16 @@ class AnalysisTask(models.Model):
         help_text="Дешева модель для «так/ні» відсіву. Порожньо — дефолт із settings.",
     )
     prescreen_prompt = models.TextField(
-        blank=True, verbose_name="Прескрін: системний промпт",
-        help_text="Порожньо — стандартний compact-промпт із analysis/pilot/prompts.py.",
+        blank=True, default=_default_prescreen_prompt,
+        verbose_name="Прескрін: системний промпт",
+        help_text="Зберігається в задачі й береться звідси при запуску. "
+                  "Порожньо — стандартний із коду (запасний варіант).",
     )
     tagger_prompt = models.TextField(
-        blank=True, verbose_name="Тегування: системний промпт агента",
-        help_text="Іде в SYSTEM_PROMPT.md батчів для Claude-агентів. "
-                  "Порожньо — стандартний TAGGER_SYSTEM_PROMPT із prompts.py.",
+        blank=True, default=_default_tagger_prompt,
+        verbose_name="Тегування: системний промпт агента",
+        help_text="Зберігається в задачі; йде агентам у SYSTEM_PROMPT.md пачок. "
+                  "Порожньо — стандартний із коду (запасний варіант).",
     )
 
     # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
