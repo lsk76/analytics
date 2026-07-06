@@ -122,11 +122,6 @@ class AnalysisTask(models.Model):
         "TagCategory", blank=True, related_name="tasks", verbose_name="Категорії тегів",
         help_text="Які категорії тегів класифікатор збирає з поста (схема промпта будується з них).",
     )
-    closed_tag_categories = models.JSONField(
-        default=list, blank=True, verbose_name="Закриті категорії тегів",
-        help_text='Категорії, що канонізуються лише із сід-списку (інші — відкритий словник). '
-                  'Для етнічної задачі: ["nationality","conflict"]. Порожньо — усі відкриті.',
-    )
     dedup_judge_prompt = models.TextField(
         blank=True, verbose_name="Промпт дедуп-судді",
         help_text="Системний промпт LLM-судді «одна подія чи різні». Порожньо — дефолтний.",

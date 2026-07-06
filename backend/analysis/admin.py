@@ -589,7 +589,7 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
             "fields": ("name", "slug", "description", "pipeline", "is_active"),
         }),
         ("Спільне: мови, теги", {
-            "fields": ("languages", "tag_categories", "closed_tag_categories"),
+            "fields": ("languages", "tag_categories"),
         }),
         ("Довідковий період задачі", {
             "classes": ("collapse",),

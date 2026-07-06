@@ -126,7 +126,6 @@ class Command(BaseCommand):
                 "llm_model": "google/gemini-2.5-flash",
                 # domain config — everything explicit on the task (no global fallbacks)
                 "geo_enabled": True,
-                "closed_tag_categories": ["nationality", "role"],
                 "dedup_judge_prompt": DEDUP_JUDGE_PROMPT,
                 "generic_sides": GENERIC_SIDES,
                 # final AI audit — pricier model does the manual QA pass
