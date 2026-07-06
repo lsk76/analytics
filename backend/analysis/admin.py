@@ -588,9 +588,15 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
         ("Задача", {
             "fields": ("name", "slug", "description", "pipeline", "is_active"),
         }),
-        ("Спільне: період, мови, теги", {
-            "fields": ("date_from", "date_to", "languages",
-                       "tag_categories", "closed_tag_categories"),
+        ("Спільне: мови, теги", {
+            "fields": ("languages", "tag_categories", "closed_tag_categories"),
+        }),
+        ("Довідковий період задачі", {
+            "classes": ("collapse",),
+            "description": "НЕ впливає на роботу: реальні періоди задаються при "
+                           "створенні запуску збору (Збори → Додати). Ці дати — лише "
+                           "типовий період для адмін-дії «Зібрати період задачі».",
+            "fields": ("date_from", "date_to"),
         }),
         # ---------- 📰 ПОШУК ПОДІЙ: етапи ----------
         ("📰 Етап 1 — Збір (TeleZip)", {
