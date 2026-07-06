@@ -8,10 +8,15 @@
     python3 06_analyze_channels.py           # всі канали з JSON-файлами
 """
 import json, os, sys, time
+from pathlib import Path
 from typing import List
 from openai import OpenAI
+from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
+
+# Load secrets from the repo-root .env (four levels up from this file).
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 # ── Налаштування ────────────────────────────────────────────────────
 POSTS_DIR = '/Users/r2d2/Documents/dev/openclaw/tgstat_posts'
@@ -19,7 +24,9 @@ KEY_FILE  = '/Users/r2d2/Downloads/tg-vk-groups-baa6d186e7f5.json'
 SHEET_ID  = '1qnhnIa_1ziZjRICiP4RHBi0OJlF28uyf_3LDPnIMbOA'
 TEST_MODE = '--test' in sys.argv
 
-OPENROUTER_API_KEY = 'OPENROUTER_API_KEY_REMOVED'
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+if not OPENROUTER_API_KEY:
+    sys.exit('OPENROUTER_API_KEY is not set (add it to the repo-root .env).')
 OPENROUTER_MODEL   = 'google/gemini-2.0-flash-001'
 
 # ── Google Sheets ────────────────────────────────────────────────────
