@@ -308,6 +308,24 @@ class ResearchRunAdmin(admin.ModelAdmin):
                        "events_corroborated", "created_at")
     change_list_template = "admin/analysis/researchrun/change_list.html"
 
+    def save_model(self, request, obj, form, change):
+        """«Новий запуск» одним кроком: створення запису в адмінці одразу планує
+        чанки збору — далі все ведуть воркери (mon-collect/filter/prescreen +
+        mon-runs для гібридного тегування; events-задачі — свої стадії)."""
+        super().save_model(request, obj, form, change)
+        if change or obj.status not in ("pending", "collecting"):
+            return
+        if obj.chunks.exists():
+            return
+        from .services import stages as _stages
+        made = _stages.enqueue_collection(obj.task, obj.date_from, obj.date_to,
+                                          chunk_days=obj.chunk_days, job=obj)
+        obj.status = "collecting"
+        obj.started_at = djtz.now()
+        obj.save(update_fields=["status", "started_at"])
+        messages.success(request, f"Запуск #{obj.id}: заплановано {made} чанків — "
+                                  f"воркери підхоплять самі. Прогрес: Збори → Статус.")
+
     # ---------- status dashboard --------------------------------------------
 
     def get_urls(self):
@@ -343,10 +361,10 @@ class ResearchRunAdmin(admin.ModelAdmin):
             chunk_pct = round(100 * chunks_finished / c_total) if c_total else 0
 
             # post-stage breakdown for the job's date range (posts belong to task, not job)
-            pcounts = dict(Post.objects.filter(task=j.task,
-                                                posted_at__date__gte=j.date_from,
-                                                posted_at__date__lte=j.date_to)
-                           .values_list("stage").annotate(n=Count("id")))
+            W = Post.objects.filter(task=j.task,
+                                    posted_at__date__gte=j.date_from,
+                                    posted_at__date__lte=j.date_to)
+            pcounts = dict(W.values_list("stage").annotate(n=Count("id")))
             p_total = sum(pcounts.values())
             p_terminal = pcounts.get(Post.STAGE_DONE, 0) + pcounts.get(Post.STAGE_FAILED, 0)
             p_pct = round(100 * p_terminal / p_total) if p_total else 0
@@ -369,8 +387,7 @@ class ResearchRunAdmin(admin.ModelAdmin):
                 "chunks_total": c_total, "chunks": c_by, "chunks_pct": chunk_pct,
                 "chunks_cooldown": cooldown,
                 "posts_total": p_total, "posts_pct": p_pct,
-                "post_stages": [(lbl, pcounts.get(st, 0))
-                                for st, lbl in self._STAGE_SEQ if pcounts.get(st)],
+                "flow": self._stage_flow(j, W, pcounts),
                 "posts_failed": pcounts.get(Post.STAGE_FAILED, 0),
                 "events_total": e_total, "events_review": r_by, "events_pct": r_pct,
                 "last_running": last_run,
@@ -405,6 +422,75 @@ class ResearchRunAdmin(admin.ModelAdmin):
         (Post.STAGE_MON_PRESCREENED, "прескрін+"),
         (Post.STAGE_DONE, "готово"),
     ]
+
+    # ---- потік етапів для статус-картки --------------------------------------
+    # «Черга етапу X» = пости, що стоять на ВХІДНІЙ стадії X (claim-модель:
+    # захоплені воркером = «в роботі»); «помилки етапу» — по префіксу stage_error.
+    _FLOW_MONITOR = [
+        ("Фільтр",   Post.STAGE_MON_COLLECTED,   "mon_filter"),
+        ("Прескрін", Post.STAGE_MON_FILTERED,    "mon_prescreen"),
+        ("Тегування (агент)", Post.STAGE_MON_PRESCREENED, "mon_tag"),
+    ]
+    _FLOW_EVENTS = [
+        ("Збагачення",   Post.STAGE_COLLECTED,    "enrich"),
+        ("Прекластер",   Post.STAGE_ENRICHED,     "precluster"),
+        ("Класифікація", Post.STAGE_PRECLUSTERED, "classify"),
+        ("Дедуп",        Post.STAGE_CLASSIFIED,   "dedup"),
+        ("Подієзбірка",  Post.STAGE_DEDUPED,      ""),
+    ]
+
+    def _stage_flow(self, j, W, pcounts):
+        from django.db.models import Value
+        from django.db.models.functions import StrIndex, Substr
+        is_mon = j.task.pipeline == AnalysisTask.PIPELINE_MONITOR
+        steps_cfg = self._FLOW_MONITOR if is_mon else self._FLOW_EVENTS
+        locked = dict(W.filter(stage_locked_at__isnull=False)
+                      .values_list("stage").annotate(n=Count("id")))
+        # помилки по етапах: префікс stage_error до двокрапки
+        failed_by = {}
+        for pref, n in (W.filter(stage=Post.STAGE_FAILED)
+                        .annotate(_p=Substr("stage_error", 1,
+                                            StrIndex("stage_error", Value(":")) - 1))
+                        .values_list("_p").annotate(n=Count("id"))):
+            failed_by[pref or "інше"] = n
+        steps = []
+        for label, in_stage, err_pref in steps_cfg:
+            queue = pcounts.get(in_stage, 0)
+            working = locked.get(in_stage, 0)
+            step = {"label": label,
+                    "queue": max(queue - working, 0),
+                    "working": working,
+                    "failed": failed_by.pop(err_pref, 0) if err_pref else 0}
+            if is_mon and in_stage == Post.STAGE_MON_PRESCREENED:
+                # агентний крок: черга = лише prescreen-ПОЗИТИВНІ ще без вердикту
+                step["queue"] = W.filter(
+                    stage=Post.STAGE_MON_PRESCREENED, is_classified=False,
+                    classification___prescreen__could_be_criticism=True).count()
+                st = j.stats or {}
+                if st.get("batches"):
+                    step["batches"] = st.get("batches")
+                    step["batches_done"] = st.get("batches_done", 0)
+            steps.append(step)
+        # хвіст помилок без відомого префікса — окремим бакетом
+        other_failed = sum(failed_by.values())
+        # термінал «Готово» з чесною розбивкою
+        done_n = pcounts.get(Post.STAGE_DONE, 0)
+        breakdown = []
+        if is_mon and done_n:
+            noise = W.filter(stage=Post.STAGE_DONE,
+                             classification__is_filtered=True).count()
+            crit = W.filter(stage=Post.STAGE_DONE, is_relevant=True).count()
+            pre_neg = W.filter(
+                stage=Post.STAGE_DONE,
+                classification___prescreen__could_be_criticism=False).count()
+            rest = max(done_n - noise - crit - pre_neg, 0)
+            breakdown = [("відсіяно фільтром", noise),
+                         ("відсіяно прескріном", pre_neg),
+                         ("не критика (агент)", rest),
+                         ("критика → події", crit)]
+        return {"steps": steps, "done": done_n,
+                "done_breakdown": [(l, n) for l, n in breakdown if n],
+                "other_failed": other_failed}
 
     @admin.display(description="Чанки")
     def chunk_progress(self, obj):

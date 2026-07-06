@@ -346,6 +346,7 @@ class ResearchRun(models.Model):
         ("pending", "Очікує"),
         ("collecting", "Збір триває"),
         ("collected", "Збір завершено"),
+        ("awaiting_agent", "Чекає агента (тегування)"),
         ("done", "Готово"),
         ("failed", "Помилка"),
         ("cancelled", "Скасовано"),

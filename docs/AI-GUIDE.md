@@ -69,10 +69,16 @@ mon_collect → mon_filter(25..600 симв) → mon_prescreen(OpenRouter, де�
   → [АГЕНТ: тег+валідація ОДНИМ проходом: criticism_target+topic+opinion ⇒ is_relevant]
   → sync_comment_event: Event 1:1 → done
 ```
-Команди: `monitor_prescreen_api`, `monitor_prepare_batches --require-prescreen`,
-`monitor_ingest_tags`. Промпти: `analysis/pilot/prompts.py` (єдине джерело правди).
-Деталі: **docs/comments-analysis-pipeline.md**. Разовий перенос історії:
-`_dir/materialize_comment_events.py` (ідемпотентний).
+**ГІБРИДНИЙ ЗАПУСК ЧЕРЕЗ UI (канон з 2026-07-06):** адмінка Збори → Додати
+(задача+період) → чанки плануються самі → воркери збирають/фільтрують/прескрінять →
+воркер `mon-runs` (`services/pipeline_runs.py`) готує батчі в `_dir/runs/run_<id>/`
+→ статус **«Чекає агента»** (жовтий блок на Збори→Статус з інструкцією) → людина
+каже Claude Code «протегуй батчі запуску #N» (Haiku-агенти, SYSTEM_PROMPT.md у теці)
+→ ранер сам бачить `*_done.json`, інжестить, створює події 1:1, закриває запуск.
+Ранер сам пере-чергує mon-failed пости (транзієнтні LLM-збої) до 3 разів.
+Команди під капотом: `monitor_prepare_batches --require-prescreen`, `monitor_ingest_tags`.
+Промпти: `analysis/pilot/prompts.py`. Деталі: **docs/comments-analysis-pipeline.md**.
+Разовий перенос історії: `_dir/materialize_comment_events.py` (ідемпотентний).
 
 ### ad-hoc дослідницькі конвеєри (task=6)
 ```
@@ -135,6 +141,12 @@ docs/                       # ARCHITECTURE, comments-…, ethnic-…, econ-… p
   (переставляти після рестарту контейнера).
 - **Воркери не перечитують код** — після зміни stage-коду `docker compose restart worker-…`;
   web теж рестартуй після зміни admin.py.
+- **`docker compose restart` НЕ перечитує .env** — оновив ключі (OpenRouter/TeleZip) →
+  `docker compose up -d --force-recreate worker-…`, інакше воркери житимуть зі старим
+  env (ловили 401 добу). Легасі-воркер mon-tag ВИДАЛЕНО з compose — тегують агенти.
+- **`Post.region_subject`** заповнюється на вставці (mon_collect) — але для events-конвеєра
+  вставка своя; після нових шляхів вставки перевіряй денормалізацію (бекфіл-скрипт
+  `_dir/backfill_post_region.py` ідемпотентний).
 - **Довгі фонові збори** — одразу перевіряй, що процес реально працює (мовчазні провали).
 - **Бекапи перед схемними змінами**: `docker compose exec -T db pg_dump -U postgres tg_events | gzip > backups/…`.
   Останній повний: `backups/tg_events_20260704_121716_pre_unify_phase2.sql.gz`.

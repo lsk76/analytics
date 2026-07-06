@@ -339,6 +339,7 @@ def mon_collect_once(task):
         to_create.append(Post(
             task=task, url=url, stage=Post.STAGE_MON_COLLECTED,
             channel=ch, channel_name=ch.username or f"id{ch.tg_id}",
+            region_subject_id=ch.region_subject_id,   # денормалізація Ф2 — на вставці
             posted_at=_parse_dt(r.get("date")),
             telezip_date=_parse_dt(r.get("date")),
             text=text, content_hash=_content_hash(text),

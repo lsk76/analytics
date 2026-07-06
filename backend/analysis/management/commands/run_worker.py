@@ -13,6 +13,7 @@ Stage worker — polls the DB for posts/chunks at its stage and processes them.
     python manage.py run_worker --stage mon_filter
     python manage.py run_worker --stage mon_prescreen
     python manage.py run_worker --stage mon_tag
+    python manage.py run_worker --stage mon_runs   # ранер запусків (гібрид)
 
     # options
     --task <slug>     only this task (default: all active tasks of the
@@ -26,9 +27,11 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from analysis.models import AnalysisTask
-from analysis.services import monitor_stages, stages
+from analysis.services import monitor_stages, pipeline_runs, stages
 
-ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS}
+ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
+               # гібридний ранер monitor-запусків (див. services/pipeline_runs.py)
+               "mon_runs": pipeline_runs.mon_runs_once}
 
 
 class Command(BaseCommand):

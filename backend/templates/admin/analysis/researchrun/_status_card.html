@@ -19,17 +19,39 @@
     {% if c.chunks.failed %}<span class="chip bad">⚠ failed {{ c.chunks.failed }}</span>{% endif %}
   </div>
 
-  {# 2. Posts pipeline #}
+  {# 2. Потік етапів: під кожним — черга / в роботі / помилки САМЕ цього етапу #}
   {% if c.posts_total %}
     <div class="row" style="margin-top:10px">
-      <span class="label">Пости (всі стадії)</span>
+      <span class="label">Пости вікна</span>
       <span class="val">{{ c.posts_total }}</span>
-      <span class="small">({{ c.posts_pct }}% готово)</span>
+      <span class="small">({{ c.posts_pct }}% пройшло конвеєр)</span>
     </div>
     <div class="progress"><div class="done" style="width: {{ c.posts_pct }}%"></div></div>
-    <div class="chips">
-      {% for lbl, n in c.post_stages %}<span class="chip">{{ lbl }} {{ n }}</span>{% endfor %}
-      {% if c.posts_failed %}<span class="chip bad">помилка {{ c.posts_failed }}</span>{% endif %}
+
+    <div style="display:flex; align-items:stretch; gap:4px; margin-top:8px; flex-wrap:wrap">
+      {% for st in c.flow.steps %}
+        <div style="flex:1; min-width:110px; border:1px solid var(--border-color,#ddd);
+                    border-radius:6px; padding:6px 8px;
+                    {% if st.working %}background:rgba(59,130,246,.08);{% endif %}">
+          <div style="font-weight:600; font-size:12px">{{ st.label }}</div>
+          <div class="small" style="line-height:1.7">
+            {% if st.queue %}⏳ черга {{ st.queue }}<br>{% endif %}
+            {% if st.working %}▶ в роботі {{ st.working }}<br>{% endif %}
+            {% if st.batches %}🤖 батчі {{ st.batches_done }}/{{ st.batches }}<br>{% endif %}
+            {% if st.failed %}<span style="color:#b3261e">⚠ помилки {{ st.failed }}</span><br>{% endif %}
+            {% if not st.queue and not st.working and not st.failed and not st.batches %}<span style="color:var(--body-quiet-color)">—</span>{% endif %}
+          </div>
+        </div>
+        <div style="align-self:center; color:var(--body-quiet-color)">→</div>
+      {% endfor %}
+      <div style="flex:1; min-width:130px; border:1px solid var(--border-color,#ddd);
+                  border-radius:6px; padding:6px 8px; background:rgba(16,185,129,.08)">
+        <div style="font-weight:600; font-size:12px">Готово · {{ c.flow.done }}</div>
+        <div class="small" style="line-height:1.7">
+          {% for lbl, n in c.flow.done_breakdown %}{{ lbl }}: {{ n }}<br>{% endfor %}
+          {% if c.flow.other_failed %}<span style="color:#b3261e">⚠ інші помилки {{ c.flow.other_failed }}</span>{% endif %}
+        </div>
+      </div>
     </div>
   {% endif %}
 
@@ -44,6 +66,22 @@
       {% if c.events_review.approved %}<span class="chip ok">✅ approved {{ c.events_review.approved }}</span>{% endif %}
       {% if c.events_review.pending %}<span class="chip warn">⏳ pending {{ c.events_review.pending }}</span>{% endif %}
       {% if c.events_review.rejected %}<span class="chip bad">🚫 rejected {{ c.events_review.rejected }}</span>{% endif %}
+    </div>
+  {% endif %}
+
+  {# 3b. ГІБРИД: запуск чекає агентного тегування #}
+  {% if c.job.status == "awaiting_agent" %}
+    <div class="row" style="margin-top:10px; padding:8px 10px; border:1px dashed #d97706;
+                            border-radius:6px; background:rgba(245,158,11,.10); display:block">
+      <b>🤖 Чекає агента:</b> батчі
+      <b>{{ c.job.stats.batches_done|default:0 }} / {{ c.job.stats.batches }}</b> відтеговано
+      · <code style="font-size:11px">{{ c.job.stats.batch_dir }}</code><br>
+      <span class="small">
+        Скажи Claude Code: <b>«протегуй батчі запуску #{{ c.job.id }}»</b> —
+        агент читає SYSTEM_PROMPT.md і batch_NNN.json у цій теці та пише
+        batch_NNN_done.json. Щойно всі done — ранер сам заінжестить теги,
+        створить події (1 коментар = 1 подія) і закриє запуск.
+      </span>
     </div>
   {% endif %}
 

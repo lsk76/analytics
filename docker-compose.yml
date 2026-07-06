@@ -64,7 +64,7 @@ services:
   worker-mon-collect:   { <<: *worker, command: python manage.py run_worker --stage mon_collect }
   worker-mon-filter:    { <<: *worker, command: python manage.py run_worker --stage mon_filter }
   worker-mon-prescreen: { <<: *worker, command: python manage.py run_worker --stage mon_prescreen }
-  worker-mon-tag:       { <<: *worker, command: python manage.py run_worker --stage mon_tag }
+  worker-mon-runs:      { <<: *worker, command: python manage.py run_worker --stage mon_runs }
 
 volumes:
   pgdata:
