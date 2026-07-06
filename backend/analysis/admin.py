@@ -570,6 +570,10 @@ class MonitorChatInline(admin.TabularInline):
 
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
+    """Форма задачі = дві реюзабельні «рецептури», згруповані ПО ЕТАПАХ конвеєра:
+      📰 Пошук подій: Збір → Класифікація → Дедуплікація → Аудит/резонансність
+      💬 Моніторинг коментарів: Чати → Фільтрація → Прескрін → Тегування агентами
+    JS у change_form ховає етапи чужого конвеєра (перемикач «Конвеєр» угорі)."""
     list_display = ("name", "slug", "pipeline", "date_from", "date_to", "geo_enabled",
                     "is_active", "drop_linked_comments", "monitor_chats_count")
     list_filter = ("pipeline", "is_active", "drop_linked_comments")
@@ -578,6 +582,61 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     filter_horizontal = ("tag_categories",)
     actions = [collect_task_period_action]
     inlines = [MonitorChatInline]
+    change_form_template = "admin/analysis/analysistask/change_form.html"
+
+    fieldsets = (
+        ("Задача", {
+            "fields": ("name", "slug", "description", "pipeline", "is_active"),
+        }),
+        ("Спільне: період, мови, теги", {
+            "fields": ("date_from", "date_to", "languages",
+                       "tag_categories", "closed_tag_categories"),
+        }),
+        # ---------- 📰 ПОШУК ПОДІЙ: етапи ----------
+        ("📰 Етап 1 — Збір (TeleZip)", {
+            "classes": ("flow-events",),
+            "description": "Що і як тягнемо з пошуку TeleZip.",
+            "fields": ("telezip_query", "telezip_unique", "search_posts",
+                       "search_comments", "drop_linked_comments",
+                       "min_channel_subscribers", "collect_chunk_days"),
+        }),
+        ("📰 Етап 2 — Класифікація (LLM)", {
+            "classes": ("flow-events",),
+            "description": "Як LLM вирішує релевантність і витягує поля події.",
+            "fields": ("classify_system_prompt", "llm_model",
+                       "relevance_field", "geo_enabled"),
+        }),
+        ("📰 Етап 3 — Дедуплікація", {
+            "classes": ("flow-events", "collapse"),
+            "description": "N постів → 1 подія: пороги схожості та LLM-суддя.",
+            "fields": ("dedup_window_days", "dedup_pre_thresh",
+                       "dedup_cand_thresh", "dedup_judge_prompt", "generic_sides"),
+        }),
+        ("📰 Етап 4 — AI-аудит і резонансність", {
+            "classes": ("flow-events", "collapse"),
+            "description": "Фінальна перевірка подій дорожчою моделлю; охоплення/канали "
+                           "рахуються автоматично (reach, channel_count).",
+            "fields": ("review_enabled", "review_model", "review_prompt"),
+        }),
+        # ---------- 💬 МОНІТОРИНГ КОМЕНТАРІВ: етапи ----------
+        ("💬 Етап 2 — Фільтрація", {
+            "classes": ("flow-monitor",),
+            "description": "Дешевий відсів шуму без LLM (етап 1 — чати нижче, "
+                           "у блоці «Чати моніторингу»).",
+            "fields": ("mon_min_len", "mon_max_len"),
+        }),
+        ("💬 Етап 3 — Прескрін (дешеве так/ні)", {
+            "classes": ("flow-monitor",),
+            "description": "OpenRouter-модель відсіює ~90-95% некритики перед агентами.",
+            "fields": ("prescreen_model", "prescreen_prompt"),
+        }),
+        ("💬 Етап 4 — Тегування агентами", {
+            "classes": ("flow-monitor",),
+            "description": "Промпт, який отримують Claude-агенти в SYSTEM_PROMPT.md "
+                           "батчів («чекає агента» на дашборді запусків).",
+            "fields": ("tagger_prompt",),
+        }),
+    )
 
     @admin.display(description="Чати моніт.")
     def monitor_chats_count(self, obj):

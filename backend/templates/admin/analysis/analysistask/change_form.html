@@ -1,0 +1,65 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  /* картки-перемикач конвеєра (стилізуємо стандартний select через сусідній блок) */
+  .flow-cards { display:flex; gap:10px; margin:8px 0 4px; }
+  .flow-card { flex:1; max-width:390px; border:2px solid var(--border-color,#ccc);
+               border-radius:10px; padding:10px 14px; cursor:pointer; user-select:none; }
+  .flow-card.active { border-color: var(--link-fg,#417690); background: rgba(65,118,144,.08); }
+  .flow-card b { display:block; margin-bottom:2px; }
+  .flow-card small { color: var(--body-quiet-color,#777); line-height:1.35; display:block; }
+  fieldset.flow-hidden { display:none !important; }
+</style>
+{% endblock %}
+
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<script>
+(function() {
+  const sel = document.getElementById('id_pipeline');
+  if (!sel) return;
+
+  // 1) картки-перемикач над формою (селект лишається джерелом правди, ховаємо його рядок)
+  const CARDS = [
+    ['events',  '📰 Пошук подій',
+     'збір за пошуковим запитом → класифікація → дедуплікація → аудит і резонансність'],
+    ['monitor', '💬 Моніторинг коментарів',
+     'обрані чати → фільтрація → прескрін → тегування агентами → подія на кожен коментар'],
+  ];
+  const wrap = document.createElement('div');
+  wrap.className = 'flow-cards';
+  CARDS.forEach(([val, title, desc]) => {
+    const c = document.createElement('div');
+    c.className = 'flow-card'; c.dataset.val = val;
+    c.innerHTML = '<b>' + title + '</b><small>' + desc + '</small>';
+    c.addEventListener('click', () => { sel.value = val; apply(); });
+    wrap.appendChild(c);
+  });
+  const pipelineRow = sel.closest('.form-row, .field-pipeline');
+  if (pipelineRow) {
+    pipelineRow.parentNode.insertBefore(wrap, pipelineRow);
+    pipelineRow.style.display = 'none';   // селект дублює картки — ховаємо
+  }
+
+  // 2) показ лише етапів обраного конвеєра
+  function apply() {
+    const v = sel.value;
+    document.querySelectorAll('fieldset').forEach(fs => {
+      const isE = fs.classList.contains('flow-events');
+      const isM = fs.classList.contains('flow-monitor');
+      if (!isE && !isM) return;
+      fs.classList.toggle('flow-hidden', (isE && v !== 'events') || (isM && v !== 'monitor'));
+    });
+    // inline «Чати моніторингу» — лише для monitor
+    const chats = document.getElementById('monitor_chats-group');
+    if (chats) chats.style.display = (v === 'monitor') ? '' : 'none';
+    wrap.querySelectorAll('.flow-card').forEach(c =>
+      c.classList.toggle('active', c.dataset.val === v));
+  }
+  sel.addEventListener('change', apply);
+  apply();
+})();
+</script>
+{% endblock %}

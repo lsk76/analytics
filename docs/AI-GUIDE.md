@@ -63,6 +63,14 @@ collect(TeleZip) → enrich(Telethon) → precluster(fuzzy) → classify(LLM) �
 ```
 Деталі стадій/watermark/failure-семантика: **docs/ARCHITECTURE.md**.
 
+**Реюзабельні рецептури:** форма «Задача аналізу» в адмінці згрупована ПО ЕТАПАХ
+обраного конвеєра (картки 📰 Пошук подій / 💬 Моніторинг коментарів; JS ховає чужі
+етапи). ВСІ робочі параметри стадій редагуються з адмінки: events — запит/промпт
+класифікації/пороги дедупу/промпт судді/аудит (поля існували давно); monitor —
+`mon_min_len`/`mon_max_len` (фільтр), `prescreen_model`/`prescreen_prompt`,
+`tagger_prompt` (іде агентам у SYSTEM_PROMPT.md батчів). Порожнє поле = дефолт із
+`analysis/pilot/prompts.py` — тож існуючі задачі працюють як раніше.
+
 ### monitor (критика; збір воркерами, тегування оркеструється Claude-агентами)
 ```
 mon_collect → mon_filter(25..600 симв) → mon_prescreen(OpenRouter, дешеве так/ні)

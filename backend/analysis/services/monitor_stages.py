@@ -381,14 +381,17 @@ def mon_filter_once(task):
     if not ids:
         return False
     region = _region_of(task)
+    # довжини — конфіг задачі (редагується з адмінки; дефолти 25/600)
+    min_len = task.mon_min_len or MIN_LEN
+    max_len = task.mon_max_len or MAX_LEN
     posts = list(Post.objects.filter(id__in=ids))
     n_kept = n_drop = 0
     for p in posts:
         text = p.text or ""
-        if len(text) < MIN_LEN:
-            reason = ("too_short", f"len<{MIN_LEN}")
-        elif len(text) >= MAX_LEN:
-            reason = ("too_long", f"len≥{MAX_LEN} — likely a post, not a comment")
+        if len(text) < min_len:
+            reason = ("too_short", f"len<{min_len}")
+        elif len(text) >= max_len:
+            reason = ("too_long", f"len≥{max_len} — likely a post, not a comment")
         else:
             reason = PF.classify(text, region)
         cl = dict(p.classification or {})
@@ -425,7 +428,8 @@ async def _llm_prescreen(batches, model):
                 f"[{i}] " + (p.text or "").strip().replace("\n", " ")[:1000]
                 for i, p in enumerate(batch))
             raw = await llm.query(
-                [{"role": "system", "content": PRESCREEN_SYSTEM_PROMPT_COMPACT},
+                [{"role": "system",
+                  "content": task.prescreen_prompt or PRESCREEN_SYSTEM_PROMPT_COMPACT},
                  {"role": "user", "content": user}],
                 model=model, client=client, max_tokens=2500, json_mode=True)
             data = _parse_object(raw)
@@ -454,7 +458,7 @@ def mon_prescreen_once(task):
     ids = _claim(task, Post.STAGE_MON_FILTERED, PRESCREEN_TICK)
     if not ids:
         return False
-    model = task.llm_model or settings.LLM_MODEL
+    model = task.prescreen_model or task.llm_model or settings.LLM_MODEL
     posts = list(Post.objects.filter(id__in=ids).order_by("posted_at", "id"))
     batches = [posts[i:i + PRESCREEN_SUB] for i in range(0, len(posts), PRESCREEN_SUB)]
     verdicts = asyncio.run(_llm_prescreen(batches, model))
@@ -510,7 +514,7 @@ async def _llm_tag(batches, region, model):
                     "\n\nУ КОЖНОМУ елементі items ОБОВ'ЯЗКОВО додай поле "
                     '"id" = число з [id=...] відповідного коментаря.')
             raw = await llm.query(
-                [{"role": "system", "content": TAGGER_SYSTEM_PROMPT},
+                [{"role": "system", "content": task.tagger_prompt or TAGGER_SYSTEM_PROMPT},
                  {"role": "user", "content": user}],
                 model=model, client=client, max_tokens=4000, json_mode=True)
             data = _parse_object(raw)

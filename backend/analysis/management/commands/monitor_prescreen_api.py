@@ -65,8 +65,8 @@ def _parse_object(text: str) -> Any:
 
 
 async def _classify_batch(client, model: str, batch: List[Dict],
-                          max_tokens: int, compact: bool) -> List[Dict[str, Any]]:
-    system = PRESCREEN_SYSTEM_PROMPT_COMPACT if compact else PRESCREEN_SYSTEM_PROMPT
+                          max_tokens: int, compact: bool,
+                          system: str) -> List[Dict[str, Any]]:
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": _build_user(batch)},
@@ -102,7 +102,7 @@ async def _classify_batch(client, model: str, batch: List[Dict],
 
 async def _run(posts: List[Dict], model: str, batch_size: int,
                concurrency: int, max_tokens: int, compact: bool,
-               log) -> Dict[int, Dict[str, Any]]:
+               system: str, log) -> Dict[int, Dict[str, Any]]:
     sem = asyncio.Semaphore(concurrency)
     client = llm.make_client()
     results: Dict[int, Dict[str, Any]] = {}
@@ -113,7 +113,7 @@ async def _run(posts: List[Dict], model: str, batch_size: int,
         async with sem:
             batch = posts[start:start + batch_size]
             verdicts = await _classify_batch(client, model, batch, max_tokens,
-                                             compact)
+                                             compact, system)
             for j, p in enumerate(batch):
                 if j < len(verdicts) and isinstance(verdicts[j], dict):
                     results[p["id"]] = verdicts[j]
@@ -213,12 +213,21 @@ class Command(BaseCommand):
             return
 
         t0 = datetime.now(timezone.utc)
+        # конфіг задачі має пріоритет над дефолтами (реюзабельність з адмінки);
+        # явний --model лишається найсильнішим
+        model = opts["model"]
+        if model == settings.LLM_MODEL and task.prescreen_model:
+            model = task.prescreen_model
+        system = (task.prescreen_prompt or
+                  (PRESCREEN_SYSTEM_PROMPT_COMPACT if opts["compact"]
+                   else PRESCREEN_SYSTEM_PROMPT))
         verdicts = asyncio.run(_run(
-            posts, model=opts["model"],
+            posts, model=model,
             batch_size=max(1, opts["batch_size"]),
             concurrency=max(1, opts["concurrency"]),
             max_tokens=opts["max_tokens"],
             compact=opts["compact"],
+            system=system,
             log=log,
         ))
         wall = (datetime.now(timezone.utc) - t0).total_seconds()

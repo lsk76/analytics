@@ -134,7 +134,7 @@ class Command(BaseCommand):
             f"# Tagger system prompt\n\n"
             f"Task: `{task.slug}` | Region: `{region or '-'}`\n"
             f"Generated: {ts_now}\n\n"
-            f"---\n\n```\n{TAGGER_SYSTEM_PROMPT}\n```\n"
+            f"---\n\n```\n{task.tagger_prompt or TAGGER_SYSTEM_PROMPT}\n```\n"
         )
 
         self.stdout.write(self.style.SUCCESS(

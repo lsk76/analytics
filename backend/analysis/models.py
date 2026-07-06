@@ -132,6 +132,30 @@ class AnalysisTask(models.Model):
         help_text="Системний промпт аудитора. Порожньо — дефолтний.",
     )
 
+    # --- конфіг monitor-стадій (реюзабельність: усе редагується з адмінки, ---
+    # --- згруповано по етапах у формі; порожнє поле = дефолт із коду) ---
+    mon_min_len = models.PositiveSmallIntegerField(
+        default=25, verbose_name="Фільтр: мін. довжина коментаря",
+        help_text="Коротші повідомлення відсіюються як шум (емодзі, «+1»).",
+    )
+    mon_max_len = models.PositiveSmallIntegerField(
+        default=600, verbose_name="Фільтр: макс. довжина",
+        help_text="Довші — найімовірніше пости/репости каналу, не коментарі людей.",
+    )
+    prescreen_model = models.CharField(
+        max_length=100, blank=True, verbose_name="Прескрін: модель (OpenRouter)",
+        help_text="Дешева модель для «так/ні» відсіву. Порожньо — дефолт із settings.",
+    )
+    prescreen_prompt = models.TextField(
+        blank=True, verbose_name="Прескрін: системний промпт",
+        help_text="Порожньо — стандартний compact-промпт із analysis/pilot/prompts.py.",
+    )
+    tagger_prompt = models.TextField(
+        blank=True, verbose_name="Тегування: системний промпт агента",
+        help_text="Іде в SYSTEM_PROMPT.md батчів для Claude-агентів. "
+                  "Порожньо — стандартний TAGGER_SYSTEM_PROMPT із prompts.py.",
+    )
+
     # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
     PIPELINE_EVENTS = "events"
     PIPELINE_MONITOR = "monitor"
