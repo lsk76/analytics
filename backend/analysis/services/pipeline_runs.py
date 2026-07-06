@@ -166,3 +166,170 @@ def _finish(run: ResearchRun, stats: dict):
                             "stats", "status", "finished_at"])
     log.info("mon_runs: run #%s DONE (posts=%s relevant=%s events=%s)",
              run.id, run.posts_collected, run.posts_relevant, run.events_total)
+
+
+# ============================================================================
+# EVENTS-запуски: агент-аудит подій (гібрид, симетрично monitor-тегуванню)
+#
+#   collecting/collected  чанки збору + events-стадії постів вікна (enrich...
+#                         dedup) розгрібають воркери; якщо увімкнено —
+#                         чекаємо й авто-аудит (перший прохід дешевою LLM).
+#   → prepare             батчі approved-подій вікна (без уже агент-ревʼюнутих)
+#                         у _dir/runs/run_<id>/ + SYSTEM_PROMPT.md
+#                         (= task.agent_review_prompt або EVENT_REVIEW_PROMPT.md).
+#   → awaiting_agent      агенти пишуть batch_NNN_done.json (формат §5 промпту:
+#                         keep/reject + region_fix + tags_add + reason).
+#   → ingest              reject -> rejected + '[agent review] '+reason;
+#                         region_fix -> Event.region; tags_add -> теги. -> done.
+# ============================================================================
+
+_EV_OPEN_STAGES = [Post.STAGE_COLLECTED, Post.STAGE_ENRICHED,
+                   Post.STAGE_PRECLUSTERED, Post.STAGE_CLASSIFIED,
+                   Post.STAGE_DEDUPED]
+_EV_BATCH_SIZE = 80
+
+
+def _default_agent_review_prompt() -> str:
+    import analysis.pilot as _pilot
+    from pathlib import Path
+    return (Path(_pilot.__file__).parent / "EVENT_REVIEW_PROMPT.md").read_text()
+
+
+def _window_events(run):
+    from analysis.models import Event
+    return Event.objects.filter(task=run.task,
+                                event_date__gte=run.date_from,
+                                event_date__lte=run.date_to)
+
+
+def ev_runs_once(task) -> bool:
+    """Просунути активні EVENTS-запуски задачі (контракт run_worker)."""
+    did = False
+    for run in (ResearchRun.objects
+                .filter(task=task, status__in=["collecting", "collected", "awaiting_agent"])
+                .order_by("id")):
+        try:
+            if run.status == "awaiting_agent":
+                did = _ev_try_ingest(run) or did
+            else:
+                did = _ev_try_prepare(run) or did
+        except Exception as e:  # noqa: BLE001
+            run.error = repr(e)[:2000]
+            run.save(update_fields=["error"])
+            log.exception("ev_runs: run #%s advance failed", run.id)
+    return did
+
+
+def _ev_try_prepare(run) -> bool:
+    import json
+    from analysis.models import Event
+    # 1) збір закритий?
+    if CollectChunk.objects.filter(job=run).exclude(status__in=["done", "split"]).exists():
+        return False
+    # 2) конвеєр постів вікна дожував? (enrich→...→dedup ведуть воркери)
+    if _window_posts(run).filter(stage__in=_EV_OPEN_STAGES).exists():
+        return False
+    # 3) авто-аудит (перший прохід) закінчив? (лише якщо увімкнений)
+    if run.task.review_enabled and _window_events(run).filter(
+            review_status=Event.REVIEW_PENDING).exists():
+        return False
+    # 4) батчі approved-подій, ще не бачених агент-аудитом
+    evs = (_window_events(run).filter(review_status=Event.REVIEW_APPROVED)
+           .exclude(review_notes__icontains="agent review")
+           .prefetch_related("tags").order_by("id"))
+    items = [{"id": e.id,
+              "event_date": e.event_date.isoformat() if e.event_date else None,
+              "region": e.region or (e.region_subject.name if e.region_subject_id else ""),
+              "summary": e.summary,
+              "tags": [{"category": t.category, "name": t.name} for t in e.tags.all()]}
+             for e in evs]
+    bdir = batch_dir(run)
+    os.makedirs(bdir, exist_ok=True)
+    prompt = run.task.agent_review_prompt or _default_agent_review_prompt()
+    with open(f"{bdir}/SYSTEM_PROMPT.md", "w") as f:
+        f.write(prompt)
+    n_batches = 0
+    for i in range(0, len(items), _EV_BATCH_SIZE):
+        n_batches += 1
+        with open(f"{bdir}/batch_{n_batches:03d}.json", "w") as f:
+            json.dump({"meta": {"task_slug": run.task.slug, "batch_id": n_batches,
+                                "kind": "event_review"},
+                       "items": items[i:i + _EV_BATCH_SIZE]}, f, ensure_ascii=False)
+    stats = dict(run.stats or {})
+    stats.update(batch_dir=bdir, batches=n_batches, batches_done=0,
+                 kind="event_review", events_to_review=len(items))
+    if not n_batches:
+        _ev_finish(run, stats)
+        return True
+    run.stats = stats
+    run.status = "awaiting_agent"
+    run.save(update_fields=["stats", "status"])
+    log.info("ev_runs: run #%s → awaiting_agent (%s подій у %s батчах)",
+             run.id, len(items), n_batches)
+    return True
+
+
+def _ev_try_ingest(run) -> bool:
+    import json
+    from analysis.models import Event, Tag
+    bdir = batch_dir(run)
+    todo, done = _batches(bdir)
+    stats = dict(run.stats or {})
+    if stats.get("batches_done") != len(done):
+        stats["batches_done"] = len(done)
+        run.stats = stats
+        run.save(update_fields=["stats"])
+    if len(done) < len(todo):
+        return False
+    n_keep = n_reject = n_fix = 0
+    for f in sorted(done):
+        data = json.load(open(f))
+        for it in (data.get("items") or []):
+            ev = Event.objects.filter(id=it.get("id"), task=run.task).first()
+            if not ev:
+                continue
+            verdict = (it.get("verdict") or "").lower()
+            reason = (it.get("reason") or "")[:200]
+            if verdict == "reject":
+                ev.review_status = Event.REVIEW_REJECTED
+                note = f"[agent review] {reason or 'відхилено агент-аудитом'}"
+                ev.review_notes = (ev.review_notes + " | " + note) if ev.review_notes else note
+                ev.reviewed_at = djtz.now()
+                ev.save(update_fields=["review_status", "review_notes", "reviewed_at"])
+                n_reject += 1
+                continue
+            # keep: можливі виправлення
+            upd = []
+            if it.get("region_fix") is not None:
+                ev.region = it["region_fix"] or ""
+                upd.append("region")
+            note = "[agent review] ok" + (f": {reason}" if reason else "")
+            ev.review_notes = (ev.review_notes + " | " + note) if ev.review_notes else note
+            ev.reviewed_at = djtz.now()
+            upd += ["review_notes", "reviewed_at"]
+            ev.save(update_fields=upd)
+            for pair in (it.get("tags_add") or []):
+                if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                    tg, _ = Tag.objects.get_or_create(category=pair[0], name=pair[1])
+                    ev.tags.add(tg)
+                    n_fix += 1
+            n_keep += 1
+    stats.update(agent_keep=n_keep, agent_reject=n_reject, agent_tag_fixes=n_fix)
+    _ev_finish(run, stats)
+    return True
+
+
+def _ev_finish(run, stats: dict):
+    from analysis.models import Event
+    W = _window_posts(run)
+    run.posts_collected = W.count()
+    run.posts_relevant = W.filter(is_relevant=True).count()
+    evq = _window_events(run)
+    run.events_total = evq.filter(review_status=Event.REVIEW_APPROVED).count()
+    run.stats = stats
+    run.status = "done"
+    run.finished_at = djtz.now()
+    run.save(update_fields=["posts_collected", "posts_relevant", "events_total",
+                            "stats", "status", "finished_at"])
+    log.info("ev_runs: run #%s DONE (approved=%s, agent: keep=%s reject=%s)",
+             run.id, run.events_total, stats.get("agent_keep"), stats.get("agent_reject"))

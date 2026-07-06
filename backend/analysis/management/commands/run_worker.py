@@ -30,8 +30,12 @@ from analysis.models import AnalysisTask
 from analysis.services import monitor_stages, pipeline_runs, stages
 
 ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
-               # гібридний ранер monitor-запусків (див. services/pipeline_runs.py)
-               "mon_runs": pipeline_runs.mon_runs_once}
+               # гібридні ранери запусків (див. services/pipeline_runs.py):
+               # mon_runs — критика (тегування агентами), ev_runs — події
+               # (агент-аудит). Іменування: mon_* бачить monitor-задачі,
+               # решта — events (див. _tasks нижче).
+               "mon_runs": pipeline_runs.mon_runs_once,
+               "ev_runs": pipeline_runs.ev_runs_once}
 
 
 class Command(BaseCommand):

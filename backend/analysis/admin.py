@@ -612,11 +612,19 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
             "fields": ("dedup_window_days", "dedup_pre_thresh",
                        "dedup_cand_thresh", "dedup_judge_prompt", "generic_sides"),
         }),
-        ("📰 Етап 4 — AI-аудит і резонансність", {
+        ("📰 Етап 4 — Авто-аудит: перший прохід (дешева LLM)", {
             "classes": ("flow-events", "collapse"),
-            "description": "Фінальна перевірка подій дорожчою моделлю; охоплення/канали "
-                           "рахуються автоматично (reach, channel_count).",
+            "description": "Воркер грубо відсіює хибнопозитиви дешевою моделлю "
+                           "(gemini-flash тощо). Резонансність (охоплення/канали) "
+                           "рахується автоматично.",
             "fields": ("review_enabled", "review_model", "review_prompt"),
+        }),
+        ("📰 Етап 5 — Агент-аудит (гібрид)", {
+            "classes": ("flow-events",),
+            "description": "Якісний ярус: запуск збору готує батчі approved-подій і стає "
+                           "в «Чекає агента»; Claude-агенти виносять keep/reject + правки "
+                           "(регіон, теги), ранер застосовує вердикти сам.",
+            "fields": ("agent_review_prompt",),
         }),
         # ---------- 💬 МОНІТОРИНГ КОМЕНТАРІВ: етапи ----------
         ("💬 Етап 2 — Фільтрація", {

@@ -116,20 +116,28 @@ class AnalysisTask(models.Model):
                   '(напр. мігрант/місцевий). Порожньо — дефолтний набір.',
     )
 
-    # --- фінальний AI-аудит (дорожча модель робить «ручну» перевірку подій) ---
+    # --- аудит подій: два яруси ---
+    # ярус 1 — АВТО-аудит воркером (дешева LLM, грубий перший прохід);
+    # ярус 2 — АГЕНТ-аудит (гібрид: батчі -> Claude-агенти -> вердикти)
     review_enabled = models.BooleanField(
-        default=False, verbose_name="Фінальний AI-аудит",
-        help_text="Доганяти готові події дорожчою моделлю: відсів хибнопозитивів, "
-                  "злиття дублів, фікс гео/полів.",
+        default=False, verbose_name="Авто-аудит: перший прохід",
+        help_text="Воркер проганяє готові події ДЕШЕВОЮ моделлю: грубий відсів "
+                  "хибнопозитивів. Якість добиває агент-аудит (етап нижче).",
     )
     review_model = models.CharField(
-        max_length=100, blank=True, default="anthropic/claude-sonnet-4.6",
-        verbose_name="Модель аудиту",
-        help_text="Дорожча LLM для фінального аудиту (OpenRouter).",
+        max_length=100, blank=True, default="google/gemini-2.5-flash",
+        verbose_name="Авто-аудит: модель",
+        help_text="Дешева LLM (OpenRouter) для першого проходу — напр. gemini-flash.",
     )
     review_prompt = models.TextField(
-        blank=True, verbose_name="Промпт аудиту",
-        help_text="Системний промпт аудитора. Порожньо — дефолтний.",
+        blank=True, verbose_name="Авто-аудит: промпт",
+        help_text="Системний промпт авто-аудитора. Порожньо — дефолтний.",
+    )
+    agent_review_prompt = models.TextField(
+        blank=True, verbose_name="Агент-аудит: промпт",
+        help_text="Іде агентам у SYSTEM_PROMPT.md рев'ю-батчів запуску "
+                  "(статус «Чекає агента»). Порожньо — стандартний "
+                  "EVENT_REVIEW_PROMPT.md із analysis/pilot/.",
     )
 
     # --- конфіг monitor-стадій (реюзабельність: усе редагується з адмінки, ---

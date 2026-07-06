@@ -65,6 +65,7 @@ services:
   worker-mon-filter:    { <<: *worker, command: python manage.py run_worker --stage mon_filter }
   worker-mon-prescreen: { <<: *worker, command: python manage.py run_worker --stage mon_prescreen }
   worker-mon-runs:      { <<: *worker, command: python manage.py run_worker --stage mon_runs }
+  worker-ev-runs:       { <<: *worker, command: python manage.py run_worker --stage ev_runs }
 
 volumes:
   pgdata:

@@ -60,8 +60,13 @@ task=6 — «контейнер» для дослідницьких конвеє
 ### events (docker-воркери, claim-черга по Post.stage)
 ```
 collect(TeleZip) → enrich(Telethon) → precluster(fuzzy) → classify(LLM) → dedup(LLM-суддя) → Event
+  → авто-аудит (воркер review, ДЕШЕВА LLM — перший прохід)
+  → АГЕНТ-АУДИТ (гібрид): воркер ev-runs готує батчі approved-подій у
+    _dir/runs/run_<id>/ → «Чекає агента» → агенти пишуть keep/reject+правки
+    (§5 EVENT_REVIEW_PROMPT.md / task.agent_review_prompt) → ранер застосовує.
 ```
-Деталі стадій/watermark/failure-семантика: **docs/ARCHITECTURE.md**.
+Аудит ДВОЯРУСНИЙ: review_model=gemini-flash це НЕ помилка — дешевий перший
+прохід; якість добиває агент-аудит. Деталі стадій: **docs/ARCHITECTURE.md**.
 
 **Реюзабельні рецептури:** форма «Задача аналізу» в адмінці згрупована ПО ЕТАПАХ
 обраного конвеєра (картки 📰 Пошук подій / 💬 Моніторинг коментарів; JS ховає чужі
