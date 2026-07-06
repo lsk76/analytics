@@ -551,10 +551,11 @@ class MonitorChatInline(admin.TabularInline):
     fields = ("channel", "is_active")
     ordering = ("channel__username",)
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        ff = super().formfield_for_foreignkey(db_field, request, **kwargs)
-        # прибрати «+ додати / олівець-редагувати / видалити / око» біля каналу —
-        # канал лише ОБИРАЄМО зі списку, не створюємо й не правимо звідси
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        # ловимо ПІСЛЯ обгортання RelatedFieldWidgetWrapper — саме він додає
+        # «+ додати / олівець-редагувати / видалити / око» біля каналу.
+        # Канал лише ОБИРАЄМО зі списку, тож усі ці кнопки прибираємо.
+        ff = super().formfield_for_dbfield(db_field, request, **kwargs)
         if db_field.name == "channel" and hasattr(ff.widget, "can_add_related"):
             ff.widget.can_add_related = False
             ff.widget.can_change_related = False
