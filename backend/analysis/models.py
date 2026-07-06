@@ -11,6 +11,7 @@
 «Етнічні сутички 2025» — це ОДИН рядок AnalysisTask; ніщо тут не захардкоджено під неї.
 """
 from django.db import models
+from django.utils.safestring import mark_safe
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +45,12 @@ class AnalysisTask(models.Model):
     # Збір (TeleZip)
     telezip_query = models.TextField(
         verbose_name="Пошуковий запит TeleZip",
-        help_text="Запит у синтаксисі TeleZip (text=...)",
+        help_text=mark_safe(
+            'Запит у синтаксисі TeleZip (text=...). '
+            '<a href="https://docs.google.com/document/d/'
+            '1oKag8XfmpOnKapbkayRZzq8JHbpB8GaKvSgC1judnvg/edit?tab=t.0" '
+            'target="_blank" rel="noopener">Документація TeleZip ↗</a>'
+        ),
     )
     languages = models.JSONField(
         default=list, blank=True, verbose_name="Мови (фільтр пошуку TeleZip)",
