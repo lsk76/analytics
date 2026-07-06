@@ -167,7 +167,6 @@ class Command(BaseCommand):
                 search_posts=False, search_comments=True,
                 telezip_unique=False, collect_chunk_days=1,
                 classify_system_prompt="(pilot — classification deferred)",
-                relevance_field="is_relevant",
             ),
         )
         # keep the LATEST query / range on the task for visibility

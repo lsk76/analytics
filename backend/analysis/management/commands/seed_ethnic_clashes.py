@@ -117,7 +117,6 @@ class Command(BaseCommand):
                 "collect_chunk_days": 1,
                 "telezip_unique": False,   # збирати всі репости -> точне охоплення
                 "classify_system_prompt": CLASSIFY_PROMPT,
-                "relevance_field": "is_relevant",
                 "dedup_window_days": 2,
                 "dedup_pre_thresh": 82,
                 "dedup_cand_thresh": 55,

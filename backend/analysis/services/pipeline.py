@@ -326,7 +326,6 @@ def classify(run):
             cls.pop("i", None)
             rep_cls[rep.id] = cls
 
-    rfield = task.relevance_field
     for members in groups.values():
         cls = rep_cls.get(members[0].id, {})
         for p in members:
@@ -336,7 +335,7 @@ def classify(run):
                 c["_tz_channel_id"] = keep_tz
             p.classification = c
             p.is_classified = True
-            p.is_relevant = bool(c.get(rfield))
+            p.is_relevant = bool(c.get("is_relevant"))
             p.save(update_fields=["classification", "is_classified", "is_relevant"])
 
     run.posts_relevant = Post.objects.filter(run=run, is_relevant=True).count()
@@ -607,7 +606,6 @@ def run_pipeline(run: ResearchRun):
         "search_posts": run.task.search_posts,
         "search_comments": run.task.search_comments,
         "collect_chunk_days": run.task.collect_chunk_days,
-        "relevance_field": run.task.relevance_field,
         "dedup_window_days": run.task.dedup_window_days,
         "dedup_pre_thresh": run.task.dedup_pre_thresh,
         "dedup_cand_thresh": run.task.dedup_cand_thresh,

@@ -157,7 +157,6 @@ class Command(BaseCommand):
                     "telezip_unique": False,
                     "collect_chunk_days": 1,  # ширше — TeleZip 500 на cluster-query
                     "classify_system_prompt": DEFAULT_TAGGER_PROMPT,
-                    "relevance_field": "is_relevant",
                     "dedup_window_days": 0,   # коментарі не дедупимо як події
                     "geo_enabled": False,     # регіон = чат, не коментар
                     "review_enabled": False,

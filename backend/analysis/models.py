@@ -88,10 +88,6 @@ class AnalysisTask(models.Model):
         verbose_name="Системний промпт класифікації",
         help_text="Системний промпт; має вимагати строгий JSON з полями задачі.",
     )
-    relevance_field = models.CharField(
-        max_length=50, default="is_relevant", verbose_name="Поле релевантності",
-        help_text="Булеве поле у відповіді LLM, що пропускає пост у події.",
-    )
 
     # Параметри дедуплікації
     dedup_window_days = models.PositiveSmallIntegerField(

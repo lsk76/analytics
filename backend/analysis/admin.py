@@ -586,8 +586,7 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
         ("📰 Етап 2 — Класифікація (LLM)", {
             "classes": ("flow-events",),
             "description": "Як LLM вирішує релевантність і витягує поля події.",
-            "fields": ("classify_system_prompt", "llm_model",
-                       "relevance_field", "geo_enabled"),
+            "fields": ("classify_system_prompt", "llm_model", "geo_enabled"),
         }),
         ("📰 Етап 3 — Дедуплікація", {
             "classes": ("flow-events", "collapse"),

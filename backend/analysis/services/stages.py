@@ -595,7 +595,6 @@ def classify_once(task):
             cls.pop("i", None)
             rep_cls[rep.dedup_group] = cls
 
-    rfield = task.relevance_field
     for gkey, members in groups.items():
         cls = rep_cls.get(gkey, {})
         for p in members:
@@ -605,7 +604,7 @@ def classify_once(task):
                 c["_tz_channel_id"] = keep_tz
             p.classification = c
             p.is_classified = True
-            p.is_relevant = bool(c.get(rfield))
+            p.is_relevant = bool(c.get("is_relevant"))
     Post.objects.bulk_update(posts, ["classification", "is_classified", "is_relevant"],
                              batch_size=500)
     _advance(ids, Post.STAGE_CLASSIFIED)
