@@ -49,8 +49,10 @@ class AnalysisTask(models.Model):
     date_from = models.DateField(verbose_name="Дата від")
     date_to = models.DateField(verbose_name="Дата до")
     languages = models.JSONField(
-        default=list, blank=True, verbose_name="Мови",
-        help_text='Список кодів мов, напр. ["ru"]',
+        default=list, blank=True, verbose_name="Мови (фільтр пошуку TeleZip)",
+        help_text='Збирати лише пости цими мовами, напр. ["ru"] — інакше в вибірку '
+                  'лізуть інші мови. Порожньо: пошук подій — без фільтра; '
+                  'моніторинг — автоматично "ru".',
     )
     search_posts = models.BooleanField(
         default=True, verbose_name="Шукати по постах",
