@@ -548,9 +548,8 @@ class MonitorChatInline(admin.TabularInline):
     model = MonitorChat
     extra = 0
     autocomplete_fields = ("channel",)
-    fields = ("channel", "is_active", "is_critical_source", "priority",
-              "added_by", "notes")
-    ordering = ("priority", "channel__username")
+    fields = ("channel", "is_active")
+    ordering = ("channel__username",)
 
 
 @admin.register(AnalysisTask)
@@ -592,9 +591,6 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
         ("Задача", {
             "fields": ("name", "slug", "description", "pipeline", "is_active"),
         }),
-        ("Спільне: категорії тегів", {
-            "fields": ("tag_categories",),
-        }),
     )
     # 📰 ПОШУК ПОДІЙ: етапи
     _FS_EVENTS = (
@@ -606,8 +602,10 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
                        "languages"),
         }),
         ("📰 Етап 2 — Класифікація (LLM)", {
-            "description": "Як LLM вирішує релевантність і витягує поля події.",
-            "fields": ("classify_system_prompt", "llm_model", "geo_enabled"),
+            "description": "Як LLM вирішує релевантність, які теги збирає (категорії) "
+                           "і витягує поля події.",
+            "fields": ("classify_system_prompt", "tag_categories",
+                       "llm_model", "geo_enabled"),
         }),
         ("📰 Етап 3 — Дедуплікація", {
             "classes": ("collapse",),
@@ -647,9 +645,10 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
             "fields": ("prescreen_model", "prescreen_prompt"),
         }),
         ("💬 Етап 4 — Тегування агентами", {
-            "description": "Промпт, який отримують Claude-агенти в SYSTEM_PROMPT.md "
-                           "батчів («чекає агента» на дашборді запусків).",
-            "fields": ("tagger_prompt",),
+            "description": "Категорії тегів, які проставляють агенти, і промпт, який "
+                           "вони отримують у SYSTEM_PROMPT.md батчів («чекає агента» "
+                           "на дашборді запусків).",
+            "fields": ("tag_categories", "tagger_prompt"),
         }),
     )
 
