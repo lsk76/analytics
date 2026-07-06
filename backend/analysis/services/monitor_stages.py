@@ -417,7 +417,7 @@ def mon_filter_once(task):
 
 # --------------------------------------------------------------------------- mon_prescreen
 
-async def _llm_prescreen(batches, model):
+async def _llm_prescreen(batches, model, system):
     sem = asyncio.Semaphore(PRESCREEN_CONCURRENCY)
     client = llm.make_client()
     out = {}
@@ -428,8 +428,7 @@ async def _llm_prescreen(batches, model):
                 f"[{i}] " + (p.text or "").strip().replace("\n", " ")[:1000]
                 for i, p in enumerate(batch))
             raw = await llm.query(
-                [{"role": "system",
-                  "content": task.prescreen_prompt or PRESCREEN_SYSTEM_PROMPT_COMPACT},
+                [{"role": "system", "content": system},
                  {"role": "user", "content": user}],
                 model=model, client=client, max_tokens=2500, json_mode=True)
             data = _parse_object(raw)
@@ -461,7 +460,8 @@ def mon_prescreen_once(task):
     model = task.prescreen_model or task.llm_model or settings.LLM_MODEL
     posts = list(Post.objects.filter(id__in=ids).order_by("posted_at", "id"))
     batches = [posts[i:i + PRESCREEN_SUB] for i in range(0, len(posts), PRESCREEN_SUB)]
-    verdicts = asyncio.run(_llm_prescreen(batches, model))
+    system = task.prescreen_prompt or PRESCREEN_SYSTEM_PROMPT_COMPACT
+    verdicts = asyncio.run(_llm_prescreen(batches, model, system))
 
     decided, missing = [], []
     n_pos = 0
@@ -492,7 +492,7 @@ def mon_prescreen_once(task):
 
 # --------------------------------------------------------------------------- mon_tag
 
-async def _llm_tag(batches, region, model):
+async def _llm_tag(batches, region, model, system):
     sem = asyncio.Semaphore(TAG_CONCURRENCY)
     client = llm.make_client()
     out = {}
@@ -514,7 +514,7 @@ async def _llm_tag(batches, region, model):
                     "\n\nУ КОЖНОМУ елементі items ОБОВ'ЯЗКОВО додай поле "
                     '"id" = число з [id=...] відповідного коментаря.')
             raw = await llm.query(
-                [{"role": "system", "content": task.tagger_prompt or TAGGER_SYSTEM_PROMPT},
+                [{"role": "system", "content": system},
                  {"role": "user", "content": user}],
                 model=model, client=client, max_tokens=4000, json_mode=True)
             data = _parse_object(raw)
@@ -560,7 +560,8 @@ def mon_tag_once(task):
     posts = list(Post.objects.filter(id__in=ids)
                  .select_related("channel").order_by("posted_at", "id"))
     batches = [posts[i:i + TAG_SUB] for i in range(0, len(posts), TAG_SUB)]
-    verdicts = asyncio.run(_llm_tag(batches, region, model))
+    system = task.tagger_prompt or TAGGER_SYSTEM_PROMPT
+    verdicts = asyncio.run(_llm_tag(batches, region, model, system))
 
     done, missing = [], []
     n_rel = 0
