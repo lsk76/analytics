@@ -568,11 +568,23 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     inlines = [MonitorChatInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
+    # мови, які реально трапляються в наших джерелах TeleZip
+    LANG_CHOICES = [
+        ("ru", "російська (ru)"), ("uk", "українська (uk)"),
+        ("be", "білоруська (be)"), ("en", "англійська (en)"),
+        ("kk", "казахська (kk)"), ("uz", "узбецька (uz)"),
+        ("az", "азербайджанська (az)"), ("hy", "вірменська (hy)"),
+        ("ka", "грузинська (ka)"), ("tg", "таджицька (tg)"),
+    ]
+
     def formfield_for_dbfield(self, db_field, request, **kwargs):
-        # «Мови» — рідковживане: компактний однорядковий інпут замість textarea
+        # «Мови» — мультиселект замість сирого JSON (зберігається як список)
         if db_field.name == "languages":
-            kwargs["widget"] = forms.TextInput(
-                attrs={"size": 16, "placeholder": '["ru"]'})
+            return forms.MultipleChoiceField(
+                choices=self.LANG_CHOICES, required=False,
+                widget=forms.SelectMultiple(attrs={"size": 5, "style": "width:14em"}),
+                label=db_field.verbose_name,
+                help_text="Порожньо = без фільтра. Ctrl/⌘ — вибрати кілька.")
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     fieldsets = (
