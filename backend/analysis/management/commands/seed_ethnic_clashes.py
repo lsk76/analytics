@@ -111,8 +111,6 @@ class Command(BaseCommand):
                 "name": "Етнічні сутички в РФ",
                 "description": "Міжетнічні насильницькі інциденти в Росії за даними Telegram.",
                 "telezip_query": QUERY,
-                "date_from": date(2025, 1, 1),
-                "date_to": date(2025, 12, 31),
                 "languages": ["ru"],
                 "search_posts": True,
                 "search_comments": False,

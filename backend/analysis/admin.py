@@ -536,21 +536,6 @@ class CollectChunkAdmin(admin.ModelAdmin):
                        "created_at", "finished_at")
 
 
-@admin.action(description="▶ Зібрати за період задачі")
-def collect_task_period_action(modeladmin, request, queryset):
-    for task in queryset:
-        run = ResearchRun.objects.create(
-            task=task, title=f"admin {djtz.now():%Y-%m-%d %H:%M}",
-            date_from=task.date_from, date_to=task.date_to,
-            chunk_days=task.collect_chunk_days or 3, status="collecting")
-        n = stages.enqueue_collection(task, task.date_from, task.date_to,
-                                      chunk_days=run.chunk_days, job=run)
-        messages.success(
-            request,
-            f"«{task.name}» {task.date_from}…{task.date_to}: job #{run.id}, +{n} чанків. "
-            f"Стеж за прогресом у «Збори (jobs)» та лічильниках стадій постів.")
-
-
 @admin.register(TagCategory)
 class TagCategoryAdmin(admin.ModelAdmin):
     list_display = ("key", "label", "closed", "hint", "order")
@@ -574,13 +559,12 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
       📰 Пошук подій: Збір → Класифікація → Дедуплікація → Аудит/резонансність
       💬 Моніторинг коментарів: Чати → Фільтрація → Прескрін → Тегування агентами
     JS у change_form ховає етапи чужого конвеєра (перемикач «Конвеєр» угорі)."""
-    list_display = ("name", "slug", "pipeline", "date_from", "date_to", "geo_enabled",
+    list_display = ("name", "slug", "pipeline", "geo_enabled",
                     "is_active", "drop_linked_comments", "monitor_chats_count")
     list_filter = ("pipeline", "is_active", "drop_linked_comments")
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
     filter_horizontal = ("tag_categories",)
-    actions = [collect_task_period_action]
     inlines = [MonitorChatInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
@@ -590,13 +574,6 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
         }),
         ("Спільне: мови, теги", {
             "fields": ("languages", "tag_categories"),
-        }),
-        ("Довідковий період задачі", {
-            "classes": ("collapse",),
-            "description": "НЕ впливає на роботу: реальні періоди задаються при "
-                           "створенні запуску збору (Збори → Додати). Ці дати — лише "
-                           "типовий період для адмін-дії «Зібрати період задачі».",
-            "fields": ("date_from", "date_to"),
         }),
         # ---------- 📰 ПОШУК ПОДІЙ: етапи ----------
         ("📰 Етап 1 — Збір (TeleZip)", {

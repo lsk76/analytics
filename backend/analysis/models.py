@@ -46,8 +46,6 @@ class AnalysisTask(models.Model):
         verbose_name="Пошуковий запит TeleZip",
         help_text="Запит у синтаксисі TeleZip (text=...)",
     )
-    date_from = models.DateField(verbose_name="Дата від")
-    date_to = models.DateField(verbose_name="Дата до")
     languages = models.JSONField(
         default=list, blank=True, verbose_name="Мови (фільтр пошуку TeleZip)",
         help_text='Збирати лише пости цими мовами, напр. ["ru"] — інакше в вибірку '

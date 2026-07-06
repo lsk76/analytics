@@ -18,8 +18,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("slug")
-        parser.add_argument("--from", dest="date_from", default=None)
-        parser.add_argument("--to", dest="date_to", default=None)
+        parser.add_argument("--from", dest="date_from", required=True)
+        parser.add_argument("--to", dest="date_to", required=True)
         parser.add_argument("--title", default="")
 
     def handle(self, *args, **opts):
@@ -28,8 +28,8 @@ class Command(BaseCommand):
         except AnalysisTask.DoesNotExist:
             raise CommandError(f"Задачу '{opts['slug']}' не знайдено")
 
-        dfrom = date.fromisoformat(opts["date_from"]) if opts["date_from"] else task.date_from
-        dto = date.fromisoformat(opts["date_to"]) if opts["date_to"] else task.date_to
+        dfrom = date.fromisoformat(opts["date_from"])
+        dto = date.fromisoformat(opts["date_to"])
 
         run = ResearchRun.objects.create(
             task=task, title=opts["title"], date_from=dfrom, date_to=dto, status="pending")

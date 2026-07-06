@@ -173,10 +173,8 @@ class Command(BaseCommand):
         # keep the LATEST query / range on the task for visibility
         if not created:
             task.telezip_query = query
-            task.date_from = d
-            task.date_to = d
             task.languages = languages
-            task.save(update_fields=["telezip_query", "date_from", "date_to", "languages"])
+            task.save(update_fields=["telezip_query", "languages"])
 
         dfrom = datetime.combine(d, time.min, tzinfo=timezone.utc)
         dto = datetime.combine(d, time.max, tzinfo=timezone.utc)
