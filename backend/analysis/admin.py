@@ -568,12 +568,19 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     inlines = [MonitorChatInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        # «Мови» — рідковживане: компактний однорядковий інпут замість textarea
+        if db_field.name == "languages":
+            kwargs["widget"] = forms.TextInput(
+                attrs={"size": 16, "placeholder": '["ru"]'})
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
     fieldsets = (
         ("Задача", {
             "fields": ("name", "slug", "description", "pipeline", "is_active"),
         }),
-        ("Спільне: мови, теги", {
-            "fields": ("languages", "tag_categories"),
+        ("Спільне: категорії тегів", {
+            "fields": ("tag_categories",),
         }),
         # ---------- 📰 ПОШУК ПОДІЙ: етапи ----------
         ("📰 Етап 1 — Збір (TeleZip)", {
@@ -581,7 +588,8 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
             "description": "Що і як тягнемо з пошуку TeleZip.",
             "fields": ("telezip_query", "telezip_unique", "search_posts",
                        "search_comments", "drop_linked_comments",
-                       "min_channel_subscribers", "collect_chunk_days"),
+                       "min_channel_subscribers", "collect_chunk_days",
+                       "languages"),
         }),
         ("📰 Етап 2 — Класифікація (LLM)", {
             "classes": ("flow-events",),
