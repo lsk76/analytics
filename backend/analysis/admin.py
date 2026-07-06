@@ -587,16 +587,18 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
                 help_text="Порожньо = без фільтра. Ctrl/⌘ — вибрати кілька.")
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
-    fieldsets = (
+    # спільні для обох конвеєрів розділи
+    _FS_HEAD = (
         ("Задача", {
             "fields": ("name", "slug", "description", "pipeline", "is_active"),
         }),
         ("Спільне: категорії тегів", {
             "fields": ("tag_categories",),
         }),
-        # ---------- 📰 ПОШУК ПОДІЙ: етапи ----------
+    )
+    # 📰 ПОШУК ПОДІЙ: етапи
+    _FS_EVENTS = (
         ("📰 Етап 1 — Збір (TeleZip)", {
-            "classes": ("flow-events",),
             "description": "Що і як тягнемо з пошуку TeleZip.",
             "fields": ("telezip_query", "telezip_unique", "search_posts",
                        "search_comments", "drop_linked_comments",
@@ -604,49 +606,61 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
                        "languages"),
         }),
         ("📰 Етап 2 — Класифікація (LLM)", {
-            "classes": ("flow-events",),
             "description": "Як LLM вирішує релевантність і витягує поля події.",
             "fields": ("classify_system_prompt", "llm_model", "geo_enabled"),
         }),
         ("📰 Етап 3 — Дедуплікація", {
-            "classes": ("flow-events", "collapse"),
+            "classes": ("collapse",),
             "description": "N постів → 1 подія: пороги схожості та LLM-суддя.",
             "fields": ("dedup_window_days", "dedup_pre_thresh",
                        "dedup_cand_thresh", "dedup_judge_prompt", "generic_sides"),
         }),
         ("📰 Етап 4 — Авто-аудит: перший прохід (дешева LLM)", {
-            "classes": ("flow-events", "collapse"),
+            "classes": ("collapse",),
             "description": "Воркер грубо відсіює хибнопозитиви дешевою моделлю "
                            "(gemini-flash тощо). Резонансність (охоплення/канали) "
                            "рахується автоматично.",
             "fields": ("review_enabled", "review_model", "review_prompt"),
         }),
         ("📰 Етап 5 — Агент-аудит (гібрид)", {
-            "classes": ("flow-events",),
             "description": "Якісний ярус: запуск збору готує батчі approved-подій і стає "
                            "в «Чекає агента»; Claude-агенти виносять keep/reject + правки "
                            "(регіон, теги), ранер застосовує вердикти сам.",
             "fields": ("agent_review_prompt",),
         }),
-        # ---------- 💬 МОНІТОРИНГ КОМЕНТАРІВ: етапи ----------
+    )
+    # 💬 МОНІТОРИНГ КОМЕНТАРІВ: етапи (Етап 1 — збір + канали, канали переставляє JS)
+    _FS_MONITOR = (
+        ("💬 Етап 1 — Збір (TeleZip + канали)", {
+            "classes": ("mon-collect-fs",),
+            "description": "Збір коментарів із обраних Telegram-каналів (нижче). "
+                           "Репости завжди згортаються (унікальні). "
+                           "Запит '*' = усі повідомлення каналу за період.",
+            "fields": ("telezip_query", "collect_chunk_days", "languages"),
+        }),
         ("💬 Етап 2 — Фільтрація", {
-            "classes": ("flow-monitor",),
-            "description": "Дешевий відсів шуму без LLM (етап 1 — чати нижче, "
-                           "у блоці «Чати моніторингу»).",
+            "description": "Дешевий відсів шуму без LLM (надто короткі/довгі повідомлення).",
             "fields": ("mon_min_len", "mon_max_len"),
         }),
         ("💬 Етап 3 — Прескрін (дешеве так/ні)", {
-            "classes": ("flow-monitor",),
             "description": "OpenRouter-модель відсіює ~90-95% некритики перед агентами.",
             "fields": ("prescreen_model", "prescreen_prompt"),
         }),
         ("💬 Етап 4 — Тегування агентами", {
-            "classes": ("flow-monitor",),
             "description": "Промпт, який отримують Claude-агенти в SYSTEM_PROMPT.md "
                            "батчів («чекає агента» на дашборді запусків).",
             "fields": ("tagger_prompt",),
         }),
     )
+
+    def get_fieldsets(self, request, obj=None):
+        # розділи залежать від конвеєра: спільне поле збору (telezip_query,
+        # languages, collect_chunk_days) живе лише в «своєму» розділі — тож
+        # жодного дублювання поля між fieldset-ами.
+        pipeline = getattr(obj, "pipeline", None) or AnalysisTask.PIPELINE_EVENTS
+        stages = (self._FS_MONITOR if pipeline == AnalysisTask.PIPELINE_MONITOR
+                  else self._FS_EVENTS)
+        return self._FS_HEAD + stages
 
     @admin.display(description="Чати моніт.")
     def monitor_chats_count(self, obj):

@@ -3,14 +3,14 @@
 {% block extrahead %}
 {{ block.super }}
 <style>
-  /* картки-перемикач конвеєра (стилізуємо стандартний select через сусідній блок) */
   .flow-cards { display:flex; gap:10px; margin:8px 0 4px; }
   .flow-card { flex:1; max-width:390px; border:2px solid var(--border-color,#ccc);
                border-radius:10px; padding:10px 14px; cursor:pointer; user-select:none; }
   .flow-card.active { border-color: var(--link-fg,#417690); background: rgba(65,118,144,.08); }
   .flow-card b { display:block; margin-bottom:2px; }
   .flow-card small { color: var(--body-quiet-color,#777); line-height:1.35; display:block; }
-  fieldset.flow-hidden { display:none !important; }
+  .flow-switch-hint { margin:6px 0; padding:8px 12px; border-radius:6px;
+                      background:rgba(245,158,11,.12); border:1px dashed #d97706; }
 </style>
 {% endblock %}
 
@@ -20,13 +20,14 @@
 (function() {
   const sel = document.getElementById('id_pipeline');
   if (!sel) return;
+  const saved = sel.value;   // конвеєр, під який СЕРВЕР відрендерив розділи
 
-  // 1) картки-перемикач над формою (селект лишається джерелом правди, ховаємо його рядок)
+  // 1) картки-перемикач замість голого select
   const CARDS = [
     ['events',  '📰 Пошук подій',
      'збір за пошуковим запитом → класифікація → дедуплікація → аудит і резонансність'],
     ['monitor', '💬 Моніторинг коментарів',
-     'обрані чати → фільтрація → прескрін → тегування агентами → подія на кожен коментар'],
+     'обрані канали → фільтрація → прескрін → тегування агентами → подія на кожен коментар'],
   ];
   const wrap = document.createElement('div');
   wrap.className = 'flow-cards';
@@ -40,26 +41,35 @@
   const pipelineRow = sel.closest('.form-row, .field-pipeline');
   if (pipelineRow) {
     pipelineRow.parentNode.insertBefore(wrap, pipelineRow);
-    pipelineRow.style.display = 'none';   // селект дублює картки — ховаємо
+    pipelineRow.style.display = 'none';
   }
 
-  // 2) показ лише етапів обраного конвеєра
+  // підказка: розділи етапів рендеряться під ЗБЕРЕЖЕНИЙ конвеєр
+  const hint = document.createElement('div');
+  hint.className = 'flow-switch-hint';
+  hint.style.display = 'none';
+  hint.textContent = 'Конвеєр змінено — збережіть задачу, щоб побачити етапи цього конвеєра.';
+  wrap.parentNode.insertBefore(hint, wrap.nextSibling);
+
   function apply() {
     const v = sel.value;
-    document.querySelectorAll('fieldset').forEach(fs => {
-      const isE = fs.classList.contains('flow-events');
-      const isM = fs.classList.contains('flow-monitor');
-      if (!isE && !isM) return;
-      fs.classList.toggle('flow-hidden', (isE && v !== 'events') || (isM && v !== 'monitor'));
-    });
-    // inline «Чати моніторингу» — лише для monitor
-    const chats = document.getElementById('monitor_chats-group');
-    if (chats) chats.style.display = (v === 'monitor') ? '' : 'none';
     wrap.querySelectorAll('.flow-card').forEach(c =>
       c.classList.toggle('active', c.dataset.val === v));
+    hint.style.display = (v !== saved) ? '' : 'none';
   }
   sel.addEventListener('change', apply);
   apply();
+
+  // 2) канали моніторингу — одразу під розділ «Етап 1 — Збір (TeleZip + канали)»
+  const chats = document.getElementById('monitor_chats-group');
+  const collectFs = document.querySelector('fieldset.mon-collect-fs');
+  if (chats) {
+    if (saved === 'monitor' && collectFs) {
+      collectFs.after(chats);        // перемістити inline під збір
+    } else if (saved !== 'monitor') {
+      chats.style.display = 'none';   // для подій канали не потрібні
+    }
+  }
 })();
 </script>
 {% endblock %}
