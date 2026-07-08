@@ -610,6 +610,18 @@ class MonitorChatInline(admin.TabularInline):
         return ff
 
 
+class _TagByCategorySelect(forms.Select):
+    """<option> з data-cat=<категорія> — JS у формі показує лише теги обраної серії."""
+    def __init__(self, *a, cat_of=None, **kw):
+        self.cat_of = cat_of or {}
+        super().__init__(*a, **kw)
+
+    def create_option(self, name, value, *args, **kwargs):
+        opt = super().create_option(name, value, *args, **kwargs)
+        opt["attrs"]["data-cat"] = self.cat_of.get(str(value), "")
+        return opt
+
+
 class ResearchRubricInline(admin.TabularInline):
     """Рубрики тематичного дослідження — «що шукаємо» (ключові слова + тег)."""
     model = ResearchRubric
@@ -623,14 +635,18 @@ class ResearchRubricInline(admin.TabularInline):
             cats = TagCategory.objects.order_by("key").values_list("key", "label")
             return forms.ChoiceField(
                 choices=[("", "———")] + [(k, f"{l} ({k})" if l else k) for k, l in cats],
-                required=False, label=db_field.verbose_name)
-        if db_field.name == "tag_name":
-            names = (Tag.objects.order_by("name").values_list("name", flat=True)
-                     .distinct())
-            return forms.ChoiceField(
-                choices=[("", "———")] + [(n, n) for n in names],
                 required=False, label=db_field.verbose_name,
-                help_text="Тег, яким позначаються події рубрики.")
+                widget=forms.Select(attrs={"class": "rubric-cat-select"}))
+        if db_field.name == "tag_name":
+            rows = list(Tag.objects.order_by("category", "name")
+                        .values_list("name", "category"))
+            cat_of = {n: cat for n, cat in rows}
+            return forms.ChoiceField(
+                choices=[("", "———")] + [(n, n) for n, _ in rows],
+                required=False, label=db_field.verbose_name,
+                help_text="Тег події рубрики (лише з обраної серії).",
+                widget=_TagByCategorySelect(cat_of=cat_of,
+                    attrs={"class": "rubric-tag-select"}))
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 

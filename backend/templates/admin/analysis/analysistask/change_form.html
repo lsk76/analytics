@@ -81,6 +81,35 @@
       rubrics.style.display = 'none';
     }
   }
+
+  // 3) каскад рубрик: тег події показує лише теги обраної серії (категорії).
+  //    Кожна опція тегу має data-cat; ховаємо ті, чия серія ≠ обраної.
+  function syncTagOptions(catSel) {
+    const row = catSel.closest("tr, .form-row, .dynamic-rubrics") || document;
+    const tagSel = row.querySelector(".rubric-tag-select");
+    if (!tagSel) return;
+    const cat = catSel.value;
+    let currentOk = false;
+    tagSel.querySelectorAll("option").forEach(o => {
+      const oc = o.getAttribute("data-cat") || "";
+      const show = !cat || !o.value || oc === cat;   // порожня серія → усі
+      o.hidden = !show;
+      o.disabled = !show;
+      if (o.selected && !show) o.selected = false; else if (o.selected) currentOk = true;
+    });
+    if (!currentOk && cat) tagSel.value = "";   // скинути тег чужої серії
+  }
+  function wireRubricCascade(root) {
+    (root || document).querySelectorAll(".rubric-cat-select").forEach(catSel => {
+      if (catSel.dataset._wired) return;
+      catSel.dataset._wired = "1";
+      catSel.addEventListener("change", () => syncTagOptions(catSel));
+      syncTagOptions(catSel);   // початковий стан
+    });
+  }
+  wireRubricCascade(document);
+  // нові рядки інлайну (кнопка «Додати ще») — django admin шле подію formset:added
+  document.addEventListener("formset:added", e => wireRubricCascade(e.target));
 })();
 </script>
 {% endblock %}
