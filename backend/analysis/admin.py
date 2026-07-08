@@ -778,6 +778,14 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             "fields": ("dedup_group_days", "dedup_group_fuzz", "dedup_llm_cluster",
                        "dedup_cluster_prompt"),
         }),
+        ("🔬 Етап 5 — Агент-аудит (гібрид)", {
+            "description": "Опційно: після групування запуск стає в «Чекає агента» — "
+                           "Claude-агенти виносять keep/reject по кожній створеній "
+                           "події (старі ретроспективи, держпропаганда «єдності "
+                           "народів», невідповідність рубриці), ранер застосовує "
+                           "вердикти сам.",
+            "fields": ("research_audit_enabled", "research_audit_prompt"),
+        }),
     )
 
     def get_fieldsets(self, request, obj=None):

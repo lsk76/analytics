@@ -82,6 +82,19 @@
         агент читає SYSTEM_PROMPT.md і batch_NNN.json у цій теці та пише
         batch_NNN_done.json. Щойно всі done — ранер сам заінжестить теги,
         створить події (1 коментар = 1 подія) і закриє запуск.
+        {% elif c.job.task.pipeline == "research" and c.job.stats.phase == "audit" %}
+        Скажи Claude Code: <b>«проаудитуй дослідження запуску #{{ c.job.id }}»</b> —
+        агент читає SYSTEM_PROMPT_AUDIT.md і audit.json у цій теці та пише
+        audit_done.json (keep/reject по кожній події). Щойно готово — ранер сам
+        застосує вердикти й закриє запуск.
+        {% elif c.job.task.pipeline == "research" and c.job.stats.phase == "cluster" %}
+        Скажи Claude Code: <b>«злий дублі запуску #{{ c.job.id }}»</b> —
+        агент читає SYSTEM_PROMPT_CLUSTER.md і cluster.json та пише
+        cluster_done.json. Щойно готово — ранер продовжить (аудит або фініш).
+        {% elif c.job.task.pipeline == "research" %}
+        Скажи Claude Code: <b>«класифікуй батчі запуску #{{ c.job.id }}»</b> —
+        агент читає SYSTEM_PROMPT.md і batch_NNN.json у цій теці та пише
+        batch_NNN_done.json. Щойно всі done — ранер згрупує дублі в події.
         {% else %}
         Скажи Claude Code: <b>«проаудитуй події запуску #{{ c.job.id }}»</b> —
         агент читає SYSTEM_PROMPT.md і batch_NNN.json та пише batch_NNN_done.json

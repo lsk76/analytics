@@ -31,7 +31,7 @@ import re
 from django.utils import timezone as djtz
 from rapidfuzz import fuzz
 
-from analysis.models import CollectChunk, Post, ResearchRun
+from analysis.models import CollectChunk, Post, ResearchRun, _default_research_audit_prompt
 
 from .monitor_stages import _claim  # клейм-механіка постів (як у monitor)
 from . import pipeline_runs as PR
@@ -196,13 +196,17 @@ List ONLY groups of 2+ ids that must be merged; singletons are implicit.
 
 
 def _try_ingest(run) -> bool:
-    """Двофазний інжест: (1) classify — зібрати вердикти + МЕХАНІЧНЕ пре-групування
+    """Три фази інжесту: (1) classify — зібрати вердикти + МЕХАНІЧНЕ пре-групування
     (дешево склеює очевидні репости), готує LLM-крок кластеризації; (2) cluster —
-    агент зливає інциденти «одна подія різними словами» (як історичний скрипт).
-    Механіка перша → LLM бачить лише ~десятки інцидентів, а не сотні постів."""
+    агент зливає інциденти «одна подія різними словами» (як історичний скрипт);
+    (3) audit — ОПЦІЙНИЙ агент-аудит створених подій (keep/reject), симетрично
+    events-конвеєру (pipeline_runs._ev_try_ingest). Механіка перша → LLM бачить
+    лише ~десятки інцидентів, а не сотні постів."""
     bdir = PR.batch_dir(run)
     stats = dict(run.stats or {})
     phase = stats.get("phase", "classify")
+    if phase == "audit":
+        return _ingest_audit(run, bdir, stats)
     if phase == "cluster":
         return _ingest_cluster(run, bdir, stats)
     return _ingest_classify(run, bdir, stats)
@@ -338,6 +342,7 @@ def _ingest_cluster(run, bdir, stats) -> bool:
 
 def _create_events(run, bdir, stats, groups, post_ids, conf_ids) -> bool:
     from analysis.models import Event, Tag
+    created_event_ids = []
     rubric_rows = {r.key: r for r in run.task.rubrics.all()}
     # ІДЕМПОТЕНТНІСТЬ: прибрати попередні події ЦЬОГО дослідження у вікні запуску,
     # інакше повторний прогін (напр. після правки промпту) подвоїть їх. Скоуп —
@@ -389,6 +394,7 @@ def _create_events(run, bdir, stats, groups, post_ids, conf_ids) -> bool:
         for p in ps:
             p.event = ev
             p.is_relevant = True
+        created_event_ids.append(ev.id)
         n_ev += 1
 
     # 4) закрити пости вікна
@@ -403,6 +409,68 @@ def _create_events(run, bdir, stats, groups, post_ids, conf_ids) -> bool:
     Post.objects.bulk_update([p for g in groups for p, _ in g["members"]],
                              ["event", "is_relevant"], batch_size=500)
     stats.update(confirmed=len(conf_ids), incidents=n_ev)
+
+    # опційна стадія: агент-аудит створених подій (симетрично events-конвеєру)
+    if run.task.research_audit_enabled and created_event_ids:
+        return _prepare_audit(run, bdir, stats, created_event_ids)
+
+    _finish(run, stats)
+    return True
+
+
+def _prepare_audit(run, bdir, stats, event_ids) -> bool:
+    """Готує батч агент-аудиту щойно створених подій цього запуску."""
+    from analysis.models import Event
+    evs = (Event.objects.filter(id__in=event_ids)
+           .select_related("region_subject").prefetch_related("tags")
+           .order_by("id"))
+    items = [{"id": e.id,
+              "rubric": ",".join(t.name for t in e.tags.all()),
+              "region": e.region or (e.region_subject.name if e.region_subject_id else ""),
+              "date": e.event_date.isoformat() if e.event_date else None,
+              "summary": e.summary}
+             for e in evs]
+    prompt = run.task.research_audit_prompt or _default_research_audit_prompt()
+    with open(f"{bdir}/SYSTEM_PROMPT_AUDIT.md", "w") as f:
+        f.write(prompt)
+    with open(f"{bdir}/audit.json", "w") as f:
+        json.dump({"items": items}, f, ensure_ascii=False)
+    stats.update(phase="audit", audit_events=len(items))
+    run.stats = stats
+    run.status = "awaiting_agent"
+    run.save(update_fields=["stats", "status"])
+    log.info("res_runs: run #%s → audit-фаза (%s подій на аудит)",
+             run.id, len(items))
+    return True
+
+
+def _ingest_audit(run, bdir, stats) -> bool:
+    """Чекає audit_done.json від агента, застосовує keep/reject, тоді фініш."""
+    from analysis.models import Event
+    if not os.path.exists(f"{bdir}/audit_done.json"):
+        return False
+    data = json.load(open(f"{bdir}/audit_done.json"))
+    n_keep = n_reject = 0
+    for it in (data.get("items") or []):
+        ev = Event.objects.filter(id=it.get("id"), task=run.task).first()
+        if not ev:
+            continue
+        verdict = (it.get("verdict") or "").lower()
+        reason = (it.get("reason") or "")[:200]
+        if verdict == "reject":
+            ev.review_status = Event.REVIEW_REJECTED
+            note = f"[agent review] {reason or 'відхилено агент-аудитом'}"
+            ev.review_notes = (ev.review_notes + " | " + note) if ev.review_notes else note
+            ev.reviewed_at = djtz.now()
+            ev.save(update_fields=["review_status", "review_notes", "reviewed_at"])
+            n_reject += 1
+        else:
+            note = "[agent review] ok" + (f": {reason}" if reason else "")
+            ev.review_notes = (ev.review_notes + " | " + note) if ev.review_notes else note
+            ev.reviewed_at = djtz.now()
+            ev.save(update_fields=["review_notes", "reviewed_at"])
+            n_keep += 1
+    stats.update(audit_keep=n_keep, audit_reject=n_reject)
     _finish(run, stats)
     return True
 
