@@ -165,26 +165,17 @@ class TagCategoryMultiSelectFilter(MultiSelectFilter):
             "display": _("All"),
             "value": "__all__",
         }
-        base = self._facet_base(changelist)
-        ids = list(base.values_list("pk", flat=True).distinct())
-        # model-agnostic facet counts: works for Event AND Post (both have `tags`)
-        model = changelist.model
-        rows = (model._default_manager.filter(pk__in=ids, tags__category=self.category)
-                .values("tags__id", "tags__name")
-                .annotate(n=Count("pk", distinct=True)))
-        present = {str(r["tags__id"]): (r["tags__name"], r["n"]) for r in rows}
-        # Keep currently-selected (include OR exclude) tags visible even if
-        # they yield 0 in the current facet — else the user can't untick them.
-        for tid in set(included) | set(excluded):
-            if tid not in present:
-                t = Tag.objects.filter(id=tid).first()
-                if t:
-                    present[tid] = (t.name, 0)
-        for tid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
+        # Facet counts (materialize all matching pks + COUNT DISTINCT per tag) are
+        # катастрофічно дорогі на великих таблицях (Post = 692k → ~3с на кожну
+        # категорію). Показуємо просто перелік тегів БЕЗ підрахунку; загальну
+        # кількість дає звичайний лічильник changelist-а. Точні числа по кожному
+        # тегу — на графіках (тег×республіки / тег×час).
+        for tid, name in [(str(t.id), t.name) for t in
+                          Tag.objects.filter(category=self.category).order_by("name")]:
             yield {
                 "included": tid in included,
                 "excluded": tid in excluded,
-                "display": f"{name} ({n})",
+                "display": name,
                 "value": tid,
             }
 
@@ -222,7 +213,7 @@ class SubjectFilter(MultiSelectFilter):
             "value": "__all__",
         }
         base = facet_base(changelist, self.request, self)
-        ids = list(base.values_list("pk", flat=True).distinct())
+        ids = base.values("pk")   # підзапит, а не список із 692k int
         rows = (Event.objects.filter(pk__in=ids, region_subject__isnull=False)
                 .values("region_subject__id", "region_subject__name")
                 .annotate(n=Count("pk")))
@@ -1063,6 +1054,8 @@ class PostAdmin(admin.ModelAdmin):
     # instant default load; column headers still let you sort by posted_at on demand.
     ordering = ("-id",)
     paginator = EstimatedCountPaginator
+    # НЕ рахувати COUNT(*) по всій таблиці для хедера «X з N» (~11с на 692k).
+    show_full_result_count = False
     list_display = ("posted_at", "channel_name", "criticism_targets",
                     "topics", "opinions", "text_preview", "tg_link",
                     "is_relevant")
@@ -1270,6 +1263,7 @@ class EventAdmin(admin.ModelAdmin):
     readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at",
                        "review_locked_at")   # службовий claim-lock review-воркерів — лише читання
     date_hierarchy = "event_date"
+    show_full_result_count = False
     change_list_template = "admin/analysis/event/change_list.html"
 
     # ---------- charts -------------------------------------------------------
