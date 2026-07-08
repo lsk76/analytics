@@ -27,7 +27,7 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from analysis.models import AnalysisTask
-from analysis.services import monitor_stages, pipeline_runs, stages
+from analysis.services import monitor_stages, pipeline_runs, research_stages, stages
 
 ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                # гібридні ранери запусків (див. services/pipeline_runs.py):
@@ -35,7 +35,11 @@ ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                # (агент-аудит). Іменування: mon_* бачить monitor-задачі,
                # решта — events (див. _tasks нижче).
                "mon_runs": pipeline_runs.mon_runs_once,
-               "ev_runs": pipeline_runs.ev_runs_once}
+               "ev_runs": pipeline_runs.ev_runs_once,
+               # research-конвеєр (тематичні дослідження, services/research_stages.py)
+               "res_collect": monitor_stages.mon_collect_once,
+               "res_filter": research_stages.res_filter_once,
+               "res_runs": research_stages.res_runs_once}
 
 
 class Command(BaseCommand):
@@ -54,8 +58,12 @@ class Command(BaseCommand):
         qs = qs.filter(is_active=True)
         # кожен воркер бачить лише задачі «свого» конвеєра: events-воркер не
         # повинен claim'ити чанки monitor-задачі (і навпаки)
-        pipeline = (AnalysisTask.PIPELINE_MONITOR if stage.startswith("mon_")
-                    else AnalysisTask.PIPELINE_EVENTS)
+        if stage.startswith("mon_"):
+            pipeline = AnalysisTask.PIPELINE_MONITOR
+        elif stage.startswith("res_"):
+            pipeline = AnalysisTask.PIPELINE_RESEARCH
+        else:
+            pipeline = AnalysisTask.PIPELINE_EVENTS
         return list(qs.filter(pipeline=pipeline))
 
     def handle(self, *args, **opts):

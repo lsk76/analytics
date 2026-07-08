@@ -28,6 +28,8 @@
      'збір за пошуковим запитом → класифікація → дедуплікація → аудит і резонансність'],
     ['monitor', '💬 Моніторинг коментарів',
      'обрані канали → фільтрація → прескрін → тегування агентами → подія на кожен коментар'],
+    ['research', '🔬 Тематичне дослідження',
+     'канали республік → рубрики (ключові слова) → агенти підтверджують → групування в події'],
   ];
   const wrap = document.createElement('div');
   wrap.className = 'flow-cards';
@@ -62,12 +64,21 @@
 
   // 2) канали моніторингу — одразу під розділ «Етап 1 — Збір (TeleZip + канали)»
   const chats = document.getElementById('monitor_chats-group');
+  const rubrics = document.getElementById('rubrics-group');
   const collectFs = document.querySelector('fieldset.mon-collect-fs');
+  const rubricsFs = document.querySelector('fieldset.rubrics-fs');
   if (chats) {
-    if (saved === 'monitor' && collectFs) {
-      collectFs.after(chats);        // перемістити inline під збір
-    } else if (saved !== 'monitor') {
+    if ((saved === 'monitor' || saved === 'research') && collectFs) {
+      collectFs.after(chats);        // канали одразу під розділом збору
+    } else if (saved === 'events') {
       chats.style.display = 'none';   // для подій канали не потрібні
+    }
+  }
+  if (rubrics) {
+    if (saved === 'research' && rubricsFs) {
+      rubricsFs.after(rubrics);       // рубрики під своїм етапом
+    } else if (saved !== 'research') {
+      rubrics.style.display = 'none';
     }
   }
 })();

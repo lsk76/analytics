@@ -52,6 +52,7 @@ from .models import (
     AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
     Region, RegionAlias, MonitorChat, ChannelDailyStat,
+    ResearchRubric,
 )
 from .multiselect_filter import (
     multiselect_filter, autocomplete_filter, MultiSelectFilter,
@@ -564,6 +565,14 @@ class MonitorChatInline(admin.TabularInline):
         return ff
 
 
+class ResearchRubricInline(admin.TabularInline):
+    """Рубрики тематичного дослідження — «що шукаємо» (ключові слова + тег)."""
+    model = ResearchRubric
+    extra = 0
+    fields = ("key", "name", "tag_category", "tag_name", "keywords",
+              "extra_prompt", "is_active", "order")
+
+
 @admin.register(AnalysisTask)
 class AnalysisTaskAdmin(admin.ModelAdmin):
     """Форма задачі = дві реюзабельні «рецептури», згруповані ПО ЕТАПАХ конвеєра:
@@ -576,7 +585,7 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
     filter_horizontal = ("tag_categories",)
-    inlines = [MonitorChatInline]
+    inlines = [MonitorChatInline, ResearchRubricInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
     # мови, які реально трапляються в наших джерелах TeleZip
@@ -664,13 +673,41 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
         }),
     )
 
+    # 🔬 ТЕМАТИЧНЕ ДОСЛІДЖЕННЯ: етапи
+    _FS_RESEARCH = (
+        ("🔬 Етап 1 — Збір (канали республік)", {
+            "classes": ("mon-collect-fs",),
+            "description": "Збір УСІХ повідомлень з обраних локальних каналів "
+                           "(нижче, блок «Чати моніторингу» = список каналів). "
+                           "Репости згортаються.",
+            "fields": ("collect_chunk_days", "languages"),
+        }),
+        ("🔬 Етап 2 — Рубрики (ключові слова)", {
+            "classes": ("rubrics-fs",),
+            "description": "Кандидат = будь-яка активна рубрика спрацювала "
+                           "(усі слова І-групи присутні). Рубрики — таблиця нижче.",
+            "fields": (),
+        }),
+        ("🔬 Етап 3 — Класифікація агентами", {
+            "description": "Промпт агентам (SYSTEM_PROMPT.md пачок): гео-правило "
+                           "«подія сталася САМЕ в республіці» обов'язкове. Після "
+                           "агентів дублі групуються в інциденти автоматично "
+                           "(рубрика+регіон+дата±3д+схожість).",
+            "fields": ("tagger_prompt",),
+        }),
+    )
+
     def get_fieldsets(self, request, obj=None):
         # розділи залежать від конвеєра: спільне поле збору (telezip_query,
         # languages, collect_chunk_days) живе лише в «своєму» розділі — тож
         # жодного дублювання поля між fieldset-ами.
         pipeline = getattr(obj, "pipeline", None) or AnalysisTask.PIPELINE_EVENTS
-        stages = (self._FS_MONITOR if pipeline == AnalysisTask.PIPELINE_MONITOR
-                  else self._FS_EVENTS)
+        if pipeline == AnalysisTask.PIPELINE_MONITOR:
+            stages = self._FS_MONITOR
+        elif pipeline == AnalysisTask.PIPELINE_RESEARCH:
+            stages = self._FS_RESEARCH
+        else:
+            stages = self._FS_EVENTS
         return self._FS_HEAD + stages
 
     @admin.display(description="Чати моніт.")

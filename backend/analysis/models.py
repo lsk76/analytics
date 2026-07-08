@@ -189,9 +189,11 @@ class AnalysisTask(models.Model):
     # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
     PIPELINE_EVENTS = "events"
     PIPELINE_MONITOR = "monitor"
+    PIPELINE_RESEARCH = "research"
     PIPELINE_CHOICES = [
         (PIPELINE_EVENTS, "Події (enrich→precluster→classify→dedup)"),
         (PIPELINE_MONITOR, "Моніторинг думок (filter→prescreen→tag)"),
+        (PIPELINE_RESEARCH, "Тематичне дослідження (канали→рубрики→агенти→події)"),
     ]
     pipeline = models.CharField(
         max_length=12, choices=PIPELINE_CHOICES, default=PIPELINE_EVENTS,
@@ -723,6 +725,43 @@ class MonitorChat(models.Model):
         ch = self.channel
         u = (ch.username or "") if ch else ""
         return f"{self.task.slug}: @{u or 'no-username'}"
+
+
+
+class ResearchRubric(models.Model):
+    """Рубрика тематичного дослідження (конвеєр research): «що шукаємо».
+
+    Історично рубрики жили в _dir-скриптах (C2-C4/E1-E4/P1-P3): AND-набір
+    ключових слів відбирає кандидатів із сирого потоку каналів, агенти
+    класифікують, збіги стають подіями з тегом рубрики."""
+    task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,
+                             related_name="rubrics", verbose_name="Задача")
+    key = models.SlugField(verbose_name="Ключ", help_text="Напр. E2, C3, P1.")
+    name = models.CharField(max_length=200, verbose_name="Назва")
+    tag_category = models.CharField(
+        max_length=50, verbose_name="Категорія тегу",
+        help_text="Куди класти тег події (напр. econ_event).")
+    tag_name = models.CharField(
+        max_length=200, verbose_name="Тег події",
+        help_text="Канонічна назва тегу рубрики (get_or_create у цій категорії).")
+    keywords = models.JSONField(
+        default=list, verbose_name="Ключові слова (АБО-список І-груп)",
+        help_text='Список РЕГУЛЯРОК (ТЕМА ∧ ДІЯ): кандидат, якщо КОЖНА збіглась. '
+                  'Напр. ["коррупц|взятк|откат", "задержа|арест|обыск"].')
+    extra_prompt = models.TextField(
+        blank=True, verbose_name="Доповнення промпту",
+        help_text="Специфічні правила рубрики, додаються до промпту агента.")
+    is_active = models.BooleanField(default=True, verbose_name="Активна")
+    order = models.PositiveSmallIntegerField(default=0, verbose_name="Порядок")
+
+    class Meta:
+        verbose_name = "Рубрика дослідження"
+        verbose_name_plural = "Рубрики дослідження"
+        unique_together = [("task", "key")]
+        ordering = ["order", "key"]
+
+    def __str__(self):
+        return f"{self.key} {self.name}"
 
 
 class TelezipSlot(models.Model):
