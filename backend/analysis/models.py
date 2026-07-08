@@ -186,6 +186,20 @@ class AnalysisTask(models.Model):
                   "Порожньо — стандартний із коду (запасний варіант).",
     )
 
+    # --- групування дублів (research-конвеєр): 2 механічні пороги + LLM-крок ---
+    dedup_group_days = models.PositiveSmallIntegerField(
+        default=3, verbose_name="Дедуп: вікно склейки (днів)",
+        help_text="Пости одного інциденту в межах ±N днів вважаються тим самим.")
+    dedup_group_fuzz = models.PositiveSmallIntegerField(
+        default=70, verbose_name="Дедуп: поріг схожості (%)",
+        help_text="Схожість підсумків (0-100) для механічної склейки очевидних "
+                  "дублів. Вище = обережніше (менше склеює).")
+    dedup_llm_cluster = models.BooleanField(
+        default=True, verbose_name="Дедуп: LLM-злиття інцидентів",
+        help_text="Після механіки — агент зливає інциденти «одна подія різними "
+                  "словами» (як історичний скрипт). Вимкни, щоб лишити лише "
+                  "механіку (дешевше, але дробить дублі).")
+
     # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
     PIPELINE_EVENTS = "events"
     PIPELINE_MONITOR = "monitor"

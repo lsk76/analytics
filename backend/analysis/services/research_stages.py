@@ -235,7 +235,10 @@ def _ingest_classify(run, bdir, stats) -> bool:
              Post.objects.filter(id__in=[c[0] for c in confirmed])
              .select_related("channel", "region_subject")}
 
-    # 2) МЕХАНІЧНЕ пре-групування: рубрика+регіон, дата±GROUP_DAYS, схожий підсумок
+    # 2) МЕХАНІЧНЕ пре-групування: рубрика+регіон, дата±вікно, схожий підсумок
+    #    (пороги — з полів задачі, дефолти GROUP_DAYS/GROUP_FUZZ)
+    g_days = run.task.dedup_group_days or GROUP_DAYS
+    g_fuzz = run.task.dedup_group_fuzz or GROUP_FUZZ
     groups = []   # {rubric, region_id, date, summary, member_ids:[...]}
     for pid, rubs, summary in sorted(
             confirmed, key=lambda c: (posts[c[0]].posted_at if c[0] in posts and posts[c[0]].posted_at else djtz.now())):
@@ -248,9 +251,9 @@ def _ingest_classify(run, bdir, stats) -> bool:
         for g in groups:
             if g["rubric"] != rub or g["region_id"] != p.region_subject_id:
                 continue
-            if d and g["_d"] and abs((d - g["_d"]).days) > GROUP_DAYS:
+            if d and g["_d"] and abs((d - g["_d"]).days) > g_days:
                 continue
-            if fuzz.token_set_ratio(summary, g["summary"]) >= GROUP_FUZZ:
+            if fuzz.token_set_ratio(summary, g["summary"]) >= g_fuzz:
                 g["member_ids"].append(pid)
                 placed = True
                 break
@@ -269,7 +272,7 @@ def _ingest_classify(run, bdir, stats) -> bool:
     # 3) LLM-крок зайвий, якщо інцидентів ≤1 у кожній парі рубрика+регіон
     from collections import Counter
     rr = Counter((g["rubric"], g["region_id"]) for g in groups)
-    needs_cluster = any(v >= 2 for v in rr.values())
+    needs_cluster = any(v >= 2 for v in rr.values()) and run.task.dedup_llm_cluster
     if not needs_cluster or len(groups) < 2:
         return _create_events(run, bdir, stats, groups, post_ids,
                               {c[0] for c in confirmed})
