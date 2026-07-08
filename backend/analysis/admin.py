@@ -614,8 +614,24 @@ class ResearchRubricInline(admin.TabularInline):
     """Рубрики тематичного дослідження — «що шукаємо» (ключові слова + тег)."""
     model = ResearchRubric
     extra = 0
-    fields = ("key", "name", "tag_category", "tag_name", "keywords",
+    fields = ("tag_category", "tag_name", "keywords",
               "extra_prompt", "is_active", "order")
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        # категорія й тег події — випадайки з наявних значень
+        if db_field.name == "tag_category":
+            cats = TagCategory.objects.order_by("key").values_list("key", "label")
+            return forms.ChoiceField(
+                choices=[("", "———")] + [(k, f"{l} ({k})" if l else k) for k, l in cats],
+                required=False, label=db_field.verbose_name)
+        if db_field.name == "tag_name":
+            names = (Tag.objects.order_by("name").values_list("name", flat=True)
+                     .distinct())
+            return forms.ChoiceField(
+                choices=[("", "———")] + [(n, n) for n in names],
+                required=False, label=db_field.verbose_name,
+                help_text="Тег, яким позначаються події рубрики.")
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 
 @admin.register(AnalysisTask)

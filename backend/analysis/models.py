@@ -736,8 +736,9 @@ class ResearchRubric(models.Model):
     класифікують, збіги стають подіями з тегом рубрики."""
     task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,
                              related_name="rubrics", verbose_name="Задача")
-    key = models.SlugField(verbose_name="Ключ", help_text="Напр. E2, C3, P1.")
-    name = models.CharField(max_length=200, verbose_name="Назва")
+    key = models.SlugField(verbose_name="Ключ", blank=True,
+        help_text="Технічний ідентифікатор рубрики; авто з тегу події, якщо порожньо.")
+    name = models.CharField(max_length=200, verbose_name="Назва", blank=True)
     tag_category = models.CharField(
         max_length=50, verbose_name="Категорія тегу",
         help_text="Куди класти тег події (напр. econ_event).")
@@ -760,8 +761,18 @@ class ResearchRubric(models.Model):
         unique_together = [("task", "key")]
         ordering = ["order", "key"]
 
+    def save(self, *args, **kwargs):
+        # key/name прибрані з форми — виводимо з тегу події, щоб конвеєр
+        # (агентні вердикти + групування спираються на key) не зламався
+        if not self.key and self.tag_name:
+            from django.utils.text import slugify
+            self.key = slugify(self.tag_name, allow_unicode=True)[:50] or self.tag_name[:50]
+        if not self.name:
+            self.name = self.tag_name
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.key} {self.name}"
+        return self.name or self.key or self.tag_name
 
 
 class TelezipSlot(models.Model):
