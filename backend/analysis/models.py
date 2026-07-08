@@ -30,6 +30,11 @@ def _default_tagger_prompt():
     return TAGGER_SYSTEM_PROMPT
 
 
+def _default_cluster_prompt():
+    from analysis.services.research_stages import CLUSTER_PROMPT
+    return CLUSTER_PROMPT
+
+
 def _default_agent_review_prompt():
     from pathlib import Path
     import analysis.pilot as _pilot
@@ -199,6 +204,11 @@ class AnalysisTask(models.Model):
         help_text="Після механіки — агент зливає інциденти «одна подія різними "
                   "словами» (як історичний скрипт). Вимкни, щоб лишити лише "
                   "механіку (дешевше, але дробить дублі).")
+    dedup_cluster_prompt = models.TextField(
+        blank=True, default=_default_cluster_prompt,
+        verbose_name="Дедуп: промпт LLM-злиття",
+        help_text="Іде агенту-обʼєднувачу (SYSTEM_PROMPT_CLUSTER.md). Зберігається "
+                  "в задачі; порожньо — стандартний із коду.")
 
     # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
     PIPELINE_EVENTS = "events"

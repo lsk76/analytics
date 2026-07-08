@@ -775,7 +775,8 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             "description": "Один інцидент = кілька постів різних каналів. Спершу "
                            "механічна склейка (вікно+схожість), потім за бажанням "
                            "LLM-злиття «одна подія різними словами».",
-            "fields": ("dedup_group_days", "dedup_group_fuzz", "dedup_llm_cluster"),
+            "fields": ("dedup_group_days", "dedup_group_fuzz", "dedup_llm_cluster",
+                       "dedup_cluster_prompt"),
         }),
     )
 

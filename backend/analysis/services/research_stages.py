@@ -290,7 +290,7 @@ def _ingest_classify(run, bdir, stats) -> bool:
                   "date": g["date"], "summary": g["summary"]}
                  for i, g in enumerate(groups)]
     with open(f"{bdir}/SYSTEM_PROMPT_CLUSTER.md", "w") as f:
-        f.write(CLUSTER_PROMPT)
+        f.write(run.task.dedup_cluster_prompt or CLUSTER_PROMPT)
     with open(f"{bdir}/cluster.json", "w") as f:
         json.dump({"incidents": incidents}, f, ensure_ascii=False)
     stats.update(phase="cluster", incidents_pre=len(groups))
