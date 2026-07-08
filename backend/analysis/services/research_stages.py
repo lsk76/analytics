@@ -339,6 +339,20 @@ def _ingest_cluster(run, bdir, stats) -> bool:
 def _create_events(run, bdir, stats, groups, post_ids, conf_ids) -> bool:
     from analysis.models import Event, Tag
     rubric_rows = {r.key: r for r in run.task.rubrics.all()}
+    # ІДЕМПОТЕНТНІСТЬ: прибрати попередні події ЦЬОГО дослідження у вікні запуску,
+    # інакше повторний прогін (напр. після правки промпту) подвоїть їх. Скоуп —
+    # категорії тегів рубрик задачі (щоб не зачепити чужі події тієї ж задачі).
+    cats = {r.tag_category for r in rubric_rows.values() if r.tag_category}
+    if cats:
+        prev = Event.objects.filter(task=run.task,
+                                    event_date__gte=run.date_from,
+                                    event_date__lte=run.date_to,
+                                    tags__category__in=cats).distinct()
+        n_prev = prev.count()
+        if n_prev:
+            prev.delete()
+            log.info("res_runs: run #%s — прибрано %s старих подій перед перегенерацією",
+                     run.id, n_prev)
     # відновити обʼєкти постів за id (groups тепер тримають member_ids)
     all_member_ids = [pid for g in groups for pid in g["member_ids"]]
     posts = {p.id: p for p in
