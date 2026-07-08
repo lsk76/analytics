@@ -1054,8 +1054,6 @@ class PostAdmin(admin.ModelAdmin):
     # instant default load; column headers still let you sort by posted_at on demand.
     ordering = ("-id",)
     paginator = EstimatedCountPaginator
-    # НЕ рахувати COUNT(*) по всій таблиці для хедера «X з N» (~11с на 692k).
-    show_full_result_count = False
     list_display = ("posted_at", "channel_name", "criticism_targets",
                     "topics", "opinions", "text_preview", "tg_link",
                     "is_relevant")
