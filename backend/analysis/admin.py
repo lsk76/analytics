@@ -297,6 +297,51 @@ def recollect_fresh_action(modeladmin, request, queryset):
             f"-{n_posts} постів, +{n_chunks} чанків у черзі.")
 
 
+class FastDeleteAdminMixin:
+    """Сторінка видалення для сутностей із МІЛЬЙОНАМИ дочірніх (Task→692k постів).
+
+    Django на /delete/ через NestedObjects перелічує КОЖЕН обʼєкт каскаду в
+    дерево (з __str__) — на 692k постів це OOM, сторінка не вантажиться.
+    Тут замість переліку показуємо КІЛЬКОСТІ (дешеві COUNT), а саме видалення
+    робимо великими пачками через ORM-querysets, не тягнучи все в памʼять.
+
+    HEAVY_RELATIONS: (модель, поле-FK на цю сутність) — рахуються й чистяться
+    пачками ПЕРЕД видаленням самого обʼєкта.
+    """
+    HEAVY_RELATIONS = ()   # напр. [(Post, "task"), (Event, "task")]
+
+    def get_deleted_objects(self, objs, request):
+        # to_delete: короткий підсумок; model_count: {назва: к-сть}; без переліку
+        summary, model_count = [], {}
+        for obj in objs:
+            summary.append(f"{obj._meta.verbose_name}: {obj}")
+        for model, fk in self.HEAVY_RELATIONS:
+            n = model._default_manager.filter(**{f"{fk}__in": objs}).count()
+            if n:
+                vp = str(model._meta.verbose_name_plural)
+                model_count[vp] = model_count.get(vp, 0) + n
+                summary.append(f"{vp}: {n} (буде видалено каскадом)")
+        return summary, model_count, set(), []
+
+    def _bulk_wipe(self, objs):
+        # чистимо важкі дочірні пачками (уникаємо збірача Django на 692k рядків)
+        for model, fk in self.HEAVY_RELATIONS:
+            qs = model._default_manager.filter(**{f"{fk}__in": objs})
+            while True:
+                ids = list(qs.values_list("pk", flat=True)[:5000])
+                if not ids:
+                    break
+                model._default_manager.filter(pk__in=ids).delete()
+
+    def delete_model(self, request, obj):
+        self._bulk_wipe([obj])
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        self._bulk_wipe(list(queryset))
+        super().delete_queryset(request, queryset)
+
+
 @admin.register(ResearchRun)
 class ResearchRunAdmin(admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
@@ -574,11 +619,12 @@ class ResearchRubricInline(admin.TabularInline):
 
 
 @admin.register(AnalysisTask)
-class AnalysisTaskAdmin(admin.ModelAdmin):
+class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
     """Форма задачі = дві реюзабельні «рецептури», згруповані ПО ЕТАПАХ конвеєра:
       📰 Пошук подій: Збір → Класифікація → Дедуплікація → Аудит/резонансність
       💬 Моніторинг коментарів: Чати → Фільтрація → Прескрін → Тегування агентами
     JS у change_form ховає етапи чужого конвеєра (перемикач «Конвеєр» угорі)."""
+    HEAVY_RELATIONS = [(Post, "task"), (Event, "task")]
     list_display = ("name", "slug", "pipeline", "geo_enabled",
                     "is_active", "drop_linked_comments", "monitor_chats_count")
     list_filter = ("pipeline", "is_active", "drop_linked_comments")
