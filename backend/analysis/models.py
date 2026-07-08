@@ -207,7 +207,7 @@ class AnalysisTask(models.Model):
     PIPELINE_CHOICES = [
         (PIPELINE_EVENTS, "Події (enrich→precluster→classify→dedup)"),
         (PIPELINE_MONITOR, "Моніторинг думок (filter→prescreen→tag)"),
-        (PIPELINE_RESEARCH, "Тематичне дослідження (канали→рубрики→агенти→події)"),
+        (PIPELINE_RESEARCH, "Тематичне дослідження (канали→рубрики→агенти→дедуп)"),
     ]
     pipeline = models.CharField(
         max_length=12, choices=PIPELINE_CHOICES, default=PIPELINE_EVENTS,
