@@ -314,10 +314,14 @@ def info_event_once(task):
             logger.info("info_event[%s]: attach post#%d → event#%d", task.slug, post.id, ev.id)
         else:
             ev = _create_event(task, [post])   # -> STAGE_DONE всередині
-            ev.review_status = Event.REVIEW_APPROVED
+            # авто-аудит (опційно): review_enabled → подія чекає review-воркера
+            # (pending); інакше — одразу approved (дефолт infospace, свіжість)
+            ev.review_status = (Event.REVIEW_PENDING if task.review_enabled
+                                else Event.REVIEW_APPROVED)
             ev.last_post_at = post.posted_at
             ev.save(update_fields=["review_status", "last_post_at"])
-            logger.info("info_event[%s]: new event#%d (post#%d)", task.slug, ev.id, post.id)
+            logger.info("info_event[%s]: new event#%d (post#%d, %s)",
+                        task.slug, ev.id, post.id, ev.review_status)
     return True
 
 
@@ -339,9 +343,102 @@ def info_retention_once(task):
     return True
 
 
+# =========================================================================== healthcheck
+
+# Самоперевірка ловить ТИХИЙ злам скрапера («успіх без користі»), який
+# consecutive_failures не бачить (бо це не виняток). Тільки web/rss — вони
+# ламаються тихо (redesign/селектор); telegram-збої гучні (виняток).
+HEALTHCHECK_KINDS = {"web", "rss"}
+HEALTHCHECK_INTERVAL = timedelta(hours=24)
+MIN_ARTICLE_CHARS = 80
+
+
+def evaluate_quality(source, items):
+    """Канарки «схоже на робоче» (kind-залежні):
+    - будь-який kind: 0 елементів → злам (discovery/лістинг/стрічка порожні);
+    - web: extraction МУСИТЬ давати тіло статті — усі порожні/тонкі = зламано
+      шаблон/селектор;
+    - rss/інші: заголовкові стрічки дають короткий text НОРМАЛЬНО — вимагаємо
+      лише хоч якийсь непорожній контент (title або text)."""
+    if not items:
+        return False, "0 елементів (discovery/лістинг/стрічка порожні — злам?)"
+    n = len(items)
+    if source.kind == Source.KIND_WEB:
+        thin = sum(1 for it in items if len((it.text or "").strip()) < MIN_ARTICLE_CHARS)
+        if thin == n:
+            return False, f"усі {n} без тіла (<{MIN_ARTICLE_CHARS} симв.) — extraction зламано?"
+    else:
+        empty = sum(1 for it in items
+                    if not (it.title or "").strip() and not (it.text or "").strip())
+        if empty == n:
+            return False, f"усі {n} елементів без контенту (title і text порожні)"
+    return True, ""
+
+
+def _claim_healthcheck_source():
+    now = djtz.now()
+    due = now - HEALTHCHECK_INTERVAL
+    have_subs = SourceSubscription.objects.filter(
+        is_active=True, task__is_active=True,
+        task__pipeline="infospace").values("source_id")
+    with transaction.atomic():
+        sid = (
+            Source.objects.filter(is_active=True, kind__in=HEALTHCHECK_KINDS)
+            .filter(Q(last_healthcheck_at__isnull=True) | Q(last_healthcheck_at__lt=due))
+            .filter(id__in=have_subs)
+            .order_by("last_healthcheck_at", "id")
+            .select_for_update(skip_locked=True)
+            .values_list("id", flat=True)
+            .first()
+        )
+        if sid is None:
+            return None
+        # застовпити одразу (marker) — щоб повільна перевірка не пере-клеймилась
+        Source.objects.filter(id=sid).update(last_healthcheck_at=now)
+    return Source.objects.get(id=sid)
+
+
+class _DetachedProbe:
+    """Відчеплена копія джерела з ПОРОЖНІМ state — для dry-run/healthcheck.
+    Адаптер мутує state цієї копії; реальний Source (і його polling-watermark)
+    структурно недоторканий (не покладаємось на restore/update_fields)."""
+    def __init__(self, src):
+        for a in ("kind", "url", "config", "scraper_key", "region_subject", "tg_account"):
+            setattr(self, a, getattr(src, a))
+        self.state = {}
+
+
+def probe_fetch(source):
+    """Dry-run: fetch на відчепленій копії (форсований backfill), реальний
+    watermark недоторканий. Використовують healthcheck + адмін-дії."""
+    return get_adapter(source.kind).fetch(_DetachedProbe(source))
+
+
+def info_healthcheck_once():
+    """TASKLESS: раз на добу dry-run по web/rss-джерелу → канарки → health.
+    НЕ чіпає реальний watermark (fetch на відчепленій копії — див. probe_fetch)."""
+    source = _claim_healthcheck_source()
+    if source is None:
+        return False
+    try:
+        items = probe_fetch(source)
+        ok, note = evaluate_quality(source, items)
+    except RateLimited:
+        return True     # ліміт — не якісна проблема, пропускаємо прохід
+    except Exception as e:  # noqa: BLE001
+        ok, note = False, f"dry-run виняток {type(e).__name__}: {e}"
+    source.quality_ok = ok
+    source.quality_note = note[:200]
+    source.save(update_fields=["quality_ok", "quality_note"])
+    logger.info("info_healthcheck: %s (%s) → якість=%s %s",
+                source.name, source.kind, ok, note)
+    return True
+
+
 STAGE_RUNNERS = {
-    "info_collect": info_collect_once,     # taskless
+    "info_collect": info_collect_once,       # taskless
     "info_screen": info_screen_once,
     "info_event": info_event_once,
     "info_retention": info_retention_once,
+    "info_healthcheck": info_healthcheck_once,  # taskless
 }

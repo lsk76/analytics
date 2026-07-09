@@ -205,6 +205,24 @@ def test_event_attach_updates_counts_and_summary(monkeypatch):
     assert Event.objects.filter(task=task).count() == 1  # НЕ створено нову
 
 
+def test_event_review_enabled_creates_pending(monkeypatch):
+    # авто-аудит увімкнено → нова подія чекає review-воркера (pending), не approved
+    task = TaskFactory(geo_enabled=False, review_enabled=True)
+    p = _screened(task, "хабар", "Чиновника затримали.")
+    monkeypatch.setattr(stages.llm, "query", _boom)   # без кандидатів — без судді
+    stages.info_event_once(task)
+    ev = Event.objects.get(task=task)
+    assert ev.review_status == Event.REVIEW_PENDING
+
+
+def test_event_review_disabled_creates_approved(monkeypatch):
+    task = TaskFactory(geo_enabled=False, review_enabled=False)  # дефолт
+    p = _screened(task, "хабар", "Чиновника затримали.")
+    monkeypatch.setattr(stages.llm, "query", _boom)
+    stages.info_event_once(task)
+    assert Event.objects.get(task=task).review_status == Event.REVIEW_APPROVED
+
+
 def test_event_outside_window_makes_new(monkeypatch):
     task = TaskFactory(geo_enabled=False, info_match_window_hours=24)
     old = timezone.now() - timedelta(hours=48)

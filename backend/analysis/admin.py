@@ -7,7 +7,7 @@ from django.contrib import admin, messages
 from django.contrib.admin.widgets import AdminDateWidget
 from django.core.paginator import Paginator
 from django.db import connection
-from django.db.models import Count, Sum, F
+from django.db.models import Count, Sum, F, Q
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, Coalesce
 from django.shortcuts import render
 from django.urls import path
@@ -879,9 +879,10 @@ class SourceHealthFilter(admin.SimpleListFilter):
     def queryset(self, request, qs):
         v = self.value()
         if v == "ok":
-            return qs.filter(consecutive_failures=0)
-        if v == "warn":
-            return qs.filter(consecutive_failures__gte=1, consecutive_failures__lt=3)
+            return qs.filter(consecutive_failures=0, quality_ok=True)
+        if v == "warn":  # збої 1-2 АБО тиха підозра якості (🟡)
+            return qs.filter(consecutive_failures__lt=3).filter(
+                Q(consecutive_failures__gte=1) | Q(quality_ok=False))
         if v == "down":
             return qs.filter(consecutive_failures__gte=3)
         return qs
@@ -890,15 +891,16 @@ class SourceHealthFilter(admin.SimpleListFilter):
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
     """Довідник джерел infospace: health, розклад полінгу, дії."""
-    list_display = ("name", "kind", "region_subject", "health_badge",
+    list_display = ("name", "kind", "region_subject", "health_badge", "posts_24h",
                     "is_active", "last_ok_at", "next_poll_at", "subs_count")
     list_filter = ("kind", SourceHealthFilter, "is_active", "region_subject")
     search_fields = ("name", "url")
     autocomplete_fields = ("region_subject", "tg_account")
     list_editable = ("is_active",)
-    actions = ("poll_now", "dry_run_fetch", "activate", "deactivate")
+    actions = ("poll_now", "healthcheck_now", "dry_run_fetch", "activate", "deactivate")
     readonly_fields = ("locked_at", "state", "last_ok_at", "last_error",
-                       "consecutive_failures", "created_at")
+                       "consecutive_failures", "quality_ok", "quality_note",
+                       "last_healthcheck_at", "created_at")
     fieldsets = (
         ("Джерело", {"fields": ("kind", "name", "url", "region_subject",
                                  "language", "is_active")}),
@@ -909,16 +911,31 @@ class SourceAdmin(admin.ModelAdmin):
         ("Health (лише читання)", {
             "classes": ("collapse",),
             "fields": ("locked_at", "state", "last_ok_at", "last_error",
-                       "consecutive_failures", "created_at")}),
+                       "consecutive_failures", "quality_ok", "quality_note",
+                       "last_healthcheck_at", "created_at")}),
     )
+
+    def get_queryset(self, request):
+        since = djtz.now() - datetime.timedelta(hours=24)
+        return super().get_queryset(request).annotate(
+            _posts_24h=Count("posts", filter=Q(posts__created_at__gte=since)))
 
     @admin.display(description="Стан")
     def health_badge(self, obj):
         f = obj.consecutive_failures or 0
-        if f == 0:
-            return format_html('<span title="{}">🟢</span>', obj.last_ok_at or "—")
-        icon = "🟡" if f < 3 else "🔴"
-        return format_html('<span title="{}">{} {}</span>', obj.last_error[:200], icon, f)
+        if f >= 3:  # 🔴 повторні винятки
+            return format_html('<span title="{}">🔴 {}</span>', obj.last_error[:200], f)
+        if f >= 1:  # 🟡 транзієнтні збої
+            return format_html('<span title="{}">🟡 {}</span>', obj.last_error[:200], f)
+        if not obj.quality_ok:  # 🟡 тиха підозра якості (самоперевірка)
+            return format_html('<span title="{}">🟡 якість</span>', obj.quality_note or "")
+        return format_html('<span title="{}">🟢</span>', obj.last_ok_at or "—")
+
+    @admin.display(description="Пости/24г", ordering="_posts_24h")
+    def posts_24h(self, obj):
+        n = getattr(obj, "_posts_24h", 0)
+        # 0 при активних підписках — сигнал тихого зламу
+        return format_html('<b style="color:#d97706">{}</b>', n) if n == 0 else n
 
     @admin.display(description="Підписки")
     def subs_count(self, obj):
@@ -930,12 +947,32 @@ class SourceAdmin(admin.ModelAdmin):
         n = queryset.update(next_poll_at=djtz.now(), locked_at=None)
         self.message_user(request, f"{n} джерел поставлено в чергу полінгу.")
 
-    @admin.action(description="Тестовий збір (dry-run, без запису)")
-    def dry_run_fetch(self, request, queryset):
-        from analysis.services.infospace.adapters import get_adapter
+    @admin.action(description="Самоперевірка зараз (health-канарки)")
+    def healthcheck_now(self, request, queryset):
+        from analysis.services.infospace.adapters.base import RateLimited
+        from analysis.services.infospace.stages import evaluate_quality, probe_fetch
         for src in queryset:
             try:
-                items = get_adapter(src.kind).fetch(src)
+                items = probe_fetch(src)   # відчеплена копія — real watermark цілий
+                ok, note = evaluate_quality(src, items)
+            except RateLimited:
+                # ліміт (FloodWait) — НЕ злам якості (узгоджено з info_healthcheck)
+                self.message_user(request, f"{src.name}: ліміт (FloodWait), пізніше",
+                                  level=messages.WARNING)
+                continue
+            except Exception as e:  # noqa: BLE001
+                ok, note = False, f"виняток {type(e).__name__}: {e}"
+            type(src).objects.filter(id=src.id).update(
+                quality_ok=ok, quality_note=note[:200], last_healthcheck_at=djtz.now())
+            self.message_user(request, f"{src.name}: {'🟢 ок' if ok else '🟡 ' + note}",
+                              level=messages.SUCCESS if ok else messages.WARNING)
+
+    @admin.action(description="Тестовий збір (dry-run, без запису)")
+    def dry_run_fetch(self, request, queryset):
+        from analysis.services.infospace.stages import probe_fetch
+        for src in queryset:
+            try:
+                items = probe_fetch(src)   # backfill на копії, real watermark цілий
                 preview = "; ".join(f"«{i.title[:60] or i.url}»" for i in items[:5])
                 self.message_user(
                     request, f"{src.name}: {len(items)} елементів. {preview}",

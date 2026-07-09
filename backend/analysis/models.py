@@ -957,6 +957,21 @@ class Source(models.Model):
     consecutive_failures = models.PositiveSmallIntegerField(
         default=0, verbose_name="Збоїв поспіль",
     )
+
+    # --- самоперевірка якості (info_healthcheck; ловить ТИХИЙ злам скрапера:
+    # --- «успіх без користі», який consecutive_failures не бачить, бо не виняток) ---
+    quality_ok = models.BooleanField(
+        default=True, db_index=True, verbose_name="Якість ок",
+        help_text="False = 🟡 підозра: dry-run дав 0 елементів або порожній текст "
+                  "(сайт переверстали / селектор зламано). Ставить info_healthcheck.",
+    )
+    quality_note = models.CharField(
+        max_length=200, blank=True, verbose_name="Нотатка якості",
+        help_text="Чому 🟡 підозра (напр. «discovery: 0 лінків»).",
+    )
+    last_healthcheck_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Остання самоперевірка",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:

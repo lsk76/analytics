@@ -40,6 +40,15 @@ def test_inactive_infospace_task_not_picked(four_tasks):
     assert run_worker.Command()._tasks(None, "info_screen") == []
 
 
+def test_review_stage_sees_events_and_infospace(four_tasks):
+    # авто-аудит спільний: review-воркер бачить events + infospace (не monitor/research)
+    got = {t.id for t in run_worker.Command()._tasks(None, "review")}
+    assert four_tasks["events"].id in got
+    assert four_tasks["infospace"].id in got
+    assert four_tasks["monitor"].id not in got
+    assert four_tasks["research"].id not in got
+
+
 def test_taskless_stage_registered():
     assert "info_collect" in run_worker.TASKLESS_STAGES
 

@@ -60,9 +60,10 @@ except ImportError as _e:  # noqa: BLE001
 # Стадії, що працюють НЕ по задачах (ранер викликається без аргументу).
 # info_collect полить ДЖЕРЕЛА (Source): одне джерело живить кілька задач,
 # тож цикл «for task» для нього не має сенсу — черга полінгу глобальна.
+# info_healthcheck — так само по джерелах (dry-run якості web/rss).
 # Ретеншн (info_retention) — навпаки, ПЕР-ЗАДАЧНА операція (чистить пости
 # task.info_retention_days), тож іде звичайним циклом задач (не тут).
-TASKLESS_STAGES = {"info_collect"}
+TASKLESS_STAGES = {"info_collect", "info_healthcheck"}
 
 
 class Command(BaseCommand):
@@ -81,6 +82,12 @@ class Command(BaseCommand):
         qs = qs.filter(is_active=True)
         # кожен воркер бачить лише задачі «свого» конвеєра: events-воркер не
         # повинен claim'ити чанки monitor-задачі (і навпаки)
+        if stage == "review":
+            # авто-аудит подій спільний для events і infospace (обидва мають
+            # review_enabled + Event.review_status); review_once сам no-op, якщо
+            # review_enabled=False (дефолт infospace), тож це бекс-сумісно
+            return list(qs.filter(pipeline__in=[AnalysisTask.PIPELINE_EVENTS,
+                                                AnalysisTask.PIPELINE_INFOSPACE]))
         if stage.startswith("mon_"):
             pipeline = AnalysisTask.PIPELINE_MONITOR
         elif stage.startswith("res_"):

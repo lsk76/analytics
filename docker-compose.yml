@@ -74,8 +74,9 @@ services:
   # info-collect — ОДНА репліка (полінг/Telethon-сесія не терплять паралелі)
   worker-info-collect:   { <<: *worker, command: python manage.py run_worker --stage info_collect }
   worker-info-screen:    { <<: *worker, command: python manage.py run_worker --stage info_screen }
-  worker-info-event:     { <<: *worker, command: python manage.py run_worker --stage info_event }
-  worker-info-retention: { <<: *worker, command: python manage.py run_worker --stage info_retention --interval 3600 }
+  worker-info-event:       { <<: *worker, command: python manage.py run_worker --stage info_event }
+  worker-info-retention:   { <<: *worker, command: python manage.py run_worker --stage info_retention --interval 3600 }
+  worker-info-healthcheck: { <<: *worker, command: python manage.py run_worker --stage info_healthcheck --interval 3600 }
 
 volumes:
   pgdata:
