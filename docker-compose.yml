@@ -70,5 +70,12 @@ services:
   worker-res-filter:    { <<: *worker, command: python manage.py run_worker --stage res_filter }
   worker-res-runs:      { <<: *worker, command: python manage.py run_worker --stage res_runs }
 
+  # --- infospace stage workers (pipeline="infospace" tasks only) ------------
+  # info-collect — ОДНА репліка (полінг/Telethon-сесія не терплять паралелі)
+  worker-info-collect:   { <<: *worker, command: python manage.py run_worker --stage info_collect }
+  worker-info-screen:    { <<: *worker, command: python manage.py run_worker --stage info_screen }
+  worker-info-event:     { <<: *worker, command: python manage.py run_worker --stage info_event }
+  worker-info-retention: { <<: *worker, command: python manage.py run_worker --stage info_retention --interval 3600 }
+
 volumes:
   pgdata:

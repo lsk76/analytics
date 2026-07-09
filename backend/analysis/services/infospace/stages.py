@@ -1,0 +1,335 @@
+"""
+Стадії infospace-конвеєра (pipeline="infospace").
+
+  info_collect   Source(due) -> Post(info_collected)   TASKLESS (полінг джерел)
+  info_screen    info_collected -> info_screened|done  (LLM: релевантність+теги)
+  info_event     info_screened  -> done (-> Event)      (advisory lock, реюз dedup)
+  info_retention (done, !relevant, старі) -> DELETE      (пер-задачна чистка)
+
+Реюз: `_claim_posts`/`_advance`/`_create_event`/`_attach_posts` зі `stages.py`,
+`llm.query`/`extract_json`, `normalize.resolve_region`. Дизайн:
+docs/infospace-monitoring-pipeline.md §5-§6.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+import random
+from datetime import timedelta
+
+from django.conf import settings
+from django.db import connection, transaction
+from django.db.models import Q
+from django.utils import timezone as djtz
+from rapidfuzz.fuzz import token_set_ratio
+
+from analysis.models import Event, Post, Source, SourceSubscription
+from .. import llm
+from ..normalize import resolve_region
+from ..stages import _advance, _attach_posts, _claim_posts, _create_event
+from .adapters import get_adapter
+from .prompts import INFO_JUDGE_PROMPT, INFO_SCREEN_PROMPT
+
+logger = logging.getLogger(__name__)
+
+LOCK_TIMEOUT = timedelta(minutes=20)
+SCREEN_TICK = 10           # постів на прохід скріну (кожен = 1 LLM-виклик)
+BACKOFF_CAP = timedelta(hours=6)
+JUDGE_TOPK = 5             # скільки кандидатів показувати судді
+FUZZY_FLOOR = 45           # мін. схожість signature↔summary для кандидата
+RETENTION_TICK = 1000      # постів на прохід чистки
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha1((text or "").strip()[:2000].encode("utf-8")).hexdigest()[:40]
+
+
+# =========================================================================== collect
+
+def _claim_source():
+    """Атомарно захопити одне джерело, якому час полінгу, що має ≥1 активну
+    підписку активної infospace-задачі. Stale-lock (>LOCK_TIMEOUT) перезахоплюється."""
+    now = djtz.now()
+    cutoff = now - LOCK_TIMEOUT
+    # джерела з ≥1 активною підпискою активної infospace-задачі — через підзапит
+    # id__in (а не JOIN), бо SELECT ... FOR UPDATE несумісний з DISTINCT у Postgres,
+    # а JOIN по subscriptions дав би дублі рядків джерела.
+    have_subs = SourceSubscription.objects.filter(
+        is_active=True, task__is_active=True,
+        task__pipeline="infospace").values("source_id")
+    with transaction.atomic():
+        sid = (
+            Source.objects.filter(is_active=True, next_poll_at__lte=now)
+            .filter(Q(locked_at__isnull=True) | Q(locked_at__lt=cutoff))
+            .filter(id__in=have_subs)
+            .order_by("next_poll_at", "id")
+            .select_for_update(skip_locked=True)
+            .values_list("id", flat=True)
+            .first()
+        )
+        if sid is None:
+            return None
+        Source.objects.filter(id=sid).update(locked_at=now)
+    return Source.objects.get(id=sid)
+
+
+def _schedule_ok(source):
+    jitter = random.uniform(-0.1, 0.1)
+    delay = source.poll_interval_sec * (1 + jitter)
+    source.next_poll_at = djtz.now() + timedelta(seconds=delay)
+    source.last_ok_at = djtz.now()
+    source.last_error = ""
+    source.consecutive_failures = 0
+    source.locked_at = None
+    source.save(update_fields=["state", "next_poll_at", "last_ok_at", "last_error",
+                               "consecutive_failures", "locked_at"])
+
+
+def _schedule_fail(source, err):
+    source.consecutive_failures = (source.consecutive_failures or 0) + 1
+    backoff = source.poll_interval_sec * (2 ** min(source.consecutive_failures, 10))
+    delay = min(timedelta(seconds=backoff), BACKOFF_CAP)
+    source.next_poll_at = djtz.now() + delay
+    source.last_error = str(err)[:2000]
+    source.locked_at = None
+    source.save(update_fields=["next_poll_at", "last_error",
+                               "consecutive_failures", "locked_at"])
+
+
+def _fanout(source, items):
+    """Створити Post на кожну активну підписку задачі (unique(task, url)).
+    Наявний пост НЕ відкочуємо — лише пропускаємо (ідемпотентний повтор)."""
+    subs = list(SourceSubscription.objects.filter(
+        source=source, is_active=True,
+        task__is_active=True, task__pipeline="infospace").select_related("task"))
+    n_new = 0
+    for sub in subs:
+        for it in items:
+            posted = it.posted_at or djtz.now()
+            _, created = Post.objects.get_or_create(
+                task=sub.task, url=it.url,
+                defaults=dict(
+                    stage=Post.STAGE_INFO_COLLECTED,
+                    source=source, title=it.title[:500],
+                    channel_name=source.name[:128],
+                    region_subject=source.region_subject,
+                    posted_at=posted, text=it.text,
+                    content_hash=_content_hash(it.text),
+                ),
+            )
+            if created:
+                n_new += 1
+    return n_new, len(subs)
+
+
+def info_collect_once():
+    """TASKLESS: полінг одного джерела → фан-аут постів на підписані задачі."""
+    source = _claim_source()
+    if source is None:
+        return False
+    try:
+        items = get_adapter(source.kind).fetch(source)
+    except Exception as e:  # noqa: BLE001 — health рахуємо, воркер живий
+        logger.warning("info_collect: %s (%s) fetch failed: %r", source.name, source.kind, e)
+        _schedule_fail(source, e)
+        return True
+    n_new, n_subs = _fanout(source, items)
+    _schedule_ok(source)
+    logger.info("info_collect: %s → %d items, %d нових постів на %d задач",
+                source.name, len(items), n_new, n_subs)
+    return True
+
+
+# =========================================================================== screen
+
+def _build_screen_prompt(task):
+    """Скрін-промпт = системний промпт задачі + (якщо є категорії тегів) схема
+    tags + правила тегування. Порожній промпт → дефолт із коду."""
+    system = (task.info_screen_prompt or INFO_SCREEN_PROMPT).strip()
+    cats = list(task.tag_categories.all())
+    if not cats:
+        return system
+    tag_fields = ",".join(f'"{c.key}":["..."]' for c in cats)
+    lines = [system, "",
+             f'Додай у JSON поле "tags" зі списками значень: {{{tag_fields}}}.']
+    for c in cats:
+        if c.closed:
+            from analysis.models import Tag
+            seeded = list(Tag.objects.filter(category=c.key).values_list("name", flat=True))
+            lines.append(f'- "{c.key}" ({c.label}): ТОЧНО зі списку {seeded}; нема — пропусти.')
+        else:
+            lines.append(f'- "{c.key}" ({c.label}): {c.hint or "вільні значення, узагальнено"}.')
+    if task.info_tagger_prompt:
+        lines.append(task.info_tagger_prompt.strip())
+    return "\n".join(lines)
+
+
+async def _llm_screen(posts, system, model):
+    client = llm.make_client()
+    sem = asyncio.Semaphore(6)
+
+    async def one(p):
+        async with sem:
+            user = f"TITLE: {p.title}\n\nTEXT:\n{p.text[:4000]}"
+            raw = await llm.query(
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": user}],
+                model=model, client=client, json_mode=True, max_tokens=800)
+        return p.id, llm.extract_json(raw)
+
+    try:
+        results = await asyncio.gather(*(one(p) for p in posts))
+    finally:
+        await client.close()
+    return dict(results)
+
+
+def info_screen_once(task):
+    ids = _claim_posts(task, Post.STAGE_INFO_COLLECTED, SCREEN_TICK)
+    if not ids:
+        return False
+    model = task.info_screen_model or task.llm_model or settings.LLM_MODEL
+    posts = list(Post.objects.filter(id__in=ids).order_by("posted_at", "id"))
+    system = _build_screen_prompt(task)
+    verdicts = asyncio.run(_llm_screen(posts, system, model))
+
+    decided, screened, missing = [], [], []
+    for p in posts:
+        v = verdicts.get(p.id)
+        if not isinstance(v, dict):
+            missing.append(p.id)
+            continue
+        relevant = bool(v.get("relevant"))
+        cls = dict(p.classification or {})
+        cls.update({
+            "signature": (v.get("signature") or "").strip(),
+            "summary": (v.get("summary") or "").strip(),
+            "screen_reason": (v.get("reason") or "").strip(),
+            "region": (v.get("region") or "").strip() if v.get("region") else "",
+            "tags": v.get("tags") or {},
+            "_screen_model": model,
+        })
+        p.classification = cls
+        p.is_relevant = relevant
+        p.stage_locked_at = None
+        if relevant:
+            p.stage = Post.STAGE_INFO_SCREENED
+            screened.append(p)
+        else:
+            p.stage = Post.STAGE_DONE
+        decided.append(p)
+    Post.objects.bulk_update(
+        decided, ["classification", "is_relevant", "stage", "stage_locked_at"],
+        batch_size=200)
+    # missing (битий JSON) — лишаємо на стадії, звільняємо lock; після спроб → failed
+    if missing:
+        _bump_attempts(missing, "info_screen")
+    logger.info("info_screen[%s]: %d релевантних, %d відсіяно, %d retry",
+                task.slug, len(screened), len(decided) - len(screened), len(missing))
+    return True
+
+
+def _bump_attempts(ids, stage_label):
+    """Звільнити lock, +1 спроба; після 3 → failed (як у monitor-конвеєрі)."""
+    from django.db.models import F
+    Post.objects.filter(id__in=ids).update(
+        stage_locked_at=None, stage_attempts=F("stage_attempts") + 1)
+    Post.objects.filter(id__in=ids, stage_attempts__gte=3).update(
+        stage=Post.STAGE_FAILED, stage_error=f"{stage_label}: битий JSON після спроб")
+
+
+# =========================================================================== event
+
+def _judge_prompt(task, post, candidates):
+    system = (task.info_judge_prompt or INFO_JUDGE_PROMPT).strip()
+    cand = [{"id": e.id, "date": str(e.event_date), "summary": e.summary[:400]}
+            for e in candidates]
+    import json
+    user = (f"NEW ITEM:\nTITLE: {post.title}\nDATE: {post.posted_at:%Y-%m-%d}\n"
+            f"TEXT:\n{post.text[:3000]}\n\nCANDIDATES:\n{json.dumps(cand, ensure_ascii=False)}")
+    return system, user
+
+
+def _candidates(task, post):
+    """Живі події ±вікно від дати поста; свій регіон — першими."""
+    win = timedelta(hours=task.info_match_window_hours or 24)
+    lo, hi = post.posted_at - win, post.posted_at + win
+    qs = Event.objects.filter(task=task, last_post_at__isnull=False,
+                              last_post_at__gte=lo, last_post_at__lte=hi)
+    events = list(qs)
+    if post.region_subject_id:
+        events.sort(key=lambda e: (e.region_subject_id != post.region_subject_id))
+    sig = (post.classification or {}).get("signature") or post.title or post.text[:200]
+    scored = sorted(
+        ((token_set_ratio(sig, e.summary or ""), e) for e in events),
+        key=lambda t: t[0], reverse=True)
+    return [e for s, e in scored if s >= FUZZY_FLOOR][:JUDGE_TOPK]
+
+
+def info_event_once(task):
+    """Обробити ОДИН info_screened-пост під advisory-локом задачі (щоб два
+    воркери не створили дубль-подію з двох постів про той самий факт)."""
+    ids = _claim_posts(task, Post.STAGE_INFO_SCREENED, 1)
+    if not ids:
+        return False
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s, %s)", [task.id, 0])
+        post = Post.objects.select_related("region_subject").get(id=ids[0])
+        if post.posted_at is None:
+            post.posted_at = djtz.now()
+        cands = _candidates(task, post)
+        verdict = None
+        if cands:
+            system, user = _judge_prompt(task, post, cands)
+            raw = asyncio.run(llm.query(
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": user}],
+                model=(task.llm_model or None), json_mode=True, max_tokens=800))
+            verdict = llm.extract_json(raw)
+
+        ev = None
+        if isinstance(verdict, dict) and verdict.get("verdict") == "attach":
+            ev = next((e for e in cands if e.id == verdict.get("event_id")), None)
+        if ev is not None:
+            _attach_posts(ev, [post])  # -> STAGE_DONE, перерахунок count/reach
+            if (verdict.get("update_summary") and task.info_update_summaries
+                    and verdict.get("new_summary")):
+                ev.summary = verdict["new_summary"].strip()
+            ev.last_post_at = max(ev.last_post_at or post.posted_at, post.posted_at)
+            ev.save(update_fields=["summary", "last_post_at"])
+            logger.info("info_event[%s]: attach post#%d → event#%d", task.slug, post.id, ev.id)
+        else:
+            ev = _create_event(task, [post])   # -> STAGE_DONE всередині
+            ev.review_status = Event.REVIEW_APPROVED
+            ev.last_post_at = post.posted_at
+            ev.save(update_fields=["review_status", "last_post_at"])
+            logger.info("info_event[%s]: new event#%d (post#%d)", task.slug, ev.id, post.id)
+    return True
+
+
+# =========================================================================== retention
+
+def info_retention_once(task):
+    """Пер-задачна чистка: нерелевантні done-пости старші за N діб, БЕЗ події."""
+    days = task.info_retention_days or 2
+    cutoff = djtz.now() - timedelta(days=days)
+    ids = list(Post.objects.filter(
+        task=task, stage=Post.STAGE_DONE, event__isnull=True,
+        posted_at__lt=cutoff).exclude(is_relevant=True)
+        .values_list("id", flat=True)[:RETENTION_TICK])
+    if not ids:
+        return False
+    Post.objects.filter(id__in=ids).delete()
+    logger.info("info_retention[%s]: видалено %d сирих постів (старші за %d діб)",
+                task.slug, len(ids), days)
+    return True
+
+
+STAGE_RUNNERS = {
+    "info_collect": info_collect_once,     # taskless
+    "info_screen": info_screen_once,
+    "info_event": info_event_once,
+    "info_retention": info_retention_once,
+}

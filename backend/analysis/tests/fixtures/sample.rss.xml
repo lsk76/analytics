@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Тест-стрічка Бурятія</title>
+    <link>https://example.org/</link>
+    <item>
+      <title>У Бурятії затримали чиновника за хабар</title>
+      <link>https://example.org/news/1?utm_source=rss</link>
+      <guid>https://example.org/news/1</guid>
+      <description>Слідчі затримали керівника відомства за отримання великого хабаря.</description>
+      <pubDate>Tue, 07 Jul 2026 09:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>У Улан-Уде пройшов мітинг</title>
+      <link>https://example.org/news/2</link>
+      <guid>https://example.org/news/2</guid>
+      <description>Кілька сотень людей вийшли на акцію проти забудови парку.</description>
+      <pubDate>Tue, 07 Jul 2026 10:30:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>

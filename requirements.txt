@@ -13,3 +13,16 @@ pysocks>=1.7.1
 whitenoise>=6.6.0
 gunicorn>=21.2.0
 django-admin-rangefilter>=0.13.0
+
+# --- infospace-конвеєр (docs/infospace-monitoring-pipeline.md) ---
+feedparser>=6.0        # rss-адаптер
+trafilatura>=1.9       # автоекстракція статей (web)
+selectolax>=0.3        # швидкий CSS-парсер (discovery/селектори)
+httpx>=0.27            # sync http в адаптерах (транзитивний через openai — фіксуємо явно)
+
+# --- тести (docker compose exec web pytest) ---
+pytest>=8.0
+pytest-django>=4.8
+factory-boy>=3.3
+respx>=0.21            # мок httpx
+freezegun>=1.4         # заморозка часу (вікна/бекоф)

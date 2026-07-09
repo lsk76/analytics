@@ -30,6 +30,8 @@
      'обрані канали → фільтрація → прескрін → тегування агентами → подія на кожен коментар'],
     ['research', '🔬 Тематичне дослідження',
      'канали республік → рубрики (ключові слова) → класифікація агентами → дедублікація у події'],
+    ['infospace', '🛰 Моніторинг інформпростору',
+     'полінг джерел (RSS/сайти/Telegram) → скрін релевантності → жива подія (приєднати пост або нова)'],
   ];
   const wrap = document.createElement('div');
   wrap.className = 'flow-cards';
@@ -70,8 +72,8 @@
   if (chats) {
     if ((saved === 'monitor' || saved === 'research') && collectFs) {
       collectFs.after(chats);        // канали одразу під розділом збору
-    } else if (saved === 'events') {
-      chats.style.display = 'none';   // для подій канали не потрібні
+    } else {
+      chats.style.display = 'none';   // events/infospace — канали не потрібні
     }
   }
   if (rubrics) {
@@ -79,6 +81,17 @@
       rubricsFs.after(rubrics);       // рубрики під своїм етапом
     } else if (saved !== 'research') {
       rubrics.style.display = 'none';
+    }
+  }
+
+  // 2b) підписки на джерела (infospace) — під етап «Джерела (полінг)»
+  const subs = document.getElementById('source_subscriptions-group');
+  const sourcesFs = document.querySelector('fieldset.info-sources-fs');
+  if (subs) {
+    if (saved === 'infospace' && sourcesFs) {
+      sourcesFs.after(subs);          // підписки одразу під етапом джерел
+    } else if (saved !== 'infospace') {
+      subs.style.display = 'none';    // для інших конвеєрів не потрібні
     }
   }
 

@@ -52,7 +52,7 @@ from .models import (
     AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
     Region, RegionAlias, MonitorChat, ChannelDailyStat,
-    ResearchRubric,
+    ResearchRubric, Source, SourceSubscription,
 )
 from .multiselect_filter import (
     multiselect_filter, autocomplete_filter, MultiSelectFilter,
@@ -610,6 +610,24 @@ class MonitorChatInline(admin.TabularInline):
         return ff
 
 
+class SourceSubscriptionInline(admin.TabularInline):
+    """Джерела, на які підписана infospace-задача (дзеркало MonitorChatInline)."""
+    model = SourceSubscription
+    extra = 0
+    autocomplete_fields = ("source",)
+    fields = ("source", "is_active", "priority", "notes")
+    ordering = ("priority", "source__name")
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        ff = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == "source" and hasattr(ff.widget, "can_add_related"):
+            ff.widget.can_add_related = False
+            ff.widget.can_change_related = False
+            ff.widget.can_delete_related = False
+            ff.widget.can_view_related = False
+        return ff
+
+
 class _TagByCategorySelect(forms.Select):
     """<option> з data-cat=<категорія> — JS у формі показує лише теги обраної серії."""
     def __init__(self, *a, cat_of=None, **kw):
@@ -663,7 +681,7 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
     filter_horizontal = ("tag_categories",)
-    inlines = [MonitorChatInline, ResearchRubricInline]
+    inlines = [MonitorChatInline, ResearchRubricInline, SourceSubscriptionInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
     # мови, які реально трапляються в наших джерелах TeleZip
@@ -788,6 +806,35 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
         }),
     )
 
+    # 🛰 МОНІТОРИНГ ІНФОРМПРОСТОРУ: етапи
+    _FS_INFOSPACE = (
+        ("🛰 Етап 1 — Джерела (полінг)", {
+            "classes": ("info-sources-fs",),
+            "description": "Безперервний полінг підписаних джерел (нижче, блок "
+                           "«Підписки на джерела»). Розклад/health — у списку Джерел. "
+                           "Джерела — глобальний довідник (RSS/сайти/Telegram).",
+            "fields": (),
+        }),
+        ("🛰 Етап 2 — Скрін (релевантність + опис + теги)", {
+            "description": "Дешева LLM одним викликом: relevant/signature/summary/"
+                           "region + теги (за категоріями нижче). Порожні поля — "
+                           "дефолт із коду.",
+            "fields": ("info_screen_model", "info_screen_prompt",
+                       "tag_categories", "info_tagger_prompt", "geo_enabled"),
+        }),
+        ("🛰 Етап 3 — Зіставлення подій (жива подія)", {
+            "description": "Чи є вже така подія у вікні → приєднати пост (і за "
+                           "потреби оновити опис), інакше нова подія.",
+            "fields": ("info_judge_prompt", "info_match_window_hours",
+                       "info_update_summaries", "llm_model"),
+        }),
+        ("🛰 Етап 4 — Ретеншн сирих постів", {
+            "classes": ("collapse",),
+            "description": "Нерелевантні пости чистяться; тримаємо лише останні N діб.",
+            "fields": ("info_retention_days",),
+        }),
+    )
+
     def get_fieldsets(self, request, obj=None):
         # розділи залежать від конвеєра: спільне поле збору (telezip_query,
         # languages, collect_chunk_days) живе лише в «своєму» розділі — тож
@@ -797,6 +844,8 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             stages = self._FS_MONITOR
         elif pipeline == AnalysisTask.PIPELINE_RESEARCH:
             stages = self._FS_RESEARCH
+        elif pipeline == AnalysisTask.PIPELINE_INFOSPACE:
+            stages = self._FS_INFOSPACE
         else:
             stages = self._FS_EVENTS
         return self._FS_HEAD + stages
@@ -817,6 +866,100 @@ class MonitorChatAdmin(admin.ModelAdmin):
     search_fields = ("channel__username", "channel__title", "notes")
     autocomplete_fields = ("task", "channel")
     list_editable = ("is_active", "is_critical_source", "priority")
+
+
+class SourceHealthFilter(admin.SimpleListFilter):
+    """Фільтр за станом джерела (health-бейдж)."""
+    title = "Стан"
+    parameter_name = "health"
+
+    def lookups(self, request, model_admin):
+        return [("ok", "🟢 ок"), ("warn", "🟡 збої 1-2"), ("down", "🔴 збої ≥3")]
+
+    def queryset(self, request, qs):
+        v = self.value()
+        if v == "ok":
+            return qs.filter(consecutive_failures=0)
+        if v == "warn":
+            return qs.filter(consecutive_failures__gte=1, consecutive_failures__lt=3)
+        if v == "down":
+            return qs.filter(consecutive_failures__gte=3)
+        return qs
+
+
+@admin.register(Source)
+class SourceAdmin(admin.ModelAdmin):
+    """Довідник джерел infospace: health, розклад полінгу, дії."""
+    list_display = ("name", "kind", "region_subject", "health_badge",
+                    "is_active", "last_ok_at", "next_poll_at", "subs_count")
+    list_filter = ("kind", SourceHealthFilter, "is_active", "region_subject")
+    search_fields = ("name", "url")
+    autocomplete_fields = ("region_subject", "tg_account")
+    list_editable = ("is_active",)
+    actions = ("poll_now", "dry_run_fetch", "activate", "deactivate")
+    readonly_fields = ("locked_at", "state", "last_ok_at", "last_error",
+                       "consecutive_failures", "created_at")
+    fieldsets = (
+        ("Джерело", {"fields": ("kind", "name", "url", "region_subject",
+                                 "language", "is_active")}),
+        ("Полінг", {"fields": ("poll_interval_sec", "next_poll_at")}),
+        ("Web-скрапінг", {"classes": ("collapse",),
+                          "fields": ("scraper_key", "config")}),
+        ("Telegram", {"classes": ("collapse",), "fields": ("tg_account",)}),
+        ("Health (лише читання)", {
+            "classes": ("collapse",),
+            "fields": ("locked_at", "state", "last_ok_at", "last_error",
+                       "consecutive_failures", "created_at")}),
+    )
+
+    @admin.display(description="Стан")
+    def health_badge(self, obj):
+        f = obj.consecutive_failures or 0
+        if f == 0:
+            return format_html('<span title="{}">🟢</span>', obj.last_ok_at or "—")
+        icon = "🟡" if f < 3 else "🔴"
+        return format_html('<span title="{}">{} {}</span>', obj.last_error[:200], icon, f)
+
+    @admin.display(description="Підписки")
+    def subs_count(self, obj):
+        n = obj.subscriptions.filter(is_active=True).count()
+        return n or "—"
+
+    @admin.action(description="Опитати зараз (next_poll_at = now)")
+    def poll_now(self, request, queryset):
+        n = queryset.update(next_poll_at=djtz.now(), locked_at=None)
+        self.message_user(request, f"{n} джерел поставлено в чергу полінгу.")
+
+    @admin.action(description="Тестовий збір (dry-run, без запису)")
+    def dry_run_fetch(self, request, queryset):
+        from analysis.services.infospace.adapters import get_adapter
+        for src in queryset:
+            try:
+                items = get_adapter(src.kind).fetch(src)
+                preview = "; ".join(f"«{i.title[:60] or i.url}»" for i in items[:5])
+                self.message_user(
+                    request, f"{src.name}: {len(items)} елементів. {preview}",
+                    level=messages.SUCCESS if items else messages.WARNING)
+            except Exception as e:  # noqa: BLE001
+                self.message_user(request, f"{src.name}: ПОМИЛКА — {e!r}",
+                                  level=messages.ERROR)
+
+    @admin.action(description="Активувати")
+    def activate(self, request, queryset):
+        self.message_user(request, f"{queryset.update(is_active=True)} активовано.")
+
+    @admin.action(description="Деактивувати")
+    def deactivate(self, request, queryset):
+        self.message_user(request, f"{queryset.update(is_active=False)} деактивовано.")
+
+
+@admin.register(SourceSubscription)
+class SourceSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ("task", "source", "is_active", "priority", "created_at")
+    list_filter = ("task", "is_active", "source__kind")
+    search_fields = ("source__name", "source__url", "notes")
+    autocomplete_fields = ("task", "source")
+    list_editable = ("is_active", "priority")
 
 
 from rangefilter.filters import NumericRangeFilterBuilder as _NRFB

@@ -11,6 +11,7 @@
 «Етнічні сутички 2025» — це ОДИН рядок AnalysisTask; ніщо тут не захардкоджено під неї.
 """
 from django.db import models
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 
 
@@ -40,6 +41,16 @@ def _default_agent_review_prompt():
     import analysis.pilot as _pilot
     f = Path(_pilot.__file__).parent / "EVENT_REVIEW_PROMPT.md"
     return f.read_text() if f.exists() else ""
+
+
+def _default_info_screen_prompt():
+    from analysis.services.infospace.prompts import INFO_SCREEN_PROMPT
+    return INFO_SCREEN_PROMPT
+
+
+def _default_info_judge_prompt():
+    from analysis.services.infospace.prompts import INFO_JUDGE_PROMPT
+    return INFO_JUDGE_PROMPT
 
 
 def _default_research_audit_prompt():
@@ -259,14 +270,56 @@ class AnalysisTask(models.Model):
         help_text="Іде агентам у SYSTEM_PROMPT_AUDIT.md. Зберігається в задачі; "
                   "порожньо — стандартний із коду.")
 
+    # --- конфіг infospace-стадій (моніторинг інформпростору; ---
+    # --- див. docs/infospace-monitoring-pipeline.md) ---
+    info_screen_model = models.CharField(
+        max_length=100, blank=True, verbose_name="Скрін: модель (OpenRouter)",
+        help_text="Дешева модель для фільтра релевантності + короткого опису. "
+                  "Порожньо — дефолт із settings.",
+    )
+    info_screen_prompt = models.TextField(
+        blank=True, default=_default_info_screen_prompt,
+        verbose_name="Скрін: системний промпт",
+        help_text="Критерії теми задачі; модель повертає relevant/signature/"
+                  "summary/region/tags одним викликом. Порожньо — стандартний із коду.",
+    )
+    info_tagger_prompt = models.TextField(
+        blank=True, verbose_name="Скрін: правила тегування",
+        help_text="Додаткові правила для блоку tags (напр. критерії тегу «гучна "
+                  "подія»). Додаються до скрін-промпту; схема категорій будується "
+                  "з «Категорії тегів». Порожньо — лише підказки категорій.",
+    )
+    info_judge_prompt = models.TextField(
+        blank=True, default=_default_info_judge_prompt,
+        verbose_name="Зіставлення: промпт судді",
+        help_text="«Той самий факт чи інший?» — attach/new + чи оновити опис. "
+                  "Порожньо — стандартний із коду.",
+    )
+    info_match_window_hours = models.PositiveSmallIntegerField(
+        default=24, verbose_name="Зіставлення: вікно збігу (год)",
+        help_text="Ковзне вікно пошуку «такої самої події» відносно дати поста.",
+    )
+    info_update_summaries = models.BooleanField(
+        default=True, verbose_name="Жива подія (оновлювати опис)",
+        help_text="Суттєві доповнення з нових постів переписують опис події. "
+                  "Вимкнено — опис фіксується з першого поста.",
+    )
+    info_retention_days = models.PositiveSmallIntegerField(
+        default=2, verbose_name="Ретеншн сирих постів (днів)",
+        help_text="Нерелевантні done-пости старші за N діб видаляються "
+                  "(пости, приєднані до подій, не чіпаються).",
+    )
+
     # --- вибір конвеєра: які stage-воркери обробляють пости задачі ---
     PIPELINE_EVENTS = "events"
     PIPELINE_MONITOR = "monitor"
     PIPELINE_RESEARCH = "research"
+    PIPELINE_INFOSPACE = "infospace"
     PIPELINE_CHOICES = [
         (PIPELINE_EVENTS, "Події (enrich→precluster→classify→dedup)"),
         (PIPELINE_MONITOR, "Моніторинг думок (filter→prescreen→tag)"),
         (PIPELINE_RESEARCH, "Тематичне дослідження (канали→рубрики→агенти→дедуп)"),
+        (PIPELINE_INFOSPACE, "Інформпростір (полінг джерел→скрін→жива подія)"),
     ]
     pipeline = models.CharField(
         max_length=12, choices=PIPELINE_CHOICES, default=PIPELINE_EVENTS,
@@ -581,6 +634,10 @@ class Post(models.Model):
     STAGE_MON_COLLECTED = "mon_collected"
     STAGE_MON_FILTERED = "mon_filtered"
     STAGE_MON_PRESCREENED = "mon_prescreened"
+    # infospace-конвеєр (pipeline="infospace"): полінг джерел (Source), скрін,
+    # зіставлення з живими подіями — docs/infospace-monitoring-pipeline.md
+    STAGE_INFO_COLLECTED = "info_collected"
+    STAGE_INFO_SCREENED = "info_screened"
     STAGE_CHOICES = [
         (STAGE_COLLECTED, "Зібрано"),
         (STAGE_ENRICHED, "Збагачено"),
@@ -590,6 +647,8 @@ class Post(models.Model):
         (STAGE_MON_COLLECTED, "Монітор: зібрано"),
         (STAGE_MON_FILTERED, "Монітор: відфільтровано"),
         (STAGE_MON_PRESCREENED, "Монітор: прескрін+"),
+        (STAGE_INFO_COLLECTED, "Інформпростір: зібрано"),
+        (STAGE_INFO_SCREENED, "Інформпростір: скрін+"),
         (STAGE_DONE, "Готово"),
         (STAGE_FAILED, "Помилка"),
     ]
@@ -612,6 +671,16 @@ class Post(models.Model):
         related_name="posts", verbose_name="Канал",
     )
     channel_name = models.CharField(max_length=128, blank=True, verbose_name="Назва каналу")
+    source = models.ForeignKey(
+        "Source", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="posts", verbose_name="Джерело (інформпростір)",
+        help_text="Звідки зібрано пост у infospace-конвеєрі; для TeleZip-конвеєрів NULL.",
+    )
+    title = models.CharField(
+        max_length=500, blank=True, db_default="", verbose_name="Заголовок",
+        help_text="Заголовок статті/RSS-item (для Telegram порожній).",
+    )  # db_default: старий код воркерів (INSERT без title) не падає у вікні
+       # «міграцію застосовано, контейнери ще не перезапущені» (граблі проєкту).
     region_subject = models.ForeignKey(
         "Region", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="posts", verbose_name="Суб'єкт РФ (денормалізовано)",
@@ -716,6 +785,12 @@ class Event(models.Model):
         default=0, verbose_name="Охоплення",
         help_text="Сумарна к-сть підписників унікальних каналів події",
     )
+    last_post_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, verbose_name="Останній пост",
+        help_text="Час останнього приєднаного поста. Заповнює ЛИШЕ infospace-"
+                  "конвеєр (ковзне вікно збігу + сортування «живих» сюжетів); "
+                  "інші конвеєри не чіпають.",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     # --- фінальний AI-аудит (дорожча модель) ---
@@ -799,6 +874,140 @@ class MonitorChat(models.Model):
         u = (ch.username or "") if ch else ""
         return f"{self.task.slug}: @{u or 'no-username'}"
 
+
+# ---------------------------------------------------------------------------
+# Infospace: джерела моніторингу інформпростору (pipeline="infospace")
+# docs/infospace-monitoring-pipeline.md
+# ---------------------------------------------------------------------------
+
+class Source(models.Model):
+    """Джерело інформації в глобальному довіднику (Telegram-канал через акаунт,
+    RSS-стрічка, сайт зі скрапінгом; згодом VK).
+
+    До задач підключається через SourceSubscription (аналог Channel↔MonitorChat).
+    Розклад/health/watermark пише ЛИШЕ стадія info_collect; руками з адмінки
+    правлять тільки конфігурацію (kind/url/config/інтервал/актив).
+    """
+    KIND_TELEGRAM = "telegram"
+    KIND_RSS = "rss"
+    KIND_WEB = "web"
+    KIND_VK = "vk"
+    KIND_CHOICES = [
+        (KIND_TELEGRAM, "Telegram-канал (акаунт)"),
+        (KIND_RSS, "RSS-стрічка"),
+        (KIND_WEB, "Сайт (скрапінг)"),
+        (KIND_VK, "VK (згодом)"),
+    ]
+
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, db_index=True,
+                            verbose_name="Тип")
+    name = models.CharField(max_length=200, verbose_name="Назва")
+    url = models.CharField(
+        max_length=500, verbose_name="Ідентифікатор (URL)",
+        help_text="tg: @username або t.me/…; rss: URL стрічки; "
+                  "web: URL лістинг-сторінки розділу.",
+    )
+    region_subject = models.ForeignKey(
+        "Region", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="sources", verbose_name="Суб'єкт РФ",
+        help_text="Регіон джерела; денормалізується в Post при вставці (per-100k).",
+    )
+    language = models.CharField(max_length=16, blank=True, verbose_name="Мова")
+
+    # web-скрапінг
+    scraper_key = models.CharField(
+        max_length=50, blank=True, verbose_name="Кастомний скрапер",
+        help_text="Ключ у реєстрі SCRAPERS (infospace/scrapers.py). "
+                  "Порожньо = автоекстракція (trafilatura) / селектори з config.",
+    )
+    config = models.JSONField(
+        default=dict, blank=True, verbose_name="Конфігурація",
+        help_text="Селектори discovery/extraction, max_items, backfill_limit, "
+                  "full_text, headers… — див. док конвеєра.",
+    )
+
+    # telegram
+    tg_account = models.ForeignKey(
+        "accounts.TelegramAccount", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="sources",
+        verbose_name="Telegram-акаунт",
+        help_text="Яким акаунтом полити цей канал. Порожньо — пул (round-robin).",
+    )
+
+    # розклад і health (пише лише worker info-collect)
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name="Активне")
+    poll_interval_sec = models.PositiveIntegerField(
+        default=600, verbose_name="Інтервал полінгу (сек)",
+    )
+    next_poll_at = models.DateTimeField(
+        default=timezone.now, db_index=True, verbose_name="Наступний полінг",
+        help_text="Черга полінгу; бекоф при збоях. «Опитати зараз» = поставити now.",
+    )
+    locked_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Захоплено воркером",
+        help_text="Час claim'у; звільняється після проходу або таймауту.",
+    )
+    state = models.JSONField(
+        default=dict, blank=True, verbose_name="Watermark адаптера",
+        help_text="Приватний стан адаптера свого kind: tg last_msg_id / rss etag…",
+    )
+    last_ok_at = models.DateTimeField(null=True, blank=True, verbose_name="Останній успіх")
+    last_error = models.TextField(blank=True, verbose_name="Остання помилка")
+    consecutive_failures = models.PositiveSmallIntegerField(
+        default=0, verbose_name="Збоїв поспіль",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Джерело (інформпростір)"
+        verbose_name_plural = "Джерела (інформпростір)"
+        ordering = ["kind", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "url"], name="uniq_source_kind_url"),
+        ]
+        indexes = [
+            models.Index(fields=["is_active", "next_poll_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} [{self.kind}]"
+
+
+class SourceSubscription(models.Model):
+    """Підписка задачі на джерело (дзеркало MonitorChat для infospace).
+
+    Пост створюється окремо на кожну підписану задачу — unique(task, url)
+    не порушується; у кожної теми свій скрін і свої події.
+    """
+    task = models.ForeignKey(
+        AnalysisTask, on_delete=models.CASCADE, related_name="source_subscriptions",
+        verbose_name="Задача",
+    )
+    source = models.ForeignKey(
+        Source, on_delete=models.CASCADE, related_name="subscriptions",
+        verbose_name="Джерело",
+    )
+    is_active = models.BooleanField(
+        default=True, db_index=True, verbose_name="Активна",
+        help_text="Зніми галочку, щоб виключити джерело з наступних зборів "
+                  "цієї задачі, не видаляючи історичні дані.",
+    )
+    priority = models.PositiveSmallIntegerField(
+        default=100, verbose_name="Пріоритет",
+        help_text="Менше = вище у списку.",
+    )
+    notes = models.TextField(blank=True, verbose_name="Нотатки")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Підписка на джерело"
+        verbose_name_plural = "Підписки на джерела"
+        unique_together = [["task", "source"]]
+        ordering = ["task", "priority", "source__name"]
+        indexes = [models.Index(fields=["task", "is_active"])]
+
+    def __str__(self):
+        return f"{self.task.slug}: {self.source}"
 
 
 class ResearchRubric(models.Model):

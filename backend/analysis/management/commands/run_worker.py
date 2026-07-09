@@ -15,10 +15,16 @@ Stage worker — polls the DB for posts/chunks at its stage and processes them.
     python manage.py run_worker --stage mon_tag
     python manage.py run_worker --stage mon_runs   # ранер запусків (гібрид)
 
+    # infospace pipeline (AnalysisTask.pipeline == "infospace") — Phase 1:
+    python manage.py run_worker --stage info_collect   # полінг джерел (taskless)
+    python manage.py run_worker --stage info_screen
+    python manage.py run_worker --stage info_event
+
     # options
     --task <slug>     only this task (default: all active tasks of the
-                      stage's pipeline — mon_* stages take pipeline="monitor"
-                      tasks, the rest take pipeline="events")
+                      stage's pipeline — mon_* → "monitor", res_* → "research",
+                      info_* → "infospace", решта → "events"; taskless-стадії
+                      TASKLESS_STAGES ігнорують --task)
     --interval <sec>  idle sleep when there is no work (default 10)
     --once            do a single pass and exit (no loop)
 """
@@ -41,6 +47,23 @@ ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                "res_filter": research_stages.res_filter_once,
                "res_runs": research_stages.res_runs_once}
 
+# infospace-стадії (services/infospace/stages.py). Захисний імпорт: якщо
+# опційні deps (feedparser/trafilatura) не встановлені, наявні воркери
+# (events/monitor/research) все одно стартують — недоступні лише info_*-стадії.
+try:
+    from analysis.services.infospace import stages as infospace_stages
+    ALL_RUNNERS.update(infospace_stages.STAGE_RUNNERS)
+except ImportError as _e:  # noqa: BLE001
+    import sys
+    print(f"[run_worker] infospace-стадії недоступні: {_e!r}", file=sys.stderr)
+
+# Стадії, що працюють НЕ по задачах (ранер викликається без аргументу).
+# info_collect полить ДЖЕРЕЛА (Source): одне джерело живить кілька задач,
+# тож цикл «for task» для нього не має сенсу — черга полінгу глобальна.
+# Ретеншн (info_retention) — навпаки, ПЕР-ЗАДАЧНА операція (чистить пости
+# task.info_retention_days), тож іде звичайним циклом задач (не тут).
+TASKLESS_STAGES = {"info_collect"}
+
 
 class Command(BaseCommand):
     help = "Run a pipeline stage worker (claim-based, resumable)"
@@ -62,6 +85,8 @@ class Command(BaseCommand):
             pipeline = AnalysisTask.PIPELINE_MONITOR
         elif stage.startswith("res_"):
             pipeline = AnalysisTask.PIPELINE_RESEARCH
+        elif stage.startswith("info_"):
+            pipeline = AnalysisTask.PIPELINE_INFOSPACE
         else:
             pipeline = AnalysisTask.PIPELINE_EVENTS
         return list(qs.filter(pipeline=pipeline))
@@ -75,15 +100,26 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"worker[{stage}] старт"))
         while True:
             did_work = False
-            for task in self._tasks(opts["task"], stage):
+            if stage in TASKLESS_STAGES:
+                # стадія по джерелах (без циклу задач): ранер сам claim'ить
+                # одиницю роботи з глобальної черги і повертає True, поки є що робити
                 try:
-                    # drain this task's queue for the stage until empty
-                    while runner(task):
+                    while runner():
                         did_work = True
                         if opts["once"]:
                             break
                 except Exception as e:  # noqa: BLE001 — keep the worker alive
-                    self.stderr.write(f"worker[{stage}] {task.slug}: {e!r}")
+                    self.stderr.write(f"worker[{stage}]: {e!r}")
+            else:
+                for task in self._tasks(opts["task"], stage):
+                    try:
+                        # drain this task's queue for the stage until empty
+                        while runner(task):
+                            did_work = True
+                            if opts["once"]:
+                                break
+                    except Exception as e:  # noqa: BLE001 — keep the worker alive
+                        self.stderr.write(f"worker[{stage}] {task.slug}: {e!r}")
             if opts["once"]:
                 break
             if not did_work:
