@@ -931,7 +931,8 @@ class Source(models.Model):
         "accounts.TelegramAccount", on_delete=models.SET_NULL,
         null=True, blank=True, related_name="sources",
         verbose_name="Telegram-акаунт",
-        help_text="Яким акаунтом полити цей канал. Порожньо — пул (round-robin).",
+        help_text="Яким акаунтом полити цей канал. Порожньо — перший авторизований "
+                  "(ротація по пулу — Phase 4).",
     )
 
     # розклад і health (пише лише worker info-collect)

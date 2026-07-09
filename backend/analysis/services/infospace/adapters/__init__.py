@@ -43,4 +43,6 @@ def get_adapter(kind: str) -> BaseSourceAdapter:
 
 # Реєстрація конкретних адаптерів (імпорт нижче register/get_adapter — без циклу).
 # Phase 1 — rss; Phase 2 — web; Phase 3 — telegram.
-from . import rss  # noqa: E402,F401 — реєструє RssAdapter
+from . import rss        # noqa: E402,F401 — реєструє RssAdapter
+from . import web        # noqa: E402,F401 — реєструє WebAdapter
+from . import telegram   # noqa: E402,F401 — реєструє TelegramAdapter

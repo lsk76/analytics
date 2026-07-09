@@ -88,6 +88,25 @@ def test_collect_skips_source_without_active_subscription(monkeypatch):
     assert stages.info_collect_once() is False  # нема роботи
 
 
+def test_collect_rate_limited_reschedules_without_failure(monkeypatch):
+    from analysis.services.infospace.adapters.base import RateLimited
+
+    class _RL:
+        def fetch(self, source):
+            raise RateLimited(120)
+    sub = SubscriptionFactory()
+    monkeypatch.setattr(stages, "get_adapter", lambda k: _RL())
+    assert stages.info_collect_once() is True
+    sub.source.refresh_from_db()
+    assert sub.source.consecutive_failures == 0        # НЕ збій
+    assert sub.source.last_error == ""
+    assert sub.source.next_poll_at > timezone.now()    # відсунуто
+    assert sub.source.locked_at is None
+    # відрізняє _schedule_rate_limited від _schedule_ok: успіх виставив би
+    # last_ok_at, rate-limit — ні (це не успішний збір)
+    assert sub.source.last_ok_at is None
+
+
 # ------------------------------------------------------------------ screen
 
 def _mk_post(task, **kw):

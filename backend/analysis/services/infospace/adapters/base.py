@@ -18,6 +18,14 @@ DEFAULT_MAX_ITEMS = 100
 DEFAULT_BACKFILL_LIMIT = 20
 
 
+class RateLimited(Exception):
+    """Джерело просить зачекати (напр. Telegram FloodWait). НЕ вважається збоєм:
+    стадія відсуває next_poll_at на retry_after БЕЗ інкременту failures."""
+    def __init__(self, retry_after: float):
+        self.retry_after = float(retry_after)
+        super().__init__(f"rate limited, retry after {retry_after}s")
+
+
 @dataclass
 class RawItem:
     """Один елемент від джерела (стаття/пост/повідомлення)."""

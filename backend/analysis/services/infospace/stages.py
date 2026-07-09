@@ -29,6 +29,7 @@ from .. import llm
 from ..normalize import resolve_region
 from ..stages import _advance, _attach_posts, _claim_posts, _create_event
 from .adapters import get_adapter
+from .adapters.base import RateLimited
 from .prompts import INFO_JUDGE_PROMPT, INFO_SCREEN_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,13 @@ def _schedule_ok(source):
                                "consecutive_failures", "locked_at"])
 
 
+def _schedule_rate_limited(source, retry_after):
+    """FloodWait тощо: відсунути полінг, але НЕ рахувати як збій (failures не росте)."""
+    source.next_poll_at = djtz.now() + timedelta(seconds=max(retry_after, 60))
+    source.locked_at = None
+    source.save(update_fields=["next_poll_at", "locked_at"])
+
+
 def _schedule_fail(source, err):
     source.consecutive_failures = (source.consecutive_failures or 0) + 1
     backoff = source.poll_interval_sec * (2 ** min(source.consecutive_failures, 10))
@@ -130,6 +138,10 @@ def info_collect_once():
         return False
     try:
         items = get_adapter(source.kind).fetch(source)
+    except RateLimited as e:
+        logger.info("info_collect: %s rate-limited, retry за %ss", source.name, e.retry_after)
+        _schedule_rate_limited(source, e.retry_after)
+        return True
     except Exception as e:  # noqa: BLE001 — health рахуємо, воркер живий
         logger.warning("info_collect: %s (%s) fetch failed: %r", source.name, source.kind, e)
         _schedule_fail(source, e)

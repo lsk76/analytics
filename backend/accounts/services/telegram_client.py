@@ -130,6 +130,34 @@ class TelegramUserClient:
         return await cls._with_client(account, fn)
 
     @classmethod
+    async def fetch_history(cls, account, handle, min_id: int = 0, limit: int = 50,
+                            reverse: bool = False) -> list:
+        """Повідомлення каналу після min_id (watermark), до limit штук.
+
+        Полінг історії каналу акаунтом (підписуватись не треба для публічних).
+        reverse=False — найновіші перші (для backfill першого полінгу: беремо
+        останні N). reverse=True — найстаріші перші ВІД min_id: суцільний догін
+        без діри, коли між полінгами накопичилось >limit повідомлень (інакше
+        watermark перестрибнув би на найновіший id і пропустив середину).
+        Повертає список dict {id, text, date(UTC)}; порожні (медіа) — пропуск."""
+        from datetime import timezone as _tz
+
+        async def fn(client):
+            entity = int(handle) if str(handle).lstrip("-").isdigit() else handle
+            out = []
+            async for msg in client.iter_messages(
+                    entity, min_id=min_id or 0, limit=limit, reverse=reverse):
+                text = (getattr(msg, "message", None) or "").strip()
+                if not text:
+                    continue
+                out.append({
+                    "id": msg.id, "text": text,
+                    "date": msg.date.astimezone(_tz.utc) if msg.date else None,
+                })
+            return out
+        return await cls._with_client(account, fn)
+
+    @classmethod
     async def get_channel_meta(cls, account, handle: str) -> dict:
         async def fn(client):
             entity = int(handle) if str(handle).lstrip("-").isdigit() else handle
