@@ -844,55 +844,65 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
     )
 
     def get_urls(self):
-        my = [path("<path:object_id>/run-now/",
-                   self.admin_site.admin_view(self.run_now_view),
-                   name="analysis_analysistask_run_now")]
+        my = [
+            path("<path:object_id>/run-now/",
+                 self.admin_site.admin_view(self.run_now_view),
+                 name="analysis_analysistask_run_now"),
+            path("<path:object_id>/rescreen/",
+                 self.admin_site.admin_view(self.rescreen_view),
+                 name="analysis_analysistask_rescreen"),
+        ]
         return my + super().get_urls()
 
     def run_now_view(self, request, object_id):
-        """Кнопка «Запустити зараз (тест)» — прогін infospace-конвеєра для задачі
-        (полінг джерел → скрін → події) У ФОНОВОМУ ПОТОЦІ, щоб веб-запит не падав
-        по таймауту. Результат — у лозі web; події з'являються в адмінці поступово."""
+        """Кнопка «Запустити зараз (тест)» — полінг нових→скрін→події У ФОНІ."""
+        return self._kick_bg(request, object_id, "run_task_now",
+                             "Тест-прогін", "run_now")
+
+    def rescreen_view(self, request, object_id):
+        """Кнопка «Перепрогнати фільтр» — скинути й застосувати ПОТОЧНИЙ промпт
+        до вже зібраних постів (тюнінг фільтра) У ФОНІ. Події перебудовуються."""
+        return self._kick_bg(request, object_id, "rescreen_task_now",
+                             "Перепрогін фільтра", "rescreen")
+
+    def _kick_bg(self, request, object_id, fn_name, label, log_tag):
+        """Спільний запуск infospace-операції у фоновому потоці (без таймауту)."""
         from django.shortcuts import redirect
         task = self.get_object(request, object_id)
         back = redirect(f"../../{object_id}/change/")
         if task is None:
             return back
         if task.pipeline != AnalysisTask.PIPELINE_INFOSPACE:
-            self.message_user(request, "«Запустити зараз» — лише для infospace-задач.",
-                              level=messages.WARNING)
+            self.message_user(request, "Дія лише для infospace-задач.", messages.WARNING)
             return back
         if task.id in _INFO_RUN_LOCK:
-            self.message_user(request, "Тест-прогін цієї задачі вже виконується у фоні.",
-                              level=messages.WARNING)
+            self.message_user(request, f"Операція «{label}» цієї задачі вже у фоні.",
+                              messages.WARNING)
             return back
         _INFO_RUN_LOCK.add(task.id)
-        threading.Thread(target=self._run_now_bg, args=(task.id, task.slug),
-                         daemon=True).start()
+        threading.Thread(target=self._bg_run, daemon=True,
+                         args=(task.id, task.slug, fn_name, log_tag)).start()
         self.message_user(
             request,
-            f"Тест-прогін «{task.name}» запущено У ФОНІ — полінг→скрін→події. "
-            "Онови сторінку подій за ~хвилину; підсумок — у лозі web "
-            "(docker compose logs web | grep run_now).",
-            level=messages.SUCCESS)
+            f"«{label}» для «{task.name}» запущено У ФОНІ. Онови сторінку подій "
+            f"за ~хвилину; підсумок — у лозі web (docker compose logs web | grep {log_tag}).",
+            messages.SUCCESS)
         return back
 
     @staticmethod
-    def _run_now_bg(task_id, slug):
-        """Фоновий тест-прогін (окремий потік): власне DB-зʼєднання, чиститься у finally."""
+    def _bg_run(task_id, slug, fn_name, log_tag):
+        """Фонова infospace-операція (окремий потік): власне DB-зʼєднання → finally."""
         from django.db import connections
         from analysis.services.infospace import stages as info_stages
         try:
             t = AnalysisTask.objects.get(id=task_id)
-            r = info_stages.run_task_now(t)
-            logger.info("run_now[%s]: джерел %s, зібрано %s, релевантних %s, подій +%s "
-                        "(усього %s)", slug, r["sources"], r["collected"],
-                        r["screened_pending"], r["events_created"], r["events_total"])
+            r = getattr(info_stages, fn_name)(t)
+            logger.info("%s[%s]: %s", log_tag, slug, r)
         except Exception:  # noqa: BLE001
-            logger.exception("run_now[%s]: помилка фонового прогону", slug)
+            logger.exception("%s[%s]: помилка фонового прогону", log_tag, slug)
         finally:
             _INFO_RUN_LOCK.discard(task_id)
-            connections.close_all()   # не лишати зʼєднання цього потоку відкритим
+            connections.close_all()
 
     def get_fieldsets(self, request, obj=None):
         # розділи залежать від конвеєра: спільне поле збору (telezip_query,

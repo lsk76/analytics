@@ -5,8 +5,15 @@
     <li>
       <a href="{% url 'admin:analysis_analysistask_run_now' original.pk %}"
          class="button" style="background:#1a7f37"
-         title="Синхронний тест-прогін: полінг джерел → скрін → події">
-        🚀 Запустити зараз (тест)
+         title="Полінг нових джерел → скрін → події (у фоні)">
+        🚀 Запустити зараз
+      </a>
+    </li>
+    <li>
+      <a href="{% url 'admin:analysis_analysistask_rescreen' original.pk %}"
+         class="button" style="background:#8250df"
+         title="Скинути й застосувати ПОТОЧНИЙ промпт до вже зібраних постів (тюнінг фільтра, у фоні)">
+        🔁 Перепрогнати фільтр
       </a>
     </li>
   {% endif %}

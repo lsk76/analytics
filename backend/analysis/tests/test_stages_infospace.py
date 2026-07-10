@@ -236,6 +236,31 @@ def test_event_attach_updates_counts_and_summary(monkeypatch):
     assert Event.objects.filter(task=task).count() == 1  # НЕ створено нову
 
 
+def test_rescreen_resets_and_rebuilds(monkeypatch):
+    # перепрогін: видаляє події, скидає пости у info_collected і застосовує
+    # ПОТОЧНИЙ промпт наново (тюнінг фільтра на вже зібраних постах)
+    task = TaskFactory(geo_enabled=False)
+    p_keep = _mk_post(task, stage=Post.STAGE_INFO_SCREENED, is_relevant=True,
+                      classification={"summary": "s", "signature": "sig"})
+    p_drop = _mk_post(task, stage=Post.STAGE_DONE, is_relevant=False)
+    stale = Event.objects.create(task=task, summary="стара подія",
+                                 last_post_at=timezone.now())
+    p_keep.event = stale; p_keep.save(update_fields=["event"])
+
+    monkeypatch.setattr(stages, "_llm_screen", _fake_screen({
+        p_keep.id: {"relevant": True, "signature": "новий", "summary": "гостре", "tags": {}},
+        p_drop.id: {"relevant": False, "signature": "", "summary": ""}}))
+    monkeypatch.setattr(stages.llm, "query", _boom)   # без кандидатів — без судді
+
+    r = stages.rescreen_task_now(task)
+    assert r["posts"] == 2 and r["relevant"] == 1
+    assert not Event.objects.filter(id=stale.id).exists()      # стару видалено
+    assert Event.objects.filter(task=task).count() == 1        # перебудовано 1
+    p_keep.refresh_from_db(); p_drop.refresh_from_db()
+    assert p_keep.stage == Post.STAGE_DONE and p_keep.event is not None
+    assert p_drop.stage == Post.STAGE_DONE and p_drop.event is None
+
+
 def test_event_review_enabled_creates_pending(monkeypatch):
     # авто-аудит увімкнено → нова подія чекає review-воркера (pending), не approved
     task = TaskFactory(geo_enabled=False, review_enabled=True)

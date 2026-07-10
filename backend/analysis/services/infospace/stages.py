@@ -189,6 +189,24 @@ def run_task_now(task, screen_passes=6, event_cap=300):
             "events_created": after - before, "events_total": after}
 
 
+def rescreen_task_now(task):
+    """ПЕРЕПРОГІН ФІЛЬТРА: видалити події задачі, скинути ВСІ її пости у
+    info_collected і застосувати ПОТОЧНИЙ скрін-промпт наново — для тюнінгу
+    фільтра на вже зібраних постах (без нового полінгу). Повертає лічильники."""
+    Event.objects.filter(task=task).delete()   # пости.event → NULL (SET_NULL)
+    n_posts = Post.objects.filter(task=task).update(
+        stage=Post.STAGE_INFO_COLLECTED, is_relevant=None, stage_attempts=0,
+        stage_locked_at=None, stage_error="", classification={})
+    while info_screen_once(task):
+        pass
+    kept = Post.objects.filter(task=task, stage=Post.STAGE_INFO_SCREENED).count()
+    for _ in range(5000):
+        if not info_event_once(task):
+            break
+    return {"posts": n_posts, "relevant": kept,
+            "events_total": Event.objects.filter(task=task).count()}
+
+
 # =========================================================================== screen
 
 def _build_screen_prompt(task):
