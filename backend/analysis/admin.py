@@ -820,8 +820,8 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             "classes": ("info-sources-fs",),
             "description": "Безперервний полінг підписаних джерел (нижче, блок "
                            "«Підписки на джерела»). Розклад/health — у списку Джерел. "
-                           "Джерела — глобальний довідник (RSS/сайти/Telegram).",
-            "fields": (),
+                           "info_max_age_days — брати лише новини свіжіші за N діб.",
+            "fields": ("info_max_age_days",),
         }),
         ("🛰 Етап 2 — Скрін (релевантність + опис + теги)", {
             "description": "Дешева LLM одним викликом: relevant/signature/summary/"

@@ -295,6 +295,12 @@ class AnalysisTask(models.Model):
         help_text="«Той самий факт чи інший?» — attach/new + чи оновити опис. "
                   "Порожньо — стандартний із коду.",
     )
+    info_max_age_days = models.PositiveSmallIntegerField(
+        default=7, verbose_name="Свіжість: макс. вік новини (днів)",
+        help_text="Елементи, старші за N діб (за датою публікації), НЕ потрапляють "
+                  "у конвеєр — монітор бере лише свіже. Захищає і від хибної дати "
+                  "extraction / архівних сторінок.",
+    )
     info_match_window_hours = models.PositiveSmallIntegerField(
         default=24, verbose_name="Зіставлення: вікно збігу (год)",
         help_text="Ковзне вікно пошуку «такої самої події» відносно дати поста.",

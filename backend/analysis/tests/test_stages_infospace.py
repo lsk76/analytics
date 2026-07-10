@@ -50,12 +50,14 @@ def test_collect_fanout_creates_posts_and_schedules(monkeypatch):
 
 
 def test_collect_drops_stale_items(monkeypatch):
-    # елементи старші за MAX_ITEM_AGE_DAYS (архів / хибна дата extraction) не
+    # елементи старші за task.info_max_age_days (архів / хибна дата extraction) не
     # потрапляють у конвеєр; posted_at=None лишається (стадія поставить now)
     sub = SubscriptionFactory()
+    sub.task.info_max_age_days = 7
+    sub.task.save(update_fields=["info_max_age_days"])
     now = timezone.now()
     old = RawItem(external_id="old", url="https://ex.org/old", title="архів",
-                  text="старе", posted_at=now - timedelta(days=stages.MAX_ITEM_AGE_DAYS + 5))
+                  text="старе", posted_at=now - timedelta(days=12))
     fresh = RawItem(external_id="new", url="https://ex.org/new", title="свіже",
                     text="нове", posted_at=now)
     nodate = RawItem(external_id="nd", url="https://ex.org/nd", title="без дати", text="x")
