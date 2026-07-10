@@ -38,7 +38,8 @@ LOCK_TIMEOUT = timedelta(minutes=20)
 SCREEN_TICK = 10           # постів на прохід скріну (кожен = 1 LLM-виклик)
 BACKOFF_CAP = timedelta(hours=6)
 JUDGE_TOPK = 5             # скільки кандидатів показувати судді
-FUZZY_FLOOR = 45           # мін. схожість signature↔summary для кандидата
+FUZZY_FLOOR = 38           # мін. схожість (max від signature↔summary/↔signature)
+                           # для кандидата; поріг РЕКОЛУ — точність вирішує суддя
 RETENTION_TICK = 1000      # постів на прохід чистки
 MAX_ITEM_AGE_DAYS = 7      # фолбек-вікно свіжості, якщо task.info_max_age_days=0/None
                            # (монітор бере лише свіже: архів, хибна дата extraction)
@@ -327,19 +328,32 @@ def _judge_prompt(task, post, candidates):
     return system, user
 
 
+def _event_signature(event):
+    """Підпис події = signature її РЕП-поста (найранішого). Підписи дедуплять
+    краще за summary (вони — канонічний відбиток факту)."""
+    posts = list(event.posts.all())  # prefetch-кеш; Meta ordering = posted_at
+    if posts:
+        return (posts[0].classification or {}).get("signature") or ""
+    return ""
+
+
 def _candidates(task, post):
-    """Живі події ±вікно від дати поста; свій регіон — першими."""
+    """Живі події ±вікно від дати поста; свій регіон — першими. Скоринг проти
+    І summary, І підпису події (max) — різні видання формулюють по-різному, тож
+    signature↔signature ловить дублі, які signature↔summary пропускає."""
     win = timedelta(hours=task.info_match_window_hours or 24)
     lo, hi = post.posted_at - win, post.posted_at + win
-    qs = Event.objects.filter(task=task, last_post_at__isnull=False,
-                              last_post_at__gte=lo, last_post_at__lte=hi)
-    events = list(qs)
+    events = list(Event.objects.filter(
+        task=task, last_post_at__isnull=False,
+        last_post_at__gte=lo, last_post_at__lte=hi).prefetch_related("posts"))
     if post.region_subject_id:
         events.sort(key=lambda e: (e.region_subject_id != post.region_subject_id))
     sig = (post.classification or {}).get("signature") or post.title or post.text[:200]
-    scored = sorted(
-        ((token_set_ratio(sig, e.summary or ""), e) for e in events),
-        key=lambda t: t[0], reverse=True)
+
+    def score(e):
+        return max(token_set_ratio(sig, e.summary or ""),
+                   token_set_ratio(sig, _event_signature(e)))
+    scored = sorted(((score(e), e) for e in events), key=lambda t: t[0], reverse=True)
     return [e for s, e in scored if s >= FUZZY_FLOOR][:JUDGE_TOPK]
 
 

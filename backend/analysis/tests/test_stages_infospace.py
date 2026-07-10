@@ -199,6 +199,21 @@ def _screened(task, sig, summary, when=None):
         classification={"signature": sig, "summary": summary, "tags": {}})
 
 
+def test_candidates_match_by_signature_not_only_summary():
+    # дубль від іншого видання: summary події зовсім інший, але ПІДПИС близький —
+    # signature↔signature ловить кандидата, якого signature↔summary пропускає
+    task = TaskFactory(geo_enabled=False)
+    ev = Event.objects.create(task=task, summary="геть неспоріднений текст опису",
+                              last_post_at=timezone.now())
+    rep = _mk_post(task, stage=Post.STAGE_DONE,
+                   classification={"signature": "Контрактник з Бурятії засуджений за самоволку"})
+    rep.event = ev
+    rep.save(update_fields=["event"])
+    post = _mk_post(task, stage=Post.STAGE_INFO_SCREENED,
+                    classification={"signature": "У Бурятії контрактника засудили за самоволку"})
+    assert ev in stages._candidates(task, post)
+
+
 def test_event_new_without_candidates(monkeypatch):
     task = TaskFactory(geo_enabled=False)
     p = _screened(task, "хабар мерія", "Чиновника затримали за хабар.")
