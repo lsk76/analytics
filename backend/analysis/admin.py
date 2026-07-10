@@ -1,6 +1,12 @@
 import datetime
 import json
+import logging
+import threading
 from collections import OrderedDict
+
+logger = logging.getLogger(__name__)
+# infospace тест-прогони, що зараз крутяться у фоні (guard проти подвійного кліку)
+_INFO_RUN_LOCK = set()
 
 from django import forms
 from django.contrib import admin, messages
@@ -844,10 +850,10 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
         return my + super().get_urls()
 
     def run_now_view(self, request, object_id):
-        """Кнопка «Запустити зараз (тест)» — синхронний прогін infospace-конвеєра
-        для цієї задачі: полінг джерел → скрін → події. Для налагодження фільтра."""
+        """Кнопка «Запустити зараз (тест)» — прогін infospace-конвеєра для задачі
+        (полінг джерел → скрін → події) У ФОНОВОМУ ПОТОЦІ, щоб веб-запит не падав
+        по таймауту. Результат — у лозі web; події з'являються в адмінці поступово."""
         from django.shortcuts import redirect
-        from analysis.services.infospace import stages as info_stages
         task = self.get_object(request, object_id)
         back = redirect(f"../../{object_id}/change/")
         if task is None:
@@ -856,17 +862,37 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             self.message_user(request, "«Запустити зараз» — лише для infospace-задач.",
                               level=messages.WARNING)
             return back
-        try:
-            r = info_stages.run_task_now(task)
-            self.message_user(
-                request,
-                f"Тест-прогін «{task.name}»: джерел {r['sources']}, зібрано нових "
-                f"{r['collected']}, релевантних у черзі {r['screened_pending']}, "
-                f"подій +{r['events_created']} (усього {r['events_total']}).",
-                level=messages.SUCCESS)
-        except Exception as e:  # noqa: BLE001
-            self.message_user(request, f"Помилка тест-прогону: {e!r}", level=messages.ERROR)
+        if task.id in _INFO_RUN_LOCK:
+            self.message_user(request, "Тест-прогін цієї задачі вже виконується у фоні.",
+                              level=messages.WARNING)
+            return back
+        _INFO_RUN_LOCK.add(task.id)
+        threading.Thread(target=self._run_now_bg, args=(task.id, task.slug),
+                         daemon=True).start()
+        self.message_user(
+            request,
+            f"Тест-прогін «{task.name}» запущено У ФОНІ — полінг→скрін→події. "
+            "Онови сторінку подій за ~хвилину; підсумок — у лозі web "
+            "(docker compose logs web | grep run_now).",
+            level=messages.SUCCESS)
         return back
+
+    @staticmethod
+    def _run_now_bg(task_id, slug):
+        """Фоновий тест-прогін (окремий потік): власне DB-зʼєднання, чиститься у finally."""
+        from django.db import connections
+        from analysis.services.infospace import stages as info_stages
+        try:
+            t = AnalysisTask.objects.get(id=task_id)
+            r = info_stages.run_task_now(t)
+            logger.info("run_now[%s]: джерел %s, зібрано %s, релевантних %s, подій +%s "
+                        "(усього %s)", slug, r["sources"], r["collected"],
+                        r["screened_pending"], r["events_created"], r["events_total"])
+        except Exception:  # noqa: BLE001
+            logger.exception("run_now[%s]: помилка фонового прогону", slug)
+        finally:
+            _INFO_RUN_LOCK.discard(task_id)
+            connections.close_all()   # не лишати зʼєднання цього потоку відкритим
 
     def get_fieldsets(self, request, obj=None):
         # розділи залежать від конвеєра: спільне поле збору (telezip_query,
