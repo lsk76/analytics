@@ -40,6 +40,8 @@ BACKOFF_CAP = timedelta(hours=6)
 JUDGE_TOPK = 5             # скільки кандидатів показувати судді
 FUZZY_FLOOR = 45           # мін. схожість signature↔summary для кандидата
 RETENTION_TICK = 1000      # постів на прохід чистки
+MAX_ITEM_AGE_DAYS = 45     # монітор бере лише свіже — старіші елементи (архів,
+                           # хибна дата extraction) не потрапляють у конвеєр
 
 
 def _content_hash(text: str) -> str:
@@ -111,6 +113,10 @@ def _fanout(source, items):
     subs = list(SourceSubscription.objects.filter(
         source=source, is_active=True,
         task__is_active=True, task__pipeline="infospace").select_related("task"))
+    # відсів застарілих елементів (архівні сторінки, хибна дата extraction) —
+    # монітор бере лише свіже; posted_at=None лишаємо (стадія поставить now)
+    cutoff = djtz.now() - timedelta(days=MAX_ITEM_AGE_DAYS)
+    items = [it for it in items if not (it.posted_at and it.posted_at < cutoff)]
     n_new = 0
     for sub in subs:
         for it in items:

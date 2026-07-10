@@ -84,6 +84,19 @@ def test_discovery_by_regex(monkeypatch):
     assert {i.url for i in items} == {ART1, ART2}
 
 
+def test_discovery_heuristic_ignores_pagination_query(monkeypatch):
+    # цифри в query (?PAGEN_1=17894) — НЕ стаття (архівна пагінація 2009 р.);
+    # евристика має дивитись лише на ШЛЯХ
+    listing = ('<a href="/news/1010/">стаття</a>'
+               '<a href="/news/?PAGEN_1=17894">архів ст.17894</a>'
+               '<a href="/news/?page=99999">сторінка</a>')
+    pages = {LISTING_URL: listing, ART1: ARTICLE}
+    _serve(monkeypatch, pages)
+    src = _Src(config={"selectors": {"title": "h1.headline", "body": ".article-body"}})
+    items = WebAdapter().fetch(src)
+    assert {i.url for i in items} == {ART1}   # пагінація відсіяна
+
+
 def test_discovery_heuristic_filters_nav_and_foreign(monkeypatch):
     # без конфіга: евристика (цифра у шляху) бере /news/101,102; не /about, не чужий домен
     _serve(monkeypatch, {LISTING_URL: LISTING, ART1: ARTICLE, ART2: ARTICLE})

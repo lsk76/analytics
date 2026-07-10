@@ -82,7 +82,9 @@ class WebAdapter(BaseSourceAdapter):
             tree = HTMLParser(html)
             for node in tree.css("a"):
                 href = node.attributes.get("href")
-                if href and _ARTICLE_ID.search(href):
+                # цифри шукаємо лише у ШЛЯХУ, не в query — інакше евристика ловить
+                # пагінацію («?PAGEN_1=17894», «?page=…») як «статтю» (архів 2009!)
+                if href and _ARTICLE_ID.search(urlsplit(href).path):
                     hrefs.append(href)
 
         seen, out = set(), []

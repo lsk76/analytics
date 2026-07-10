@@ -49,6 +49,23 @@ def test_collect_fanout_creates_posts_and_schedules(monkeypatch):
     assert sub.source.state["seen_ids"] == ["g0", "g1"]  # watermark збережено
 
 
+def test_collect_drops_stale_items(monkeypatch):
+    # елементи старші за MAX_ITEM_AGE_DAYS (архів / хибна дата extraction) не
+    # потрапляють у конвеєр; posted_at=None лишається (стадія поставить now)
+    sub = SubscriptionFactory()
+    now = timezone.now()
+    old = RawItem(external_id="old", url="https://ex.org/old", title="архів",
+                  text="старе", posted_at=now - timedelta(days=stages.MAX_ITEM_AGE_DAYS + 5))
+    fresh = RawItem(external_id="new", url="https://ex.org/new", title="свіже",
+                    text="нове", posted_at=now)
+    nodate = RawItem(external_id="nd", url="https://ex.org/nd", title="без дати", text="x")
+    monkeypatch.setattr(stages, "get_adapter",
+                        lambda k: _StubAdapter([old, fresh, nodate]))
+    stages.info_collect_once()
+    urls = set(Post.objects.filter(task=sub.task).values_list("url", flat=True))
+    assert urls == {"https://ex.org/new", "https://ex.org/nd"}  # старе відсіяно
+
+
 def test_collect_idempotent_no_dupes(monkeypatch):
     sub = SubscriptionFactory()
     monkeypatch.setattr(stages, "get_adapter", lambda k: _StubAdapter(_items(2)))
