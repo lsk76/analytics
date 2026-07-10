@@ -1,5 +1,18 @@
 {% extends "admin/change_form.html" %}
 
+{% block object-tools-items %}
+  {% if original and original.pipeline == 'infospace' %}
+    <li>
+      <a href="{% url 'admin:analysis_analysistask_run_now' original.pk %}"
+         class="button" style="background:#1a7f37"
+         title="Синхронний тест-прогін: полінг джерел → скрін → події">
+        🚀 Запустити зараз (тест)
+      </a>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
+
 {% block extrahead %}
 {{ block.super }}
 <style>

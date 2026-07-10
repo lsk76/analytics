@@ -73,6 +73,14 @@ def extract_json(text: str) -> Any:
         if text.startswith("json"):
             text = text[4:]
     text = text.strip()
+    # Whole text first: json_mode returns pure JSON. Bracket-hunting below tries
+    # "[…]" BEFORE "{…}", so an OBJECT whose last structure is a single array
+    # (e.g. {"tags":{"x":["a","b"]}}) would wrongly yield that inner ARRAY. Trying
+    # the full string first returns the real object/array and is strictly safer.
+    try:
+        return json.loads(text)
+    except Exception:  # noqa: BLE001
+        pass
     for op, cl in (("[", "]"), ("{", "}")):
         a, b = text.find(op), text.rfind(cl)
         if a != -1 and b != -1 and b > a:

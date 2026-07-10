@@ -117,9 +117,10 @@ def _mk_post(task, **kw):
     return Post.objects.create(**d)
 
 
-def _fake_screen(verdicts):
+def _fake_screen(verdicts, empty_ids=()):
+    # _llm_screen тепер повертає {id: (parsed|None, was_empty)}
     async def _run(posts, system, model):
-        return {p.id: verdicts.get(p.id) for p in posts}
+        return {p.id: (verdicts.get(p.id), p.id in empty_ids) for p in posts}
     return _run
 
 
@@ -148,10 +149,23 @@ def test_screen_irrelevant_to_done(monkeypatch):
 def test_screen_broken_json_bumps_attempts(monkeypatch):
     task = TaskFactory(geo_enabled=False)
     p = _mk_post(task)
+    # None + was_empty=False → битий JSON → інкремент спроб
     monkeypatch.setattr(stages, "_llm_screen", _fake_screen({p.id: None}))
     stages.info_screen_once(task)
     p.refresh_from_db()
     assert p.stage == Post.STAGE_INFO_COLLECTED and p.stage_attempts == 1
+    assert p.stage_locked_at is None
+
+
+def test_screen_transient_empty_no_attempt_bump(monkeypatch):
+    task = TaskFactory(geo_enabled=False)
+    p = _mk_post(task)
+    # None + was_empty=True → транзієнт (таймаут/рейт-ліміт) → пере-черга БЕЗ спроби
+    monkeypatch.setattr(stages, "_llm_screen",
+                        _fake_screen({p.id: None}, empty_ids={p.id}))
+    stages.info_screen_once(task)
+    p.refresh_from_db()
+    assert p.stage == Post.STAGE_INFO_COLLECTED and p.stage_attempts == 0
     assert p.stage_locked_at is None
 
 

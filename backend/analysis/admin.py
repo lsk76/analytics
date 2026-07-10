@@ -625,6 +625,8 @@ class SourceSubscriptionInline(admin.TabularInline):
             ff.widget.can_change_related = False
             ff.widget.can_delete_related = False
             ff.widget.can_view_related = False
+        if db_field.name == "notes":            # нотатка — в один рядок
+            ff.widget = forms.TextInput(attrs={"size": 50})
         return ff
 
 
@@ -834,6 +836,37 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             "fields": ("info_retention_days",),
         }),
     )
+
+    def get_urls(self):
+        my = [path("<path:object_id>/run-now/",
+                   self.admin_site.admin_view(self.run_now_view),
+                   name="analysis_analysistask_run_now")]
+        return my + super().get_urls()
+
+    def run_now_view(self, request, object_id):
+        """Кнопка «Запустити зараз (тест)» — синхронний прогін infospace-конвеєра
+        для цієї задачі: полінг джерел → скрін → події. Для налагодження фільтра."""
+        from django.shortcuts import redirect
+        from analysis.services.infospace import stages as info_stages
+        task = self.get_object(request, object_id)
+        back = redirect(f"../../{object_id}/change/")
+        if task is None:
+            return back
+        if task.pipeline != AnalysisTask.PIPELINE_INFOSPACE:
+            self.message_user(request, "«Запустити зараз» — лише для infospace-задач.",
+                              level=messages.WARNING)
+            return back
+        try:
+            r = info_stages.run_task_now(task)
+            self.message_user(
+                request,
+                f"Тест-прогін «{task.name}»: джерел {r['sources']}, зібрано нових "
+                f"{r['collected']}, релевантних у черзі {r['screened_pending']}, "
+                f"подій +{r['events_created']} (усього {r['events_total']}).",
+                level=messages.SUCCESS)
+        except Exception as e:  # noqa: BLE001
+            self.message_user(request, f"Помилка тест-прогону: {e!r}", level=messages.ERROR)
+        return back
 
     def get_fieldsets(self, request, obj=None):
         # розділи залежать від конвеєра: спільне поле збору (telezip_query,

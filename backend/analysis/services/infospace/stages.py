@@ -131,26 +131,56 @@ def _fanout(source, items):
     return n_new, len(subs)
 
 
-def info_collect_once():
-    """TASKLESS: полінг одного джерела → фан-аут постів на підписані задачі."""
-    source = _claim_source()
-    if source is None:
-        return False
+def _poll_source(source):
+    """Полить ОДНЕ джерело (fetch + фан-аут + розклад/health). Спільне ядро
+    info_collect_once і кнопки «Запустити зараз». Повертає к-сть НОВИХ постів."""
     try:
         items = get_adapter(source.kind).fetch(source)
     except RateLimited as e:
         logger.info("info_collect: %s rate-limited, retry за %ss", source.name, e.retry_after)
         _schedule_rate_limited(source, e.retry_after)
-        return True
+        return 0
     except Exception as e:  # noqa: BLE001 — health рахуємо, воркер живий
         logger.warning("info_collect: %s (%s) fetch failed: %r", source.name, source.kind, e)
         _schedule_fail(source, e)
-        return True
+        return 0
     n_new, n_subs = _fanout(source, items)
     _schedule_ok(source)
     logger.info("info_collect: %s → %d items, %d нових постів на %d задач",
                 source.name, len(items), n_new, n_subs)
+    return n_new
+
+
+def info_collect_once():
+    """TASKLESS: полінг одного джерела → фан-аут постів на підписані задачі."""
+    source = _claim_source()
+    if source is None:
+        return False
+    _poll_source(source)
     return True
+
+
+def run_task_now(task, screen_passes=6, event_cap=300):
+    """Синхронний ТЕСТ-прогін infospace-задачі: полить активні джерела →
+    скрін → події. Обмежено для веб-запиту (кнопка «Запустити зараз»).
+    Полінг поважає watermark: перший раз — backfill, далі — лише нове.
+    Повертає лічильники."""
+    subs = (SourceSubscription.objects
+            .filter(task=task, is_active=True, source__is_active=True)
+            .select_related("source"))
+    collected = sum(_poll_source(s.source) for s in subs)
+    for _ in range(screen_passes):
+        if not info_screen_once(task):
+            break
+    screened = Post.objects.filter(task=task, stage=Post.STAGE_INFO_SCREENED).count()
+    before = Event.objects.filter(task=task).count()
+    for _ in range(event_cap):
+        if not info_event_once(task):
+            break
+    after = Event.objects.filter(task=task).count()
+    return {"sources": subs.count(), "collected": collected,
+            "screened_pending": screened,
+            "events_created": after - before, "events_total": after}
 
 
 # =========================================================================== screen
@@ -178,8 +208,12 @@ def _build_screen_prompt(task):
 
 
 async def _llm_screen(posts, system, model):
+    """→ {post_id: (parsed|None, was_empty)}. was_empty=True — LLM віддав ""
+    (транзієнт: таймаут/рейт-ліміт), НЕ битий JSON; стадія пере-черговує його
+    без інкременту спроб. Конкурентність 3 (gemini-flash на OpenRouter
+    рейт-лімітить при 6 — ловили масові порожні відповіді)."""
     client = llm.make_client()
-    sem = asyncio.Semaphore(6)
+    sem = asyncio.Semaphore(3)
 
     async def one(p):
         async with sem:
@@ -187,8 +221,8 @@ async def _llm_screen(posts, system, model):
             raw = await llm.query(
                 [{"role": "system", "content": system},
                  {"role": "user", "content": user}],
-                model=model, client=client, json_mode=True, max_tokens=800)
-        return p.id, llm.extract_json(raw)
+                model=model, client=client, json_mode=True, max_tokens=1500)
+        return p.id, (llm.extract_json(raw), not (raw or "").strip())
 
     try:
         results = await asyncio.gather(*(one(p) for p in posts))
@@ -206,11 +240,11 @@ def info_screen_once(task):
     system = _build_screen_prompt(task)
     verdicts = asyncio.run(_llm_screen(posts, system, model))
 
-    decided, screened, missing = [], [], []
+    decided, screened, bad, transient = [], [], [], []
     for p in posts:
-        v = verdicts.get(p.id)
+        v, was_empty = verdicts.get(p.id, (None, True))
         if not isinstance(v, dict):
-            missing.append(p.id)
+            (transient if was_empty else bad).append(p.id)
             continue
         relevant = bool(v.get("relevant"))
         cls = dict(p.classification or {})
@@ -234,11 +268,15 @@ def info_screen_once(task):
     Post.objects.bulk_update(
         decided, ["classification", "is_relevant", "stage", "stage_locked_at"],
         batch_size=200)
-    # missing (битий JSON) — лишаємо на стадії, звільняємо lock; після спроб → failed
-    if missing:
-        _bump_attempts(missing, "info_screen")
-    logger.info("info_screen[%s]: %d релевантних, %d відсіяно, %d retry",
-                task.slug, len(screened), len(decided) - len(screened), len(missing))
+    # транзієнт (порожня відповідь: таймаут/рейт-ліміт) — просто звільнити lock,
+    # БЕЗ інкременту спроб (наступний тік підбере); битий JSON — до 3 спроб → failed
+    if transient:
+        Post.objects.filter(id__in=transient).update(stage_locked_at=None)
+    if bad:
+        _bump_attempts(bad, "info_screen")
+    logger.info("info_screen[%s]: %d релевантних, %d відсіяно, %d транзієнт, %d битих",
+                task.slug, len(screened), len(decided) - len(screened),
+                len(transient), len(bad))
     return True
 
 

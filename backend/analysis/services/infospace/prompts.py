@@ -34,7 +34,8 @@ no markdown fences, no commentary:
 Rules:
 - "signature" must be stable across rewordings of the same fact (used for
   duplicate matching): name the actor, the action, the place.
-- "summary" in the language of the source text.
+- "summary" MUST be written in UKRAINIAN (translate the facts from the source
+  Russian into Ukrainian), factual, no speculation. "signature" — Ukrainian too.
 - If relevant=false: signature/summary may be empty strings, region null.
 """
 
@@ -64,8 +65,8 @@ Respond with STRICT JSON only:
  "event_id": <candidate id if attach, else null>,
  "update_summary": true|false,
  "new_summary": "<if update_summary: consolidated 2-3 sentence summary of the
-                 event including the new material facts, in the source
-                 language; else empty string>"}
+                 event including the new material facts, written in UKRAINIAN;
+                 else empty string>"}
 
 update_summary=true ONLY when the new item adds MATERIAL facts (new numbers,
 outcomes, official reactions). Minor rewording -> update_summary=false.
