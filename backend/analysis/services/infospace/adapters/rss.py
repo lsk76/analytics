@@ -94,8 +94,10 @@ class RssAdapter(BaseSourceAdapter):
                 if len(longest) > len(body):
                     body = longest.strip()
             body = _strip_html(body)
-            # full_text: title-only/короткі стрічки → дотягуємо статтю за лінком
-            if ((source.config or {}).get("full_text") and len(body) < MIN_RSS_BODY
+            # full_text ДЕФОЛТНО увімкнено: якщо тіло з RSS тонке — дотягуємо
+            # статтю за лінком (для повних фідів це no-op). Вимкнути: config
+            # {"full_text": false}.
+            if ((source.config or {}).get("full_text", True) and len(body) < MIN_RSS_BODY
                     and link.startswith("http")):
                 body = _fetch_full_text(link) or body
             items.append(RawItem(
