@@ -1606,7 +1606,7 @@ class PostAdmin(admin.ModelAdmin):
 class EventAdmin(admin.ModelAdmin):
     change_form_template = "admin/analysis/event/change_form.html"
     list_display = ("event_date", "review_badge",
-                    "region_subject", "settlement",
+                    "region_subject",
                     "tags_list", "count_short", "reach_display",
                     "posts_preview", "summary")
     readonly_fields = ("source_text", "posts_all", "review_status", "review_notes", "reviewed_at",
