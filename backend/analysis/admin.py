@@ -2639,7 +2639,33 @@ class EventAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(request.path)
         return super().response_change(request, obj)
 
-    actions = ["approve_selected", "reject_selected", "copy_links"]
+    actions = ["make_digest_report", "approve_selected", "reject_selected", "copy_links"]
+
+    @admin.action(description="📄 Сформувати звіт (одне речення на новину)")
+    def make_digest_report(self, request, queryset):
+        """Дайджест обраних подій у стилі щоденного зведення: плоский список,
+        одне речення на новину (з малої літери, «;» в кінці). Стиль/код — див.
+        analysis/services/infospace/report.py."""
+        from django.http import HttpResponse
+        from analysis.services.infospace import report
+        events = list(queryset.select_related("region_subject").order_by("event_date", "id"))
+        if not events:
+            self.message_user(request, "Не обрано подій.", level=messages.WARNING)
+            return
+        sentences = report.generate_digest_sentences(events)
+        rows = [sentences.get(e.id) or report._clean_sentence(e.summary or "")
+                for e in events]
+        rows = [r for r in rows if r]
+        if not rows:
+            self.message_user(request, "Не вдалося сформувати речення.", level=messages.ERROR)
+            return
+        docx = report.build_digest_docx(rows)
+        fname = f"{djtz.now():%d.%m.%y} Info.docx"
+        resp = HttpResponse(
+            docx,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
 
     @admin.action(description="🔗 Скопіювати посилання на вибрані події")
     def copy_links(self, request, queryset):
