@@ -19,6 +19,24 @@ from .base import BaseSourceAdapter, RawItem
 
 USER_AGENT = "tg-event-analytics infospace monitor (+https://example.org/bot)"
 SEEN_CAP = 400  # скільки останніх guid тримати у watermark
+MIN_RSS_BODY = 200  # якщо тіло з RSS коротше і config.full_text — дотягуємо статтю
+
+
+def _strip_html(s: str) -> str:
+    """RSS-описи часто містять HTML (<p>, <a>). Витягуємо чистий текст."""
+    if "<" not in s:
+        return s
+    from selectolax.parser import HTMLParser
+    return HTMLParser(s).text(separator=" ", strip=True)
+
+
+def _fetch_full_text(url: str) -> str:
+    """Дотягнути повний текст статті за посиланням (trafilatura, реюз web-адаптера)."""
+    from .web import WebAdapter, _get
+    try:
+        return (WebAdapter._extract_trafilatura(_get(url)) or {}).get("text") or ""
+    except Exception:  # noqa: BLE001 — не валимо весь полінг через одну статтю
+        return ""
 
 
 def _entry_id(e) -> str:
@@ -75,6 +93,11 @@ class RssAdapter(BaseSourceAdapter):
                 longest = max((c.get("value", "") for c in e.content), key=len, default="")
                 if len(longest) > len(body):
                     body = longest.strip()
+            body = _strip_html(body)
+            # full_text: title-only/короткі стрічки → дотягуємо статтю за лінком
+            if ((source.config or {}).get("full_text") and len(body) < MIN_RSS_BODY
+                    and link.startswith("http")):
+                body = _fetch_full_text(link) or body
             items.append(RawItem(
                 external_id=eid, url=link, title=title, text=body,
                 posted_at=_entry_dt(e), author=(getattr(e, "author", "") or "").strip(),

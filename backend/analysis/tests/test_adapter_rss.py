@@ -71,6 +71,37 @@ def test_304_returns_empty_and_keeps_state():
     assert src.state == {"etag": "abc", "seen_ids": ["x"]}  # незмінний
 
 
+def test_strip_html_body():
+    from analysis.services.infospace.adapters.rss import _strip_html
+    assert _strip_html("<p>Текст <a href='x'>лінк</a></p>") == "Текст лінк"
+    assert _strip_html("без тегів") == "без тегів"
+
+
+def test_full_text_fetches_when_body_short(monkeypatch):
+    # config.full_text + короткий RSS-опис → дотягує статтю
+    from analysis.services.infospace.adapters import rss as rss_mod
+    calls = []
+    monkeypatch.setattr(rss_mod, "_fetch_full_text",
+                        lambda url: calls.append(url) or ("повний текст статті " * 20))
+    src = _Src(config={"full_text": True})
+    with mock.patch("feedparser.parse", return_value=_parsed()):
+        items = RssAdapter().fetch(src)
+    assert calls                                    # дотягувало за лінком
+    assert all(len(i.text) >= 200 for i in items)   # тепер повне тіло
+
+
+def test_no_full_text_keeps_rss_body(monkeypatch):
+    from analysis.services.infospace.adapters import rss as rss_mod
+
+    def _boom(url):
+        raise AssertionError("не мало дотягувати без config.full_text")
+    monkeypatch.setattr(rss_mod, "_fetch_full_text", _boom)
+    src = _Src()  # без full_text
+    with mock.patch("feedparser.parse", return_value=_parsed()):
+        items = RssAdapter().fetch(src)
+    assert len(items) == 2
+
+
 def test_backfill_limit_on_first_poll():
     src = _Src(config={"backfill_limit": 1})
     with mock.patch("feedparser.parse", return_value=_parsed()):
