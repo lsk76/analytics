@@ -13,9 +13,9 @@ FEED_XML = FIXture.read_text(encoding="utf-8")
 
 class _Src:
     """Мінімальний дубль Source (адаптер не пише в БД)."""
-    def __init__(self, state=None, config=None):
+    def __init__(self, poll_cursor=None, config=None):
         self.url = "https://example.org/feed.xml"
-        self.state = state or {}
+        self.poll_cursor = poll_cursor or {}
         self.config = config or {}
 
 
@@ -43,13 +43,13 @@ def test_parses_entries_and_canonicalizes_url():
     assert items[0].url == "https://example.org/news/1"
     assert items[0].title.startswith("У Бурятії")
     assert items[0].posted_at is not None
-    # watermark збережено в state
-    assert set(src.state["seen_ids"]) == {
+    # watermark збережено в poll_cursor
+    assert set(src.poll_cursor["seen_ids"]) == {
         "https://example.org/news/1", "https://example.org/news/2"}
 
 
 def test_second_poll_skips_seen():
-    src = _Src(state={"seen_ids": ["https://example.org/news/1",
+    src = _Src(poll_cursor={"seen_ids": ["https://example.org/news/1",
                                    "https://example.org/news/2"]})
     with mock.patch("feedparser.parse", return_value=_parsed()):
         items = RssAdapter().fetch(src)
@@ -57,18 +57,18 @@ def test_second_poll_skips_seen():
 
 
 def test_new_entry_after_seen_emitted():
-    src = _Src(state={"seen_ids": ["https://example.org/news/1"]})
+    src = _Src(poll_cursor={"seen_ids": ["https://example.org/news/1"]})
     with mock.patch("feedparser.parse", return_value=_parsed()):
         items = RssAdapter().fetch(src)
     assert [i.url for i in items] == ["https://example.org/news/2"]
 
 
 def test_304_returns_empty_and_keeps_state():
-    src = _Src(state={"etag": "abc", "seen_ids": ["x"]})
+    src = _Src(poll_cursor={"etag": "abc", "seen_ids": ["x"]})
     with mock.patch("feedparser.parse", return_value=_parsed(status=304)):
         items = RssAdapter().fetch(src)
     assert items == []
-    assert src.state == {"etag": "abc", "seen_ids": ["x"]}  # незмінний
+    assert src.poll_cursor == {"etag": "abc", "seen_ids": ["x"]}  # незмінний
 
 
 def test_strip_html_body():

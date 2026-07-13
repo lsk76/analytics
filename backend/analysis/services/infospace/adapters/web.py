@@ -12,7 +12,7 @@
     config["selectors"]      — {"title","body","date"} CSS-селектори; АБО
     (дефолт) trafilatura     — автоекстракція (нуль конфігурації).
 
-Watermark у source.state["seen_ids"] (canonical-URL). Мережеві помилки лістингу →
+Watermark у source.poll_cursor["seen_ids"] (canonical-URL). Мережеві помилки лістингу →
 виняток (health рахує стадія); збій ОКРЕМОЇ статті — пропускаємо (не валимо полінг).
 """
 from __future__ import annotations
@@ -144,11 +144,11 @@ class WebAdapter(BaseSourceAdapter):
 
     # ------------------------------------------------------------ fetch
     def fetch(self, source) -> list[RawItem]:
-        state = dict(source.state or {})
-        first_poll = not state
+        poll_cursor = dict(source.poll_cursor or {})
+        first_poll = not poll_cursor
         listing = _get(source.url)                 # помилка лістингу → виняток
         links = self._discover(source, listing)
-        seen = set(state.get("seen_ids") or [])
+        seen = set(poll_cursor.get("seen_ids") or [])
         limit = self.backfill_limit(source) if first_poll else self.max_items(source)
         fresh = [u for u in links if first_poll or u not in seen][:limit]
 
@@ -171,7 +171,7 @@ class WebAdapter(BaseSourceAdapter):
                 title=(data.get("title") or "").strip(),
                 text=text, posted_at=data.get("date"), meta={}))
 
-        source.state = {"seen_ids": (done + list(seen))[:SEEN_CAP]}
+        source.poll_cursor = {"seen_ids": (done + list(seen))[:SEEN_CAP]}
         return items
 
 

@@ -967,7 +967,7 @@ class SourceAdmin(admin.ModelAdmin):
     autocomplete_fields = ("region_subject", "tg_account")
     list_editable = ("is_active",)
     actions = ("poll_now", "healthcheck_now", "dry_run_fetch", "activate", "deactivate")
-    readonly_fields = ("locked_at", "state", "last_ok_at", "last_error",
+    readonly_fields = ("locked_at", "poll_cursor", "last_ok_at", "last_error",
                        "consecutive_failures", "quality_ok", "quality_note",
                        "last_healthcheck_at", "created_at")
     fieldsets = (
@@ -979,7 +979,7 @@ class SourceAdmin(admin.ModelAdmin):
         ("Telegram", {"classes": ("collapse",), "fields": ("tg_account",)}),
         ("Health (лише читання)", {
             "classes": ("collapse",),
-            "fields": ("locked_at", "state", "last_ok_at", "last_error",
+            "fields": ("locked_at", "poll_cursor", "last_ok_at", "last_error",
                        "consecutive_failures", "quality_ok", "quality_note",
                        "last_healthcheck_at", "created_at")}),
     )

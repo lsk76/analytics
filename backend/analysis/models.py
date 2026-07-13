@@ -954,9 +954,11 @@ class Source(models.Model):
         null=True, blank=True, verbose_name="Захоплено воркером",
         help_text="Час claim'у; звільняється після проходу або таймауту.",
     )
-    state = models.JSONField(
-        default=dict, blank=True, verbose_name="Watermark адаптера",
-        help_text="Приватний стан адаптера свого kind: tg last_msg_id / rss etag…",
+    poll_cursor = models.JSONField(
+        default=dict, blank=True, verbose_name="Курсор збору (докуди прочитано)",
+        help_text="Позиція «докуди вже зібрано» для цього джерела, щоб брати лише "
+                  "нове: Telegram — last_msg_id; RSS — seen_ids+etag; web — seen_ids. "
+                  "Очистити (→ порожньо) = перечитати заново (backfill).",
     )
     last_ok_at = models.DateTimeField(null=True, blank=True, verbose_name="Останній успіх")
     last_error = models.TextField(blank=True, verbose_name="Остання помилка")

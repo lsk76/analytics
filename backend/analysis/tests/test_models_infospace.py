@@ -24,7 +24,7 @@ def test_source_defaults_ready_to_poll():
     assert src.is_active is True
     assert src.poll_interval_sec == 600
     assert src.consecutive_failures == 0
-    assert src.state == {} and src.config == {}
+    assert src.poll_cursor == {} and src.config == {}
     # нове джерело одразу в черзі полінгу
     assert src.next_poll_at <= timezone.now()
 

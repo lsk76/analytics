@@ -22,7 +22,7 @@ class _StubAdapter:
     def fetch(self, source):
         if self._raises:
             raise self._raises
-        source.state = {"seen_ids": [i.external_id for i in self._items]}
+        source.poll_cursor = {"seen_ids": [i.external_id for i in self._items]}
         return self._items
 
 
@@ -46,7 +46,7 @@ def test_collect_fanout_creates_posts_and_schedules(monkeypatch):
     assert sub.source.last_ok_at is not None
     assert sub.source.next_poll_at > timezone.now()      # заплановано наперед
     assert sub.source.locked_at is None
-    assert sub.source.state["seen_ids"] == ["g0", "g1"]  # watermark збережено
+    assert sub.source.poll_cursor["seen_ids"] == ["g0", "g1"]  # watermark збережено
 
 
 def test_collect_drops_stale_items(monkeypatch):

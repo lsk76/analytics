@@ -86,7 +86,7 @@ def _schedule_ok(source):
     source.last_error = ""
     source.consecutive_failures = 0
     source.locked_at = None
-    source.save(update_fields=["state", "next_poll_at", "last_ok_at", "last_error",
+    source.save(update_fields=["poll_cursor", "next_poll_at", "last_ok_at", "last_error",
                                "consecutive_failures", "locked_at"])
 
 
@@ -477,13 +477,13 @@ def _claim_healthcheck_source():
 
 
 class _DetachedProbe:
-    """Відчеплена копія джерела з ПОРОЖНІМ state — для dry-run/healthcheck.
-    Адаптер мутує state цієї копії; реальний Source (і його polling-watermark)
+    """Відчеплена копія джерела з ПОРОЖНІМ poll_cursor — для dry-run/healthcheck.
+    Адаптер мутує poll_cursor цієї копії; реальний Source (і його polling-watermark)
     структурно недоторканий (не покладаємось на restore/update_fields)."""
     def __init__(self, src):
         for a in ("kind", "url", "config", "scraper_key", "region_subject", "tg_account"):
             setattr(self, a, getattr(src, a))
-        self.state = {}
+        self.poll_cursor = {}
 
 
 def probe_fetch(source):

@@ -55,9 +55,9 @@ class TelegramAdapter(BaseSourceAdapter):
         if acc is None:
             raise RuntimeError("немає авторизованого TelegramAccount для полінгу")
         handle = self._handle(source)
-        state = dict(source.state or {})
-        first_poll = "last_msg_id" not in state
-        min_id = int(state.get("last_msg_id", 0))
+        poll_cursor = dict(source.poll_cursor or {})
+        first_poll = "last_msg_id" not in poll_cursor
+        min_id = int(poll_cursor.get("last_msg_id", 0))
         limit = self.backfill_limit(source) if first_poll else self.max_items(source)
         # перший полінг — найновіші N (backfill); далі — найстаріші від watermark
         # (reverse=True) суцільно, щоб бурст >limit не лишив діру (див. рев'ю)
@@ -73,6 +73,6 @@ class TelegramAdapter(BaseSourceAdapter):
                 external_id=str(mid),
                 url=canonical_url(f"https://t.me/{handle}/{mid}"),
                 title="", text=m["text"], posted_at=m.get("date"), meta={}))
-        state["last_msg_id"] = max_id
-        source.state = state
+        poll_cursor["last_msg_id"] = max_id
+        source.poll_cursor = poll_cursor
         return items

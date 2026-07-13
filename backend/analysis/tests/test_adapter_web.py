@@ -18,11 +18,11 @@ ART2 = "https://news.example/news/1020/"
 
 
 class _Src:
-    def __init__(self, config=None, scraper_key="", state=None):
+    def __init__(self, config=None, scraper_key="", poll_cursor=None):
         self.url = LISTING_URL
         self.config = config or {}
         self.scraper_key = scraper_key
-        self.state = state or {}
+        self.poll_cursor = poll_cursor or {}
 
 
 def _fake_get(pages, not_found=()):
@@ -147,7 +147,7 @@ def test_broken_article_skipped_then_retried_next_poll(monkeypatch):
     _serve(monkeypatch, {LISTING_URL: LISTING, ART2: ARTICLE}, not_found=(ART1,))
     items = WebAdapter().fetch(src)
     assert {i.url for i in items} == {ART2}
-    assert ART1 not in set(src.state["seen_ids"])     # збійна стаття НЕ позначена seen
+    assert ART1 not in set(src.poll_cursor["seen_ids"])     # збійна стаття НЕ позначена seen
     # наступний полінг: ART1 уже доступний → підбирається (не втрачено)
     _serve(monkeypatch, {LISTING_URL: LISTING, ART1: ARTICLE, ART2: ARTICLE})
     items2 = WebAdapter().fetch(src)
@@ -159,7 +159,7 @@ def test_watermark_skips_seen_on_second_poll(monkeypatch):
     src = _Src(config={"link_selector": "a.article-link",
                        "selectors": {"title": "h1.headline", "body": ".article-body"}})
     WebAdapter().fetch(src)                       # перший полінг — обидві статті
-    assert set(src.state["seen_ids"]) == {ART1, ART2}
+    assert set(src.poll_cursor["seen_ids"]) == {ART1, ART2}
     items2 = WebAdapter().fetch(src)              # другий — нічого нового
     assert items2 == []
 

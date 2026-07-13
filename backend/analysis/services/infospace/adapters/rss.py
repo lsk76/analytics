@@ -1,10 +1,10 @@
 """RSS-адаптер: feedparser + умовний GET (etag/modified → 304 задарма).
 
-Watermark у source.state:
+Watermark у source.poll_cursor:
   etag / modified — для умовного GET (сервер віддає 304, якщо не змінилось);
   seen_ids       — обмежений список останніх guid, щоб не переемітити ті самі
                    елементи (друга лінія — unique(task, url) на вставці).
-Перший полінг (порожній state) — лише backfill_limit найновіших елементів.
+Перший полінг (порожній poll_cursor) — лише backfill_limit найновіших елементів.
 """
 from __future__ import annotations
 
@@ -58,12 +58,12 @@ class RssAdapter(BaseSourceAdapter):
     kind = "rss"
 
     def fetch(self, source) -> list[RawItem]:
-        state = dict(source.state or {})
-        first_poll = not state
+        poll_cursor = dict(source.poll_cursor or {})
+        first_poll = not poll_cursor
         d = feedparser.parse(
             source.url,
-            etag=state.get("etag"),
-            modified=state.get("modified"),
+            etag=poll_cursor.get("etag"),
+            modified=poll_cursor.get("modified"),
             agent=USER_AGENT,
         )
         # feedparser кладе HTTP-статус у d.status; 304 = не змінилось
@@ -75,7 +75,7 @@ class RssAdapter(BaseSourceAdapter):
             raise bozo_exc
 
         entries = list(d.entries or [])
-        seen = set(state.get("seen_ids") or [])
+        seen = set(poll_cursor.get("seen_ids") or [])
         limit = self.backfill_limit(source) if first_poll else self.max_items(source)
 
         items: list[RawItem] = []
@@ -115,5 +115,5 @@ class RssAdapter(BaseSourceAdapter):
         # seen: усі поточні guid (обмежено), щоб наступний полінг їх не повторив
         current_ids = [i for i in (_entry_id(e) for e in entries) if i]
         new_state["seen_ids"] = (current_ids + list(seen))[:SEEN_CAP]
-        source.state = new_state
+        source.poll_cursor = new_state
         return items

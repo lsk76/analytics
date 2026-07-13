@@ -63,7 +63,7 @@ class _Stub:
     def fetch(self, source):
         if self._raises:
             raise self._raises
-        source.state = {"seen_ids": ["mutated"]}   # адаптер мутує state
+        source.poll_cursor = {"seen_ids": ["mutated"]}   # адаптер мутує poll_cursor
         return self._items
 
 
@@ -76,7 +76,7 @@ def _web_source_with_sub(**kw):
 
 
 def test_healthcheck_healthy_sets_quality_ok(monkeypatch):
-    src = _web_source_with_sub(state={"seen_ids": ["real"]})
+    src = _web_source_with_sub(poll_cursor={"seen_ids": ["real"]})
     monkeypatch.setattr(stages, "get_adapter", lambda k: _Stub([_item("x" * 200)]))
     assert stages.info_healthcheck_once() is True
     src.refresh_from_db()
@@ -85,22 +85,22 @@ def test_healthcheck_healthy_sets_quality_ok(monkeypatch):
 
 
 def test_healthcheck_does_not_touch_real_watermark(monkeypatch):
-    """Структурна гарантія: адаптер бачить ПОРОЖНІЙ state (backfill на копії),
-    а реальний Source.state у БД лишається недоторканим — навіть якщо адаптер
+    """Структурна гарантія: адаптер бачить ПОРОЖНІЙ poll_cursor (backfill на копії),
+    а реальний Source.poll_cursor у БД лишається недоторканим — навіть якщо адаптер
     його мутує. Ловить регресію, якщо healthcheck почне fetch на реальному Source."""
-    src = _web_source_with_sub(state={"seen_ids": ["real"]})
+    src = _web_source_with_sub(poll_cursor={"seen_ids": ["real"]})
     seen = {}
 
     class _MutatingStub:
         def fetch(self, source):
-            seen["adapter_saw"] = dict(source.state)      # має бути {} (backfill)
-            source.state = {"seen_ids": ["MUTATED"]}       # мутуємо (як реальний адаптер)
+            seen["adapter_saw"] = dict(source.poll_cursor)      # має бути {} (backfill)
+            source.poll_cursor = {"seen_ids": ["MUTATED"]}       # мутуємо (як реальний адаптер)
             return [_item("x" * 200)]
     monkeypatch.setattr(stages, "get_adapter", lambda k: _MutatingStub())
     stages.info_healthcheck_once()
     src.refresh_from_db()
     assert seen["adapter_saw"] == {}                       # адаптер отримав відчеплену копію
-    assert src.state == {"seen_ids": ["real"]}             # реальний watermark цілий
+    assert src.poll_cursor == {"seen_ids": ["real"]}             # реальний watermark цілий
 
 
 def test_healthcheck_empty_flags_suspect(monkeypatch):

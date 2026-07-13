@@ -9,9 +9,9 @@ from analysis.services.infospace.adapters.telegram import TelegramAdapter
 
 
 class _Src:
-    def __init__(self, url="https://t.me/ulan_smi", state=None, config=None):
+    def __init__(self, url="https://t.me/ulan_smi", poll_cursor=None, config=None):
         self.url = url
-        self.state = state or {}
+        self.poll_cursor = poll_cursor or {}
         self.config = config or {}
         self.tg_account = None
 
@@ -53,11 +53,11 @@ def test_first_poll_sets_watermark_and_urls(monkeypatch):
     assert items[0].url == "https://t.me/ulan_smi/28919"
     assert items[0].text == "повідомлення 28919"
     assert items[0].posted_at.year == 2026
-    assert src.state["last_msg_id"] == 28921         # максимум id
+    assert src.poll_cursor["last_msg_id"] == 28921         # максимум id
 
 
 def test_second_poll_uses_min_id_and_reverse(monkeypatch):
-    src = _Src(state={"last_msg_id": 28921})
+    src = _Src(poll_cursor={"last_msg_id": 28921})
     captured = {}
 
     def _fh(account, handle, min_id, limit, reverse):
@@ -69,11 +69,11 @@ def test_second_poll_uses_min_id_and_reverse(monkeypatch):
     assert captured["min_id"] == 28921               # watermark → min_id
     assert captured["reverse"] is True               # догін суцільно (без діри)
     assert captured["limit"] == 100                  # max_items на подальших полінгах
-    assert src.state["last_msg_id"] == 28922
+    assert src.poll_cursor["last_msg_id"] == 28922
 
 
 def test_first_poll_uses_backfill_limit_and_no_reverse(monkeypatch):
-    src = _Src(config={"backfill_limit": 5})          # порожній state → перший полінг
+    src = _Src(config={"backfill_limit": 5})          # порожній poll_cursor → перший полінг
     captured = {}
 
     def _fh(account, handle, min_id, limit, reverse):
@@ -105,10 +105,10 @@ def test_fetch_history_converts_floodwait_to_ratelimited(monkeypatch):
 
 
 def test_empty_channel_keeps_watermark(monkeypatch):
-    src = _Src(state={"last_msg_id": 100})
+    src = _Src(poll_cursor={"last_msg_id": 100})
     _patch(monkeypatch, [])
     assert TelegramAdapter().fetch(src) == []
-    assert src.state["last_msg_id"] == 100
+    assert src.poll_cursor["last_msg_id"] == 100
 
 
 def test_floodwait_propagates_as_ratelimited(monkeypatch):
