@@ -84,6 +84,20 @@ def test_discovery_by_regex(monkeypatch):
     assert {i.url for i in items} == {ART1, ART2}
 
 
+def test_discovery_excludes_comments_tag_author(monkeypatch):
+    # /comments/, /tag/, /author/ — не статті (trafilatura дає спільний віджет),
+    # мають відсіюватись, лишається лише сама стаття
+    listing = ('<a href="/news/1010/">стаття</a>'
+               '<a href="/text/sport/2026/07/13/76524491/comments/">коментарі</a>'
+               '<a href="/text/2026/07/13/76530092/comments/?discuss=1">обговорення</a>'
+               '<a href="/tag/2026/">тег</a>'
+               '<a href="/author/12345/">автор</a>')
+    _serve(monkeypatch, {LISTING_URL: listing, ART1: ARTICLE})
+    src = _Src(config={"selectors": {"title": "h1.headline", "body": ".article-body"}})
+    items = WebAdapter().fetch(src)
+    assert {i.url for i in items} == {ART1}   # лише стаття, без /comments/ /tag/ /author/
+
+
 def test_discovery_heuristic_ignores_pagination_query(monkeypatch):
     # цифри в query (?PAGEN_1=17894) — НЕ стаття (архівна пагінація 2009 р.);
     # евристика має дивитись лише на ШЛЯХ

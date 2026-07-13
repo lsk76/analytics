@@ -40,6 +40,9 @@ HTTP_TIMEOUT = 20.0
 # з яких trafilatura витягла б cookie-банер замість статті. Сайти зі
 # slug-URL без цифр потребують link_selector/link_pattern у config.
 _ARTICLE_ID = re.compile(r"\d{4,}")
+# НЕ-статті: сторінки коментарів, тегів, авторів, пошуку — на них trafilatura
+# витягує спільний віджет («популярне»), тож усі дають ІДЕНТИЧНИЙ сміттєвий текст
+_NON_ARTICLE = re.compile(r"/(comments?|tags?|author|search|login|rss|feed|page)(/|$)")
 
 
 def _get(url: str) -> str:
@@ -92,6 +95,8 @@ class WebAdapter(BaseSourceAdapter):
             absu = canonical_url(urljoin(base, h))
             if not absu.startswith("http") or not _same_host(absu, base):
                 continue
+            if _NON_ARTICLE.search(urlsplit(absu).path):
+                continue   # /comments/, /tag/, /author/ … — не стаття
             if absu == canonical_url(base) or absu in seen:
                 continue
             seen.add(absu)
