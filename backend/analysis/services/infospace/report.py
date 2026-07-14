@@ -24,11 +24,11 @@ logger = logging.getLogger(__name__)
 BATCH = 30
 
 DIGEST_PROMPT = """Ти — редактор щоденного інформаційного зведення про 8 національних республік РФ.
-Отримуєш список новин (id + короткий опис українською). Для КОЖНОЇ напиши РІВНО ОДНЕ
-речення про те, про що новина.
+Отримуєш список новин (id + короткий опис українською). Для КОЖНОЇ напиши стислий
+опис про те, про що новина — ІДЕАЛЬНО ОДНЕ речення, щонайбільше ДВА.
 
 ЖОРСТКІ ПРАВИЛА ФОРМАТУ (стиль зведення):
-- рівно одне речення, українською, фактологічно, без оцінок і без вступних слів;
+- 1 речення (ідеально), максимум 2; українською, фактологічно, без оцінок і без вступних слів;
 - починається з МАЛОЇ літери;
 - закінчується КРАПКОЮ З КОМОЮ «;» (НЕ крапкою);
 - без посилань, без нумерації, без назви республіки як окремого заголовка;
@@ -45,14 +45,26 @@ DIGEST_PROMPT = """Ти — редактор щоденного інформац
 """
 
 
+def _round_quotes(s: str) -> str:
+    """Будь-які прямі/інші лапки → криві «ялинки»-парою “ ” (“ на відкритті, ” далі)."""
+    out, open_q = [], True
+    for ch in s:
+        if ch in '"“”„«»':
+            out.append("“" if open_q else "”")
+            open_q = not open_q
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _clean_sentence(s: str) -> str:
-    """Гарантуємо два жорсткі правила: мала перша літера + кінцева «;»."""
+    """Гарантуємо три правила: мала перша літера, кінцева «;», криві лапки “ ”."""
     s = " ".join((s or "").split()).strip()
     if not s:
         return ""
     s = s[0].lower() + s[1:]
     s = s.rstrip(" .;…!?")
-    return s + ";" if s else ""
+    return _round_quotes(s + ";") if s else ""
 
 
 async def _agen(events, model):
@@ -88,16 +100,19 @@ def generate_digest_sentences(events, model=None):
 def build_digest_docx(rows) -> bytes:
     """rows: список рядків-речень. Плоский список абзаців → .docx (bytes)."""
     from docx import Document
-    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Cm, Pt
 
     doc = Document()
     normal = doc.styles["Normal"]
     normal.font.name = "Times New Roman"
     normal.font.size = Pt(14)
     normal.font.italic = True
+    normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     for line in rows:
         if line:
-            doc.add_paragraph("\t" + line)
+            p = doc.add_paragraph(line)
+            p.paragraph_format.first_line_indent = Cm(1.25)
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
