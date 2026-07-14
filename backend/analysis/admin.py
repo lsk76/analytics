@@ -1283,6 +1283,30 @@ class ReviewStatusDefaultFilter(admin.SimpleListFilter):
             }
 
 
+class RecentWindowFilter(admin.SimpleListFilter):
+    """Ковзне вікно свіжості: події з активністю (last_post_at) за останні N год/днів
+    від ПОТОЧНОГО моменту (о 9:00 → з учора 9:00 до зараз). Fallback на created_at
+    для подій без last_post_at."""
+    title = "Свіжість"
+    parameter_name = "recent"
+
+    def lookups(self, request, model_admin):
+        return [("24h", "Останні 24 год"), ("48h", "Останні 48 год"),
+                ("7d", "Останні 7 днів")]
+
+    def queryset(self, request, queryset):
+        from datetime import timedelta
+        from django.utils import timezone as djtz
+        delta = {"24h": timedelta(hours=24), "48h": timedelta(hours=48),
+                 "7d": timedelta(days=7)}.get(self.value())
+        if not delta:
+            return queryset
+        cutoff = djtz.now() - delta
+        return queryset.filter(
+            Q(last_post_at__gte=cutoff)
+            | Q(last_post_at__isnull=True, created_at__gte=cutoff))
+
+
 class ReviewSourceFilter(admin.SimpleListFilter):
     """Хто виніс вердикт: агент-рев'ю / ручне Claude-рев'ю / відновлені / аудит."""
     title = "Джерело рев'ю"
@@ -2606,6 +2630,7 @@ class EventAdmin(admin.ModelAdmin):
                        for c in TagCategory.objects.all()]
         return (
             ("event_date", ISODateRangeFilterBuilder(title="Період")),
+            RecentWindowFilter,
             TaskSingleFilter,
             ReviewStatusDefaultFilter,
             ReviewSourceFilter,
@@ -2720,14 +2745,33 @@ class EventAdmin(admin.ModelAdmin):
         ]
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related("posts__channel", "tags")
+        from django.contrib.postgres.aggregates import StringAgg
+        from django.db.models import Case, CharField, Max, Value, When
+        from django.db.models.functions import Concat
+        qs = super().get_queryset(request).prefetch_related("posts__channel", "tags")
+        # Ключ сортування колонки «Теги»: важливість_N спереду (домінує), далі всі
+        # інші теги за абеткою. Події без важливості («яяя») — у кінець (ASC).
+        # StringAgg — Postgres; агрегати всередині Concat → GROUP BY по події.
+        return qs.annotate(
+            _tags_order=Concat(
+                Coalesce(
+                    Max(Case(When(tags__category="importance", then="tags__name"),
+                             output_field=CharField())),
+                    Value("яяя")),
+                Value("~"),
+                Coalesce(
+                    StringAgg("tags__name", delimiter=", ", ordering="tags__name",
+                              distinct=True),
+                    Value(""), output_field=CharField()),
+                output_field=CharField()),
+        )
 
     @admin.display(description="Тип конфлікту")
     def conflict_display(self, obj):
         names = [t.name for t in obj.tags.all() if t.category == "conflict"]
         return ", ".join(names) or "—"
 
-    @admin.display(description="Теги")
+    @admin.display(description="Теги", ordering="_tags_order")
     def tags_list(self, obj):
         # sides only — the conflict type has its own column
         return ", ".join(t.name for t in obj.tags.all() if t.category != "conflict")
