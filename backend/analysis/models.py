@@ -10,6 +10,7 @@
 
 «Етнічні сутички 2025» — це ОДИН рядок AnalysisTask; ніщо тут не захардкоджено під неї.
 """
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.utils.safestring import mark_safe
@@ -94,6 +95,10 @@ class AnalysisTask(models.Model):
     name = models.CharField(max_length=200, verbose_name="Назва")
     slug = models.SlugField(unique=True, verbose_name="Ідентифікатор (slug)")
     description = models.TextField(blank=True, verbose_name="Опис")
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="owned_tasks", verbose_name="Власник",
+        help_text="Не-суперюзери бачать в адмінці лише свої задачі.")
 
     # Збір (TeleZip)
     telezip_query = models.TextField(
@@ -1137,3 +1142,186 @@ class ChannelDailyStat(models.Model):
 
     def __str__(self):
         return f"{self.task_id}/{self.channel_id} {self.date}: {self.relevant}/{self.total}"
+
+
+class Setting(models.Model):
+    """Загальна key-value таблиця налаштувань (промпти, тексти, прапорці), які має
+    правити оператор БЕЗ деплою. Читається кодом через `Setting.get(key, default)`;
+    порожнє значення = дефолт із коду. Сюди поступово виносимо подібний конфіг."""
+    key = models.SlugField(max_length=64, unique=True, verbose_name="Ключ")
+    value = models.TextField(blank=True, verbose_name="Значення")
+    description = models.CharField(max_length=300, blank=True, verbose_name="Опис")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
+
+    class Meta:
+        verbose_name = "Налаштування"
+        verbose_name_plural = "Налаштування"
+        ordering = ["key"]
+
+    def __str__(self):
+        return self.key
+
+    @classmethod
+    def get(cls, key, default=""):
+        """Значення налаштування, або default якщо рядка нема / значення порожнє."""
+        row = cls.objects.filter(key=key).first()
+        val = (row.value or "").strip() if row else ""
+        return val or default
+
+
+# ---------------------------------------------------------------------------
+# Publish-конвеєр: відбір approved-подій → AI-фільтр+рерайт → пост у Telegram
+# ---------------------------------------------------------------------------
+
+class PublishConfig(models.Model):
+    """Операторський профіль публікації (редагується в адмінці).
+
+    Відбирає approved-Event ДЗЕРКАЛОМ фасетів changelist (задача/теги/регіон),
+    прогонить кожну через AI (фільтр yes/no + рерайт у пост) і публікує в один
+    Telegram-канал через Bot API. Один рядок = один канал/профіль; кілька
+    профілів можуть публікувати різні зрізи в різні канали.
+
+    Claim/стан/аудит публікації живе в [[PublishedEvent]] (unique per config+event),
+    тож повторна публікація тієї самої події виключена. Воркер: стадія `publish`
+    (services/publish/stages.py, TASKLESS — ітерує активні профілі)."""
+
+    name = models.CharField(max_length=120, verbose_name="Назва профілю")
+    is_active = models.BooleanField(default=False, verbose_name="Активний")
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="owned_publish_configs", verbose_name="Власник",
+        help_text="Не-суперюзери бачать в адмінці лише свої профілі.")
+
+    # --- відбір подій (дзеркало фасетів changelist подій) ---
+    task = models.ForeignKey(
+        AnalysisTask, on_delete=models.CASCADE, related_name="publish_configs",
+        null=True, blank=True, verbose_name="Задача (збір)",
+        help_text="Порожньо = події всіх задач.")
+    tags = models.ManyToManyField(
+        Tag, blank=True, related_name="publish_configs", verbose_name="Теги",
+        help_text="Порожньо = будь-які теги; інакше подія має мати ХОЧА Б ОДИН із цих тегів.")
+    regions = models.ManyToManyField(
+        Region, blank=True, related_name="publish_configs", verbose_name="Суб'єкти РФ",
+        help_text="Порожньо = усі регіони; інакше подія має бути з ОДНОГО з обраних.")
+    review_status = models.CharField(
+        max_length=12, choices=Event.REVIEW_CHOICES, default=Event.REVIEW_APPROVED,
+        verbose_name="Статус аудиту", help_text="Публікуємо лише події цього статусу.")
+    publish_from = models.DateField(
+        null=True, blank=True, verbose_name="Публікувати події від (дата)",
+        help_text="Беруться лише події з event_date >= цієї дати. Порожньо = без нижньої "
+                  "межі (УВАГА: перший прохід забере ВЕСЬ історичний беклог). Став дату "
+                  "активації, щоб публікувати лише нові події.")
+
+    # --- Telegram Bot API (один канал) ---
+    chat_id = models.CharField(
+        max_length=64, verbose_name="Chat ID каналу",
+        help_text="@username каналу або числовий id (напр. -1001234567890). "
+                  "Бот має бути адміном каналу.")
+    bot_token = models.CharField(
+        max_length=128, blank=True, verbose_name="Bot token",
+        help_text="Порожньо = береться з env TELEGRAM_BOT_TOKEN.")
+
+    # --- AI (фільтр + рерайт одним викликом) ---
+    ai_model = models.CharField(
+        max_length=120, blank=True, verbose_name="AI-модель",
+        help_text="Порожньо = дефолтна LLM_MODEL.")
+    ai_prompt = models.TextField(
+        blank=True, verbose_name="AI-промпт (фільтр+рерайт)",
+        help_text="Системний промпт. Порожньо = дефолт із коду (services/publish/prompts.py). "
+                  "Модель має повертати JSON {publish: bool, reason, post_text}.")
+
+    # --- throttle ---
+    max_per_pass = models.PositiveIntegerField(
+        default=5, verbose_name="Макс. постів за прохід",
+        help_text="Скільки подій обробляти за один тік воркера (стримує вивал беклогу).")
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Профіль публікації"
+        verbose_name_plural = "Профілі публікації"
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} → {self.chat_id}"
+
+    def resolved_token(self):
+        from django.conf import settings as dj_settings
+        return (self.bot_token or "").strip() or getattr(dj_settings, "TELEGRAM_BOT_TOKEN", "")
+
+
+class PublishedEvent(models.Model):
+    """Стан публікації однієї події одним профілем: claim-мітка + аудит.
+
+    Наявність рядка = подію вже взято в роботу цим профілем (unique config+event),
+    тож повторний claim неможливий. status веде життєвий цикл:
+      pending  — заклеймлено, ще не оброблено (locked_at — м'який лок воркера);
+      skipped  — AI вирішив НЕ публікувати (ai_reason);
+      published— відправлено в канал (tg_message_id, published_at);
+      failed   — вичерпано спроби (error)."""
+
+    STATUS_PENDING = "pending"
+    STATUS_SKIPPED = "skipped"
+    STATUS_PUBLISHED = "published"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "В обробці"),
+        (STATUS_SKIPPED, "Відсіяно AI"),
+        (STATUS_PUBLISHED, "Опубліковано"),
+        (STATUS_FAILED, "Помилка"),
+    ]
+
+    config = models.ForeignKey(
+        PublishConfig, on_delete=models.CASCADE, related_name="published",
+        verbose_name="Профіль")
+    event = models.ForeignKey(
+        Event, on_delete=models.CASCADE, related_name="publications",
+        verbose_name="Подія")
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True,
+        verbose_name="Статус")
+
+    ai_verdict = models.BooleanField(null=True, blank=True, verbose_name="AI: публікувати")
+    ai_reason = models.TextField(blank=True, verbose_name="AI: причина")
+    post_text = models.TextField(blank=True, verbose_name="Текст поста (рерайт AI)")
+
+    tg_message_id = models.BigIntegerField(null=True, blank=True, verbose_name="TG message id")
+    published_at = models.DateTimeField(null=True, blank=True, verbose_name="Опубліковано о")
+
+    attempts = models.PositiveIntegerField(default=0, verbose_name="Спроби")
+    locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Заблоковано о")
+    error = models.TextField(blank=True, verbose_name="Помилка")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Публікація події"
+        verbose_name_plural = "Публікації подій"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["config", "event"], name="uniq_publish_config_event"),
+        ]
+        indexes = [models.Index(fields=["config", "status"])]
+
+    def __str__(self):
+        return f"{self.config_id}/{self.event_id}: {self.status}"
+
+
+class UserProfile(models.Model):
+    """Персональні налаштування юзера. Наразі — власний OpenRouter API-ключ:
+    задачі аналізу, публікації та звіти цього юзера ходять під ЙОГО ключем
+    (резолвиться через owner у стадіях; порожньо = глобальний ключ із env).
+    Ключ задає admin в адмінці юзера (інлайн)."""
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="profile", verbose_name="Користувач")
+    openrouter_key = models.CharField(
+        max_length=200, blank=True, verbose_name="OpenRouter API-ключ",
+        help_text="Персональний ключ для задач/публікацій/звітів цього юзера. "
+                  "Порожньо = глобальний ключ із env (OPENROUTER_API_KEY).")
+
+    class Meta:
+        verbose_name = "Профіль користувача (LLM-ключ)"
+        verbose_name_plural = "Профілі користувачів (LLM-ключі)"
+
+    def __str__(self):
+        return f"{self.user}"

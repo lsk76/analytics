@@ -1,11 +1,16 @@
 # tg-event-analytics — Docker management
 
-DC      = docker compose
-DC_PROD = docker compose -f docker-compose.prod.yml
+DC          = docker compose
+# Два прод-профілі під два різні сервери:
+#   DC_PROD      — сервер моніторингу + ведення ТГ (без аналітики)
+#   DC_ANALYTICS — сервер аналітики (важкий конвеєр collect…dedup + графіки)
+DC_PROD      = docker compose -f docker-compose.monitor.yml
+DC_ANALYTICS = docker compose -f docker-compose.prod.yml
 
 .PHONY: help dev prod build start stop restart logs ps shell dbshell \
         migrate makemigrations superuser changepassword collectstatic \
         seed run backup restore list-backups prod-build prod-logs prod-stop clean \
+        prod-analytics prod-analytics-build prod-analytics-logs prod-analytics-ps prod-analytics-stop \
         workers workers-logs workers-stop scale-workers worker
 
 # Default
@@ -21,10 +26,16 @@ help:
 	@echo "    make logs         - follow web logs"
 	@echo "    make ps           - container status"
 	@echo ""
-	@echo "  Prod (gunicorn, DEBUG=false, port 8001):"
+	@echo "  Prod — моніторинг + ведення ТГ (docker-compose.monitor.yml):"
 	@echo "    make prod         - build + up (detached)"
 	@echo "    make prod-logs    - follow web logs"
 	@echo "    make prod-stop    - down"
+	@echo ""
+	@echo "  Prod — сервер аналітики, важкий конвеєр (docker-compose.prod.yml):"
+	@echo "    make prod-analytics       - build + up (detached)"
+	@echo "    make prod-analytics-logs  - follow web logs"
+	@echo "    make prod-analytics-ps    - container status"
+	@echo "    make prod-analytics-stop  - down"
 	@echo ""
 	@echo "  Django:"
 	@echo "    make migrate      - apply migrations"
@@ -102,6 +113,20 @@ prod-logs:
 
 prod-stop:
 	$(DC_PROD) down
+
+# ---------- Prod: сервер аналітики (важкий конвеєр) ----------
+prod-analytics: prod-analytics-build
+prod-analytics-build:
+	$(DC_ANALYTICS) up -d --build
+
+prod-analytics-logs:
+	$(DC_ANALYTICS) logs -f web
+
+prod-analytics-ps:
+	$(DC_ANALYTICS) ps
+
+prod-analytics-stop:
+	$(DC_ANALYTICS) down
 
 # ---------- Django ----------
 migrate:

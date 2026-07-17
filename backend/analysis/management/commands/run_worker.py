@@ -57,13 +57,23 @@ except ImportError as _e:  # noqa: BLE001
     import sys
     print(f"[run_worker] infospace-стадії недоступні: {_e!r}", file=sys.stderr)
 
+# publish-стадія (services/publish/stages.py): approved-Event → AI-фільтр+рерайт
+# → Telegram Bot API. Захисний імпорт (залежить від `requests`).
+try:
+    from analysis.services.publish import stages as publish_stages
+    ALL_RUNNERS.update(publish_stages.STAGE_RUNNERS)
+except ImportError as _e:  # noqa: BLE001
+    import sys
+    print(f"[run_worker] publish-стадія недоступна: {_e!r}", file=sys.stderr)
+
 # Стадії, що працюють НЕ по задачах (ранер викликається без аргументу).
 # info_collect полить ДЖЕРЕЛА (Source): одне джерело живить кілька задач,
 # тож цикл «for task» для нього не має сенсу — черга полінгу глобальна.
 # info_healthcheck — так само по джерелах (dry-run якості web/rss).
 # Ретеншн (info_retention) — навпаки, ПЕР-ЗАДАЧНА операція (чистить пости
 # task.info_retention_days), тож іде звичайним циклом задач (не тут).
-TASKLESS_STAGES = {"info_collect", "info_healthcheck"}
+# publish — теж по НЕ-задачах: ітерує PublishConfig-профілі, а не AnalysisTask.
+TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish"}
 
 
 class Command(BaseCommand):

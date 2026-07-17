@@ -13,6 +13,10 @@
   перед `.values().annotate()` завжди `.order_by()`.
 - **Гео — `region_subject` FK**, не сирий текст `region` («Саха» матчить «Сахалін»).
 - **Нова категорія тегів ⇒ створити рядок `TagCategory`**, інакше адмін-фасет ламається (`?e=1`).
+- **Налаштування, які має правити оператор без деплою (промпти, тексти, прапорці) ⇒
+  key-value таблиця `Setting`**: додати рядок (`/admin/analysis/setting/`) і читати з коду
+  `Setting.get("ключ", ДЕФОЛТ)` (порожнє значення = дефолт із коду). Не хардкодити такий
+  конфіг. Приклад: `digest_report_prompt` (промпт дайджест-звіту, `services/infospace/report.py`).
 - **Конвеєри НЕ вигадувати** — вони задокументовані: `docs/comments-analysis-pipeline.md`
   (критика), `docs/ethnic-events-pipeline.md` / `docs/econ-events-pipeline.md` (ad-hoc події),
   `docs/ARCHITECTURE.md` (events-воркери). Промпти monitor — `analysis/pilot/prompts.py`.

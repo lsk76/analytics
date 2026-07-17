@@ -58,7 +58,8 @@ from .models import (
     AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
     Region, RegionAlias, MonitorChat, ChannelDailyStat,
-    ResearchRubric, Source, SourceSubscription,
+    ResearchRubric, Source, SourceSubscription, Setting,
+    PublishConfig, PublishedEvent, UserProfile,
 )
 from .multiselect_filter import (
     multiselect_filter, autocomplete_filter, MultiSelectFilter,
@@ -595,6 +596,125 @@ class TagCategoryAdmin(admin.ModelAdmin):
     ordering = ("order", "key")
 
 
+@admin.register(Setting)
+class SettingAdmin(admin.ModelAdmin):
+    list_display = ("key", "description", "updated_at")
+    search_fields = ("key", "description", "value")
+    readonly_fields = ("updated_at",)
+
+
+class OwnedAdminMixin:
+    """Ізоляція по власнику (owner): не-суперюзер бачить/редагує в адмінці лише
+    свої рядки; owner авто-ставиться на створенні й не редагується. Суперюзер
+    бачить усе, може призначати owner і фільтрувати за ним.
+
+    Об'єктний доступ (перегляд/зміна/видалення однієї сторінки) теж обмежений —
+    Django бере об'єкт через get_queryset, тож чужий id → 404."""
+    owner_field = "owner"
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        return qs.filter(**{self.owner_field: request.user})
+
+    def save_model(self, request, obj, form, change):
+        if not request.user.is_superuser:
+            setattr(obj, self.owner_field, request.user)              # завжди свій
+        elif getattr(obj, self.owner_field + "_id", None) is None:
+            setattr(obj, self.owner_field, request.user)              # дефолт суперюзеру
+        super().save_model(request, obj, form, change)
+
+    def get_list_filter(self, request):
+        lf = list(super().get_list_filter(request))
+        if request.user.is_superuser and self.owner_field not in lf:
+            lf = [self.owner_field, *lf]
+        return lf
+
+    def _inject_owner_fieldset(self, request, fieldsets):
+        """Додати owner у перший розділ лише суперюзеру (копіюємо, не мутуємо клас)."""
+        fs = [(name, dict(opts)) for name, opts in fieldsets]
+        if request.user.is_superuser and fs:
+            name, opts = fs[0]
+            if self.owner_field not in tuple(opts.get("fields", ())):
+                opts["fields"] = tuple(opts["fields"]) + (self.owner_field,)
+        return fs
+
+
+@admin.register(PublishConfig)
+class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
+    list_display = ("name", "owner", "is_active", "task", "regions_display",
+                    "review_status", "publish_from", "chat_id", "max_per_pass",
+                    "published_count")
+    list_filter = ("is_active", "task", "review_status", "regions")
+    search_fields = ("name", "chat_id")
+    autocomplete_fields = ("task", "tags")
+    filter_horizontal = ("tags", "regions")
+    _BASE_FIELDSETS = (
+        (None, {"fields": ("name", "is_active")}),
+        ("Відбір подій (дзеркало фасетів списку подій)", {
+            "fields": ("task", "tags", "regions", "review_status", "publish_from")}),
+        ("Telegram-канал", {"fields": ("chat_id", "bot_token")}),
+        ("AI (фільтр + рерайт)", {"fields": ("ai_model", "ai_prompt")}),
+        ("Throttle", {"fields": ("max_per_pass",)}),
+    )
+
+    def get_fieldsets(self, request, obj=None):
+        return self._inject_owner_fieldset(request, self._BASE_FIELDSETS)
+
+    @admin.display(description="Суб'єкти РФ")
+    def regions_display(self, obj):
+        names = list(obj.regions.values_list("name", flat=True))
+        return ", ".join(names) if names else "усі"
+
+    @admin.display(description="Опубліковано")
+    def published_count(self, obj):
+        return obj.published.filter(status=PublishedEvent.STATUS_PUBLISHED).count()
+
+
+class OwnedConfigListFilter(admin.RelatedFieldListFilter):
+    """Фасет за профілем публікації, звужений до ВЛАСНИХ профілів (суперюзер — усі).
+    Лишає фільтр корисним, але не світить чужі профілі не-суперюзеру."""
+    def field_choices(self, field, request, model_admin):
+        qs = field.related_model.objects.all()
+        if not request.user.is_superuser:
+            qs = qs.filter(owner=request.user)
+        return [(c.pk, str(c)) for c in qs.order_by("name")]
+
+    def has_output(self):
+        # Django за замовч. ховає related-фільтр, якщо в ньому <2 варіанти. Але
+        # власник із ОДНИМ профілем теж має бачити фасет — тож показуємо при ≥1.
+        return len(self.lookup_choices) > 0
+
+
+@admin.register(PublishedEvent)
+class PublishedEventAdmin(admin.ModelAdmin):
+    list_display = ("id", "config", "event", "status", "ai_verdict",
+                    "tg_message_id", "published_at", "attempts", "created_at")
+    list_filter = ("status", "ai_verdict", ("config", OwnedConfigListFilter))
+    search_fields = ("event__summary", "post_text", "ai_reason", "error")
+    readonly_fields = ("config", "event", "ai_verdict", "ai_reason", "post_text",
+                       "tg_message_id", "published_at", "attempts", "locked_at",
+                       "error", "created_at")
+    actions = ("requeue",)
+
+    def get_queryset(self, request):
+        # Ізоляція: не-суперюзер бачить лише публікації СВОЇХ профілів (config__owner).
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        return qs.filter(config__owner=request.user)
+
+    @admin.action(description="Перечергувати (видалити рядок — воркер обробить наново)")
+    def requeue(self, request, queryset):
+        n = queryset.count()
+        queryset.delete()
+        self.message_user(
+            request,
+            f"Видалено {n} записів публікації — активний профіль обробить ці події наново.",
+            messages.SUCCESS)
+
+
 class MonitorChatInline(admin.TabularInline):
     """Whitelist чатів для opinion-моніторингу. Видно одразу на сторінці Task."""
     model = MonitorChat
@@ -677,13 +797,13 @@ class ResearchRubricInline(admin.TabularInline):
 
 
 @admin.register(AnalysisTask)
-class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
+class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin):
     """Форма задачі = дві реюзабельні «рецептури», згруповані ПО ЕТАПАХ конвеєра:
       📰 Пошук подій: Збір → Класифікація → Дедуплікація → Аудит/резонансність
       💬 Моніторинг коментарів: Чати → Фільтрація → Прескрін → Тегування агентами
     JS у change_form ховає етапи чужого конвеєра (перемикач «Конвеєр» угорі)."""
     HEAVY_RELATIONS = [(Post, "task"), (Event, "task")]
-    list_display = ("name", "slug", "pipeline", "geo_enabled",
+    list_display = ("name", "slug", "owner", "pipeline", "geo_enabled",
                     "is_active", "drop_linked_comments", "monitor_chats_count")
     list_filter = ("pipeline", "is_active", "drop_linked_comments")
     prepopulated_fields = {"slug": ("name",)}
@@ -917,7 +1037,8 @@ class AnalysisTaskAdmin(FastDeleteAdminMixin, admin.ModelAdmin):
             stages = self._FS_INFOSPACE
         else:
             stages = self._FS_EVENTS
-        return self._FS_HEAD + stages
+        head = self._inject_owner_fieldset(request, self._FS_HEAD)
+        return tuple(head) + stages
 
     @admin.display(description="Чати моніт.")
     def monitor_chats_count(self, obj):
@@ -2673,11 +2794,13 @@ class EventAdmin(admin.ModelAdmin):
         analysis/services/infospace/report.py."""
         from django.http import HttpResponse
         from analysis.services.infospace import report
+        from analysis.services import llm
         events = list(queryset.select_related("region_subject").order_by("event_date", "id"))
         if not events:
             self.message_user(request, "Не обрано подій.", level=messages.WARNING)
             return
-        sentences = report.generate_digest_sentences(events)
+        sentences = report.generate_digest_sentences(
+            events, api_key=llm.key_for_user(request.user))
         rows = [sentences.get(e.id) or report._clean_sentence(e.summary or "")
                 for e in events]
         rows = [r for r in rows if r]
@@ -2749,6 +2872,9 @@ class EventAdmin(admin.ModelAdmin):
         from django.db.models import Case, CharField, Max, Value, When
         from django.db.models.functions import Concat
         qs = super().get_queryset(request).prefetch_related("posts__channel", "tags")
+        # Ізоляція: не-суперюзер бачить лише події СВОЇХ задач (Event.task__owner).
+        if not request.user.is_superuser:
+            qs = qs.filter(task__owner=request.user)
         # Ключ сортування колонки «Теги»: важливість_N спереду (домінує), далі всі
         # інші теги за абеткою. Події без важливості («яяя») — у кінець (ASC).
         # StringAgg — Postgres; агрегати всередині Concat → GROUP BY по події.
@@ -2851,3 +2977,32 @@ class EventAdmin(admin.ModelAdmin):
             '<a href="{}" target="_blank" rel="noopener">{}</a> — {} (👥 {})',
             ((p.url, p.url, p.channel_name or "приватний", subs_label(p)) for p in posts),
         )
+
+
+# --- Персональний OpenRouter-ключ юзера: інлайн на сторінці користувача ------
+from django.contrib.auth import get_user_model as _get_user_model  # noqa: E402
+from django.contrib.auth.admin import UserAdmin as _DjangoUserAdmin  # noqa: E402
+
+
+class UserProfileInline(admin.StackedInline):
+    """OpenRouter-ключ юзера прямо на його сторінці. min_num=1 → форма є завжди
+    (створює профіль, якщо його ще немає)."""
+    model = UserProfile
+    can_delete = False
+    min_num = 1
+    max_num = 1
+    extra = 0
+    verbose_name_plural = "OpenRouter API-ключ (для задач/публікацій/звітів)"
+    fields = ("openrouter_key",)
+
+
+_User = _get_user_model()
+try:
+    admin.site.unregister(_User)
+except admin.sites.NotRegistered:
+    pass
+
+
+@admin.register(_User)
+class UserWithKeyAdmin(_DjangoUserAdmin):
+    inlines = [UserProfileInline]

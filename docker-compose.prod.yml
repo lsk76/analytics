@@ -20,14 +20,19 @@ x-worker: &worker
 services:
   db:
     image: postgres:16-alpine
+    # 1GB /dev/shm: важкі хеш-агрегації над мультимільйонною Post (адмін-графіки,
+    # матриця) інакше спилялись з "No space left on device" на дефолтних 64MB.
+    shm_size: "1gb"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tg_events}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
+    # БД НЕ публікуємо в інтернет. Доступ лише всередині compose-мережі.
+    # Для локального дебагу через SSH-тунель — bind на loopback хоста:
+    # ports:
+    #   - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tg_events}"]
       interval: 5s
@@ -46,9 +51,11 @@ services:
     command: >
       sh -c "python manage.py collectstatic --noinput &&
              python manage.py migrate &&
-             gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+             gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
+    # Bind лише на loopback хоста — назовні gunicorn НЕ світиться, його проксіює
+    # nginx (TLS-термінація). У фаєрволі відкриті тільки 80/443, не 8001.
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     depends_on:
       db:
         condition: service_healthy

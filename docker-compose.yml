@@ -78,5 +78,11 @@ services:
   worker-info-retention:   { <<: *worker, command: python manage.py run_worker --stage info_retention --interval 3600 }
   worker-info-healthcheck: { <<: *worker, command: python manage.py run_worker --stage info_healthcheck --interval 3600 }
 
+  # --- publish worker (approved-Event → AI-фільтр+рерайт → Telegram Bot API) --
+  # TASKLESS: ітерує активні PublishConfig-профілі. ОДНА репліка (пейсинг
+  # відправок у канал; кілька реплік дублювали б throttle). Потребує
+  # TELEGRAM_BOT_TOKEN в env (або bot_token на профілі).
+  worker-publish:        { <<: *worker, command: python manage.py run_worker --stage publish --interval 30 }
+
 volumes:
   pgdata:

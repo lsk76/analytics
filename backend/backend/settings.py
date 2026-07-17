@@ -52,6 +52,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",  # X-Frame-Options: DENY
 ]
 
 ROOT_URLCONF = "backend.urls"
@@ -93,7 +94,36 @@ else:
         }
     }
 
-AUTH_PASSWORD_VALIDATORS = []
+# Адмінка дивиться у відкритий інтернет → вимагаємо сильні паролі адмінів
+# (перевіряється на createsuperuser / changepassword / зміні пароля в адмінці).
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+     "OPTIONS": {"min_length": 12}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# --- Prod hardening (лише коли DEBUG=false, тобто за nginx+TLS) --------------
+# Всі — env-tunable, щоб dev/тести не ламались. Вмикаються автоматично в prod.
+if not DEBUG:
+    # Куки лише по HTTPS (сесія адміна не піде відкритим HTTP).
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    # Редирект http→https на рівні Django (дублює nginx-редирект як страхування).
+    SECURE_SSL_REDIRECT = os.getenv("DJANGO_SSL_REDIRECT", "true").lower() == "true"
+    # HSTS: браузер сам форсить https. Вмикай ПІСЛЯ того, як TLS точно працює
+    # (інакше на помилковому сертифікаті домен «залипне» на https). Рік + сабдомени.
+    SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    # За проксі реальний IP клієнта — у X-Forwarded-For (nginx проставляє).
+    USE_X_FORWARDED_HOST = True
+    # Не світити referer на сторонні хости з адмінки.
+    SECURE_REFERRER_POLICY = "same-origin"
+
 LANGUAGE_CODE = "uk"
 TIME_ZONE = "UTC"
 USE_I18N = True
@@ -128,6 +158,11 @@ TELEZIP_MAX_CONCURRENCY = int(os.getenv("TELEZIP_MAX_CONCURRENCY", "2"))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_API_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
+
+# --- Telegram publishing (publish-конвеєр) ---
+# Дефолтний bot token для публікації подій у канал; PublishConfig.bot_token
+# може перекрити пер-профіль. Бот має бути адміном цільового каналу.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # --- Logging ---
 # Stage workers are long-lived; their per-tick progress goes through the

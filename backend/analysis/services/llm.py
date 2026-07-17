@@ -10,24 +10,38 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 
-def make_client() -> AsyncOpenAI:
+def make_client(api_key: Optional[str] = None) -> AsyncOpenAI:
     """One client per asyncio.run — pass it to many query() calls, then close it.
+
+    api_key: персональний ключ юзера; порожньо → глобальний settings.OPENROUTER_API_KEY.
 
     max_retries=0: the SDK's default (2) silently triples the wall-clock of a bad
     call (each attempt waits the full timeout) and, on a flapping VPN, made dedup
     workers appear wedged for minutes. Callers tolerate a "" reply and retry on the
     next tick, so failing fast is strictly better than retrying inside a hung socket."""
     return AsyncOpenAI(
-        api_key=settings.OPENROUTER_API_KEY,
+        api_key=(api_key or "").strip() or settings.OPENROUTER_API_KEY,
         base_url=settings.OPENROUTER_API_BASE_URL,
         max_retries=0,
     )
 
 
+def key_for_user(user) -> Optional[str]:
+    """OpenRouter-ключ конкретного юзера (UserProfile.openrouter_key) або None →
+    фолбек на глобальний ключ у make_client. Так задачі/публікації/звіти юзера
+    ходять під його ключем, а «нічиї» — під глобальним."""
+    if user is None:
+        return None
+    prof = getattr(user, "profile", None)
+    key = (getattr(prof, "openrouter_key", "") or "").strip() if prof else ""
+    return key or None
+
+
 async def query(messages: List[dict], model: Optional[str] = None, timeout: float = 120.0,
                 client: Optional[AsyncOpenAI] = None,
                 max_tokens: int = 2000,
-                json_mode: bool = False) -> str:
+                json_mode: bool = False,
+                api_key: Optional[str] = None) -> str:
     """Send a chat completion. `max_tokens` defaults to 2000 — large enough for
     classify batches and audit verdicts, while avoiding OpenRouter's 402 error
     ("requested up to N tokens but can only afford M") that fires when the model's
@@ -41,7 +55,7 @@ async def query(messages: List[dict], model: Optional[str] = None, timeout: floa
     model = model or settings.LLM_MODEL
     own = client is None
     if own:
-        client = make_client()
+        client = make_client(api_key)
     try:
         kwargs = dict(model=model, messages=messages, timeout=timeout,
                       max_tokens=max_tokens)

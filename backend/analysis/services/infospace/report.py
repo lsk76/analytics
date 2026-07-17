@@ -67,13 +67,13 @@ def _clean_sentence(s: str) -> str:
     return _round_quotes(s + ";") if s else ""
 
 
-async def _agen(events, model):
+async def _agen(events, model, system, api_key=None):
     payload = [{"id": e.id, "summary": (e.summary or "")[:800]} for e in events]
     user = "НОВИНИ:\n" + json.dumps(payload, ensure_ascii=False)
     raw = await llm.query(
-        [{"role": "system", "content": DIGEST_PROMPT},
+        [{"role": "system", "content": system},
          {"role": "user", "content": user}],
-        model=model, json_mode=True, max_tokens=4000)
+        model=model, json_mode=True, max_tokens=4000, api_key=api_key)
     data = llm.extract_json(raw) or {}
     out = {}
     for it in (data.get("items") or []):
@@ -84,14 +84,18 @@ async def _agen(events, model):
     return out
 
 
-def generate_digest_sentences(events, model=None):
-    """{event_id: sentence} у стилі зведення. Порожній рядок — якщо LLM не дав."""
+def generate_digest_sentences(events, model=None, api_key=None):
+    """{event_id: sentence} у стилі зведення. Порожній рядок — якщо LLM не дав.
+    Промпт — з таблиці Setting['digest_report_prompt'] (порожньо = DIGEST_PROMPT).
+    api_key — ключ юзера, що генерує звіт (порожньо = глобальний)."""
+    from analysis.models import Setting
     events = list(events)
     model = model or settings.LLM_MODEL
+    system = Setting.get("digest_report_prompt", DIGEST_PROMPT)
     out = {}
     for i in range(0, len(events), BATCH):
         try:
-            out.update(asyncio.run(_agen(events[i:i + BATCH], model)))
+            out.update(asyncio.run(_agen(events[i:i + BATCH], model, system, api_key)))
         except Exception as e:  # noqa: BLE001 — не валимо весь звіт через один батч
             logger.warning("digest batch %d: %r", i, e)
     return out

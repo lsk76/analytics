@@ -234,12 +234,13 @@ def _build_screen_prompt(task):
     return "\n".join(lines)
 
 
-async def _llm_screen(posts, system, model):
+async def _llm_screen(posts, system, model, api_key=None):
     """→ {post_id: (parsed|None, was_empty)}. was_empty=True — LLM віддав ""
     (транзієнт: таймаут/рейт-ліміт), НЕ битий JSON; стадія пере-черговує його
     без інкременту спроб. Конкурентність 3 (gemini-flash на OpenRouter
-    рейт-лімітить при 6 — ловили масові порожні відповіді)."""
-    client = llm.make_client()
+    рейт-лімітить при 6 — ловили масові порожні відповіді).
+    api_key — ключ власника задачі (порожньо = глобальний)."""
+    client = llm.make_client(api_key)
     sem = asyncio.Semaphore(3)
 
     async def one(p):
@@ -265,7 +266,7 @@ def info_screen_once(task):
     model = task.info_screen_model or task.llm_model or settings.LLM_MODEL
     posts = list(Post.objects.filter(id__in=ids).order_by("posted_at", "id"))
     system = _build_screen_prompt(task)
-    verdicts = asyncio.run(_llm_screen(posts, system, model))
+    verdicts = asyncio.run(_llm_screen(posts, system, model, llm.key_for_user(task.owner)))
 
     decided, screened, bad, transient = [], [], [], []
     for p in posts:
@@ -376,7 +377,8 @@ def info_event_once(task):
             raw = asyncio.run(llm.query(
                 [{"role": "system", "content": system},
                  {"role": "user", "content": user}],
-                model=(task.llm_model or None), json_mode=True, max_tokens=800))
+                model=(task.llm_model or None), json_mode=True, max_tokens=800,
+                api_key=llm.key_for_user(task.owner)))
             verdict = llm.extract_json(raw)
 
         ev = None
