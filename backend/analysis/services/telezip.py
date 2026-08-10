@@ -4,6 +4,53 @@ Lean async TeleZip Search API client (v3) — collection + channel metadata.
 Only the bits the pipeline needs:
   * find_posts() — POST /Find with unique + language filter (returns all matches)
   * get_channel() — GET /Channels by id (is_channel flag + title/about for region fallback)
+
+================================================================================
+QUERY SYNTAX (the `searchTerm` string / AnalysisTask.telezip_query)
+================================================================================
+`searchTerm` uses the `/find text=` dialect of the TeleZip bot (NOT the `/messages`
+site dialect, whose operators are inverted). Source: the official "TeleZip v2"
+guide + the live, battle-tested query on task=1 (`ethnic-clashes`). Verified
+2026-08-10.
+
+Operators (default operator between terms is OR):
+  space | `|`  OR   — `дрон FPV` == `дрон | FPV`   → дрон OR FPV (default when none)
+  `+`          AND  — `+термін` / `+(a b)`          → term/group REQUIRED (ANDed in)
+  `-`          NOT  — `-mavic` / `-"сектор газа"`   → exclude; write it ATTACHED, no space
+  ( … )             — grouping / precedence: `дрон +(тасс -риа)`
+  word              — matches ALL word-forms/declensions of the lemma, no wildcard:
+                      `дрон` → дрон/дрона/дрону/дронах; `депутат` → депутата/депутатов/…
+                      (so listing declensions by hand is redundant).
+  слово*            — PREFIX search — `дрон*` → дрон, дронников (any continuation).
+                      Use for word FAMILIES across parts of speech:
+                      `мобилиз*` → мобилизация / мобилизационный / мобилизовать.
+                      A bare stem like `мобилизаци` (task=1 style) is NOT a documented
+                      form — prefer a real word (declensions) or `*` (prefix).
+  "фраза"           — phrase; word-forms STILL apply — `"дрон FPV"` hits «дроны-FPV».
+  "a b"~N           — proximity: a & b within N words, any order; write `~N` with NO space.
+  exact="…"         — literal, NO declensions (abbreviations / model codes, e.g. "сво").
+                      NOTE: this lean client sends only `searchTerm` (text= mode); it does
+                      NOT send exact=/channeltext=/regex=. Add them upstream if needed.
+
+Proven shape (task=1) — TOPIC ∧ ACTION, minus noise:
+  (мигрант диаспora "лицо кавказской" …) +(драка избил напал "с ножом" …) -(всу фронт военкомат …)
+  ⇒ (any topic term) AND (any action term) NOT (any excluded term). AND-logic is
+  what cuts keyword floods (task=1 pilot: 11 404 → 367 candidates).
+
+Rejection ("відлуп" — returns empty / errors) when a search:
+  * runs > 3 min, or  * matches > 300 000 messages, or  * hits > 10 000 channels,
+  * or has a malformed query.
+  → NARROW it: chunk the window by day (find_posts_range already halves heavy
+    windows), add a `+(…)` required group, or quote phrases. A bare topic term
+    over a long window across the whole index will trip this.
+
+Caveats
+  * Negation `-(…)` over a broad window is SLOW (500/timeout/429, ~68× slower) —
+    prefer positive `+(…)` filters and let the classifier drop the rest.
+  * `unique=true` (the `unique=` kwarg) dedups reposts of the same message.
+  * `languages=["ru"]` restricts to Russian; empty = no language filter.
+  * No `channelIds` here ⇒ the query runs over the WHOLE index (all channels).
+  Full guide: https://docs.google.com/document/d/1oKag8XfmpOnKapbkayRZzq8JHbpB8GaKvSgC1judnvg
 """
 import asyncio
 import logging
@@ -183,6 +230,9 @@ class TelezipClient:
                          channel_names: Optional[List[str]] = None,
                          ) -> List[Dict[str, Any]]:
         """Search /Find. Optionally restrict to a list of channel ids/usernames.
+
+        `query` uses the `/find text=` syntax — see this module's docstring
+        (space=OR, +=AND, -=NOT, "phrase", declension/prefix matching, limits).
 
         TeleZip API quirks (probed 2026-06):
           * `channelIds`   — array of int, case-insensitive key alias `ChannelIds`.

@@ -13,6 +13,7 @@ docs/infospace-monitoring-pipeline.md §5-§6.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import logging
 import random
@@ -38,6 +39,13 @@ LOCK_TIMEOUT = timedelta(minutes=20)
 SCREEN_TICK = 10           # постів на прохід скріну (кожен = 1 LLM-виклик)
 BACKOFF_CAP = timedelta(hours=6)
 JUDGE_TOPK = 5             # скільки кандидатів показувати судді
+
+# Жорсткий стеля на один fetch: підвисле мережеве з'єднання (half-open сокет,
+# VPN-дроп) інакше блокує весь ОДНОРЕПЛІКОВИЙ колектор назавжди (0% CPU, тиша).
+# Тут воно стає TimeoutError → бекоф джерела, воркер живий (див. _fetch_with_timeout).
+FETCH_TIMEOUT_SEC = 120
+_FETCH_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="info-fetch")
 FUZZY_FLOOR = 38           # мін. схожість (max від signature↔summary/↔signature)
                            # для кандидата; поріг РЕКОЛУ — точність вирішує суддя
 RETENTION_TICK = 1000      # постів на прохід чистки
@@ -140,11 +148,22 @@ def _fanout(source, items):
     return n_new, len(subs)
 
 
+def _fetch_with_timeout(source):
+    """fetch у окремому потоці з жорстким таймаутом. Зависле джерело → TimeoutError
+    (ловить `except Exception` у _poll_source → бекоф). Потік із мертвим сокетом
+    лишається, доки сокет сам не відвалиться — головний цикл іде далі, не блокуючись."""
+    fut = _FETCH_POOL.submit(get_adapter(source.kind).fetch, source)
+    try:
+        return fut.result(timeout=FETCH_TIMEOUT_SEC)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(f"fetch перевищив {FETCH_TIMEOUT_SEC}s — джерело підвисло")
+
+
 def _poll_source(source):
     """Полить ОДНЕ джерело (fetch + фан-аут + розклад/health). Спільне ядро
     info_collect_once і кнопки «Запустити зараз». Повертає к-сть НОВИХ постів."""
     try:
-        items = get_adapter(source.kind).fetch(source)
+        items = _fetch_with_timeout(source)
     except RateLimited as e:
         logger.info("info_collect: %s rate-limited, retry за %ss", source.name, e.retry_after)
         _schedule_rate_limited(source, e.retry_after)
