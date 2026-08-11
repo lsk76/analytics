@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.db import transaction, DatabaseError, IntegrityError
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone as djtz
 
 from analysis.models import Post, Event, Channel, CollectChunk
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 LOCK_TIMEOUT = timedelta(minutes=20)   # stale claim is reclaimable after this
 ENRICH_BATCH = 300
 CLASSIFY_GROUP_BATCH = 400             # group-reps per classify tick
+CLASSIFY_MAX_ATTEMPTS = 4              # скільки разів повторювати батч без вердикту LLM
 PRECLUSTER_WINDOW_DAYS = 1             # each precluster tick claims this many days of posts.
                                        # Even with cdist-vectorised fuzzy, the matrix is N²:
                                        # measured 5k posts/day @ avg 841-char texts → ~30s/tick
@@ -583,7 +584,13 @@ def classify_once(task):
     text_batches = [[p.text for p in b] for b in batches]
     results = asyncio.run(P._classify_batches(build_classify_prompt(task), text_batches,
                                               task.llm_model or None))
+    # Батч, який НЕ повернув вердикт (мережевий збій/таймаут LLM), НЕ вважається
+    # опрацьованим: інакше пости тихо лягають як is_relevant=False назавжди
+    # (одноразовий Connection error → мовчазна втрата половини місяця).
+    # Такі групи лишаємо на STAGE_PRECLUSTERED зі stage_error — воркер добере їх
+    # наступним проходом, а збій видно в адмінці.
     rep_cls = {}
+    failed_groups = set()
     for bi, batch in enumerate(batches):
         arr = results.get(bi) or []
         by_i = {}
@@ -591,11 +598,18 @@ def classify_once(task):
             if isinstance(obj, dict):
                 by_i[obj.get("i", k)] = obj
         for j, rep in enumerate(batch):
-            cls = by_i.get(j, {})
+            cls = by_i.get(j)
+            if not isinstance(cls, dict) or "is_relevant" not in cls:
+                failed_groups.add(rep.dedup_group)
+                continue
             cls.pop("i", None)
             rep_cls[rep.dedup_group] = cls
 
+    done_posts, retry_ids = [], []
     for gkey, members in groups.items():
+        if gkey in failed_groups:
+            retry_ids.extend(p.id for p in members)
+            continue
         cls = rep_cls.get(gkey, {})
         for p in members:
             c = dict(cls)
@@ -605,10 +619,32 @@ def classify_once(task):
             p.classification = c
             p.is_classified = True
             p.is_relevant = bool(c.get("is_relevant"))
-    Post.objects.bulk_update(posts, ["classification", "is_classified", "is_relevant"],
+            done_posts.append(p)
+    Post.objects.bulk_update(done_posts, ["classification", "is_classified", "is_relevant"],
                              batch_size=500)
-    _advance(ids, Post.STAGE_CLASSIFIED)
-    logger.info("classify: %d groups / %d posts", len(groups), len(posts))
+    _advance([p.id for p in done_posts], Post.STAGE_CLASSIFIED)
+    if retry_ids:
+        Post.objects.filter(id__in=retry_ids).update(
+            stage=Post.STAGE_PRECLUSTERED, stage_locked_at=None,
+            stage_attempts=F("stage_attempts") + 1,
+            stage_error="classify: LLM не повернув вердикт — батч на повтор")
+        # Після CLASSIFY_MAX_ATTEMPTS припиняємо крутити той самий батч (інакше
+        # стабільно зламаний пост палить LLM-виклики вічно). Пост іде далі як
+        # нерелевантний, АЛЕ зі stage_error — втрата лишається видимою, не тихою.
+        stuck = list(Post.objects.filter(id__in=retry_ids,
+                                         stage_attempts__gte=CLASSIFY_MAX_ATTEMPTS)
+                     .values_list("id", flat=True))
+        if stuck:
+            Post.objects.filter(id__in=stuck).update(
+                stage=Post.STAGE_CLASSIFIED, is_classified=True, is_relevant=False,
+                stage_locked_at=None,
+                stage_error=f"classify: без вердикту після {CLASSIFY_MAX_ATTEMPTS} спроб")
+            logger.error("classify: %d постів здались після %d спроб — позначені "
+                         "нерелевантними зі stage_error", len(stuck), CLASSIFY_MAX_ATTEMPTS)
+        logger.warning("classify: %d постів (%d груп) без вердикту LLM → на повтор",
+                       len(retry_ids) - len(stuck), len(failed_groups))
+    logger.info("classify: %d groups / %d posts", len(groups) - len(failed_groups),
+                len(done_posts))
     return True
 
 
