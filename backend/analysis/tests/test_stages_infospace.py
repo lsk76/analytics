@@ -138,7 +138,7 @@ def _mk_post(task, **kw):
 
 def _fake_screen(verdicts, empty_ids=()):
     # _llm_screen тепер повертає {id: (parsed|None, was_empty)}
-    async def _run(posts, system, model):
+    async def _run(posts, system, model, api_key=None):   # api_key — ключ власника задачі
         return {p.id: (verdicts.get(p.id), p.id in empty_ids) for p in posts}
     return _run
 

@@ -13,11 +13,11 @@ from datetime import datetime, timezone
 
 import feedparser
 
-from ..utils import canonical_url
+from ..utils import DEFAULT_USER_AGENT, canonical_url, http_options
 from . import register
 from .base import BaseSourceAdapter, RawItem
 
-USER_AGENT = "tg-event-analytics infospace monitor (+https://example.org/bot)"
+USER_AGENT = DEFAULT_USER_AGENT
 SEEN_CAP = 400  # скільки останніх guid тримати у watermark
 MIN_RSS_BODY = 200  # якщо тіло з RSS коротше і config.full_text — дотягуємо статтю
 
@@ -30,13 +30,41 @@ def _strip_html(s: str) -> str:
     return HTMLParser(s).text(separator=" ", strip=True)
 
 
-def _fetch_full_text(url: str) -> str:
+def _fetch_full_text(url: str, opts: dict | None = None) -> str:
     """Дотягнути повний текст статті за посиланням (trafilatura, реюз web-адаптера)."""
     from .web import WebAdapter, _get
     try:
-        return (WebAdapter._extract_trafilatura(_get(url)) or {}).get("text") or ""
+        return (WebAdapter._extract_trafilatura(_get(url, opts)) or {}).get("text") or ""
     except Exception:  # noqa: BLE001 — не валимо весь полінг через одну статтю
         return ""
+
+
+def _fetch_via_httpx(url: str, opts: dict, poll_cursor: dict):
+    """Умовний GET стрічки через httpx (шлях для джерел із проксі/заголовками:
+    feedparser сам ходити через проксі не вміє). Повертає feedparser-результат
+    із проставленими .status/.etag/.modified — далі код спільний із дефолтним
+    шляхом. 304 → d.status=304, тіло не парситься."""
+    import httpx
+
+    headers = dict(opts.get("headers") or {})
+    if poll_cursor.get("etag"):
+        headers["If-None-Match"] = poll_cursor["etag"]
+    if poll_cursor.get("modified"):
+        headers["If-Modified-Since"] = poll_cursor["modified"]
+    r = httpx.get(url, headers=headers, timeout=30.0, follow_redirects=True,
+                  proxy=opts.get("proxy"))
+    if r.status_code == 304:
+        d = feedparser.util.FeedParserDict(entries=[], feed={}, bozo=0)
+        d.status = 304
+        return d
+    r.raise_for_status()
+    d = feedparser.parse(r.content)
+    d.status = r.status_code
+    if r.headers.get("etag"):
+        d.etag = r.headers["etag"]
+    if r.headers.get("last-modified"):
+        d.modified = r.headers["last-modified"]
+    return d
 
 
 def _entry_id(e) -> str:
@@ -60,12 +88,17 @@ class RssAdapter(BaseSourceAdapter):
     def fetch(self, source) -> list[RawItem]:
         poll_cursor = dict(source.poll_cursor or {})
         first_poll = not poll_cursor
-        d = feedparser.parse(
-            source.url,
-            etag=poll_cursor.get("etag"),
-            modified=poll_cursor.get("modified"),
-            agent=USER_AGENT,
-        )
+        opts = http_options(source)
+        cfg = source.config or {}
+        if opts.get("proxy") or cfg.get("headers") or cfg.get("user_agent"):
+            d = _fetch_via_httpx(source.url, opts, poll_cursor)
+        else:
+            d = feedparser.parse(
+                source.url,
+                etag=poll_cursor.get("etag"),
+                modified=poll_cursor.get("modified"),
+                agent=USER_AGENT,
+            )
         # feedparser кладе HTTP-статус у d.status; 304 = не змінилось
         if getattr(d, "status", None) == 304:
             return []
@@ -97,9 +130,9 @@ class RssAdapter(BaseSourceAdapter):
             # full_text ДЕФОЛТНО увімкнено: якщо тіло з RSS тонке — дотягуємо
             # статтю за лінком (для повних фідів це no-op). Вимкнути: config
             # {"full_text": false}.
-            if ((source.config or {}).get("full_text", True) and len(body) < MIN_RSS_BODY
+            if (cfg.get("full_text", True) and len(body) < MIN_RSS_BODY
                     and link.startswith("http")):
-                body = _fetch_full_text(link) or body
+                body = _fetch_full_text(link, opts) or body
             items.append(RawItem(
                 external_id=eid, url=link, title=title, text=body,
                 posted_at=_entry_dt(e), author=(getattr(e, "author", "") or "").strip(),

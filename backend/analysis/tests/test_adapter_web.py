@@ -26,7 +26,7 @@ class _Src:
 
 
 def _fake_get(pages, not_found=()):
-    def _get(url):
+    def _get(url, opts=None):
         if url in not_found:
             raise httpx.HTTPStatusError("404", request=None, response=None)
         try:

@@ -148,6 +148,18 @@ class BaseSourceAdapter:
   випадок — кастомний клас у `SCRAPERS`). JS-rendered/анти-бот — поза Phase 1–2.
 - **vk** — зарезервовано (Phase 4).
 
+**HTTP-опції пер-джерело** (`utils.http_options`, працює для web і rss; telegram має
+власний транспорт). Усе з `Source.config`, без деплою:
+- `user_agent` — підмінити UA (сайти, що ріжуть ботів);
+- `headers` — довільні заголовки, напр. `{"Cookie": "beget=begetok"}` для beget-челенджу
+  (сайт віддає 274-байтовий JS-стаб замість сторінки — `riakchr.ru`);
+- `proxy` — `true` бере спільний URL із `Setting("infospace_proxy_url")` (адмінка →
+  Налаштування; фолбек — env `INFOSPACE_PROXY_URL`), або явний `http://user:pass@host:port`
+  пер-джерело. Для сайтів, що блокують IP сервера / гео-фільтрують (`mk-hakasia.ru`,
+  `primpress.ru`). Проксі-джерела rss тягнуться httpx-гілкою (`_fetch_via_httpx`,
+  умовний GET через `If-None-Match`/`If-Modified-Since`), бо feedparser не вміє проксі.
+  SOCKS5 потребує `httpx[socks]` — у requirements його нема, тож поки лише HTTP-проксі.
+
 ## 6. Стадії конвеєра
 
 ### `info_collect` — полінг джерел (по джерелах, не по задачах)

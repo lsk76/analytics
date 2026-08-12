@@ -26,13 +26,13 @@ import httpx
 from selectolax.parser import HTMLParser
 
 from ..scrapers import get_scraper
-from ..utils import canonical_url
+from ..utils import DEFAULT_USER_AGENT, canonical_url, http_options
 from . import register
 from .base import BaseSourceAdapter, RawItem
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "tg-event-analytics infospace monitor (+https://example.org/bot)"
+USER_AGENT = DEFAULT_USER_AGENT
 SEEN_CAP = 500
 HTTP_TIMEOUT = 20.0
 # Евристика дефолтного discovery: id статті — це прогін ≥4 цифр у href
@@ -45,10 +45,15 @@ _ARTICLE_ID = re.compile(r"\d{4,}")
 _NON_ARTICLE = re.compile(r"/(comments?|tags?|author|search|login|rss|feed|page)(/|$)")
 
 
-def _get(url: str) -> str:
-    """GET сторінки як текст (httpx сам визначає кодування, напр. windows-1251)."""
-    r = httpx.get(url, headers={"User-Agent": USER_AGENT},
-                  timeout=HTTP_TIMEOUT, follow_redirects=True)
+def _get(url: str, opts: dict | None = None) -> str:
+    """GET сторінки як текст (httpx сам визначає кодування, напр. windows-1251).
+
+    opts — {"headers", "proxy"} з utils.http_options(source): проксі й заголовки
+    задаються пер-джерело в Source.config (див. http_options).
+    """
+    o = opts or {}
+    r = httpx.get(url, headers=o.get("headers") or {"User-Agent": USER_AGENT},
+                  timeout=HTTP_TIMEOUT, follow_redirects=True, proxy=o.get("proxy"))
     r.raise_for_status()
     return r.text
 
@@ -146,7 +151,8 @@ class WebAdapter(BaseSourceAdapter):
     def fetch(self, source) -> list[RawItem]:
         poll_cursor = dict(source.poll_cursor or {})
         first_poll = not poll_cursor
-        listing = _get(source.url)                 # помилка лістингу → виняток
+        opts = http_options(source)                # проксі/заголовки з config
+        listing = _get(source.url, opts)           # помилка лістингу → виняток
         links = self._discover(source, listing)
         seen = set(poll_cursor.get("seen_ids") or [])
         limit = self.backfill_limit(source) if first_poll else self.max_items(source)
@@ -156,7 +162,7 @@ class WebAdapter(BaseSourceAdapter):
         done: list[str] = []   # у watermark лише УСПІШНО завантажені (див. рев'ю)
         for url in fresh:
             try:
-                art = _get(url)
+                art = _get(url, opts)
                 data = self._extract(source, url, art)
             except Exception as e:  # noqa: BLE001 — транзієнтний збій статті:
                 logger.warning("web.extract %s: %r", url, e)

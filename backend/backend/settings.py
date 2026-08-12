@@ -155,6 +155,11 @@ TELEZIP_BASE_URL = os.getenv("TELEZIP_BASE_URL", "https://api.telezip.net/v3")
 # Max CONCURRENT TeleZip requests (API allows very few). Enforced in TelezipClient.
 TELEZIP_MAX_CONCURRENCY = int(os.getenv("TELEZIP_MAX_CONCURRENCY", "2"))
 
+# Проксі для infospace-скрапінгу (сайти, що блокують IP сервера або віддають
+# контент лише з РФ). Використовується ЛИШЕ джерелами з config {"proxy": true};
+# явний рядок у config.proxy має пріоритет. Формат: http://user:pass@host:port
+INFOSPACE_PROXY_URL = os.getenv("INFOSPACE_PROXY_URL", "")
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_API_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
