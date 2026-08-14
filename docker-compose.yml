@@ -30,12 +30,15 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5433:5432"          # host 5433 (5432 is taken by pso)
+      # Лише loopback: публікація на 0.0.0.0 обходить UFW (docker пише свої
+      # DNAT-правила ПЕРЕД ufw), тож на сервері порт світився б в інтернет.
+      - "127.0.0.1:5433:5432"   # host 5433 (5432 is taken by pso)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tg_events}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   web:
     build: .
@@ -47,10 +50,13 @@ services:
     volumes:
       - ./backend:/app/backend   # live code reload
     ports:
-      - "8001:8000"          # host 8001 (8000 is taken by pso)
+      # Лише loopback (див. коментар у db): назовні gunicorn/runserver не
+      # світиться, його проксіює nginx з TLS і rate-limit на /admin/login/.
+      - "127.0.0.1:8001:8000"   # host 8001 (8000 is taken by pso)
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
 
   # --- stage workers (reuse the web image) ----------------------------------
   worker-collect:    { <<: *worker, command: python manage.py run_worker --stage collect }
