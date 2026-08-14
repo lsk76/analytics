@@ -32,6 +32,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from analysis.models import AnalysisTask, Post
 from analysis.pilot.prompts import TAGGER_SYSTEM_PROMPT
+from analysis.services.monitor_stages import _post_region
 
 
 class Command(BaseCommand):
@@ -40,7 +41,9 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--task", required=True)
         parser.add_argument("--region", default="",
-                            help="Region label for context inside each batch.")
+                            help="Перебити регіон-контекст у батчах одним значенням. "
+                                 "Порожньо (типово) — регіон КОЖНОГО поста зі свого "
+                                 "region_subject: задача може накривати багато регіонів.")
         parser.add_argument("--out-dir", required=True,
                             help="Where to write batch_<NNN>.json files.")
         parser.add_argument("--batch-size", type=int, default=50)
@@ -71,7 +74,7 @@ class Command(BaseCommand):
         out.mkdir(parents=True, exist_ok=True)
 
         qs = (Post.objects.filter(task=task)
-              .select_related("channel")
+              .select_related("channel", "region_subject", "channel__region_subject")
               .exclude(text=""))
 
         if opts["date_from"]:
@@ -112,7 +115,11 @@ class Command(BaseCommand):
             buf.append({
                 "id": p.id,
                 "chat": (p.channel.username if p.channel else "") or p.channel_name,
-                "region": region or (p.channel.inferred_region if p.channel else ""),
+                # канонічний FK суб'єкта; inferred_region (сирий текст із назви
+                # каналу) — лише останній резерв. --region перебиває все: одна
+                # задача може накривати десятки регіонів, тоді його не задають.
+                "region": region or _post_region(
+                    p, p.channel.inferred_region if p.channel else ""),
                 "text": (p.text or "").strip(),
             })
             if len(buf) >= bsz:

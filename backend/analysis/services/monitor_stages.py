@@ -167,9 +167,25 @@ def _parse_object(text: str):
 
 
 def _region_of(task) -> str:
-    """Регіональний ключ для pilot.filters та контексту tagger'а.
-    Конвенція: slug починається з регіону ('dagestan-criticism-monitor')."""
+    """Регіональний ключ для pilot.filters (REGIONAL_PATTERNS).
+    Конвенція: slug починається з регіону ('dagestan-criticism-monitor').
+    Для контексту tagger'а НЕ годиться — див. _post_region."""
     return (task.slug or "").split("-")[0]
+
+
+def _post_region(post, fallback: str = "") -> str:
+    """Регіон КОНКРЕТНОГО поста — контекст для tagger'а.
+
+    Одна задача більше не означає один регіон: fedcrit-sib-dv накриває 20 регіонів
+    СФО/ДФО, і slug-конвенція давала моделі однаковий безглуздий рядок ('fedcrit')
+    на всі коментарі. Регіон важливий: правило «безадресні „власти“ = регіональна
+    влада» без нього не працює."""
+    if post.region_subject_id:
+        return post.region_subject.name
+    ch = post.channel
+    if ch and ch.region_subject_id:
+        return ch.region_subject.name
+    return fallback
 
 
 def _claim(task, stage, limit):
@@ -388,7 +404,13 @@ def mon_filter_once(task):
     n_kept = n_drop = 0
     for p in posts:
         text = p.text or ""
-        if len(text) < min_len:
+        if p.is_channel_repost:
+            # Автопересилка поста каналу в групу обговорень (анкер, під яким пишуть
+            # коментарі) — не думка людини. У групі новинного каналу таких до 99%,
+            # тому відсіюємо ТУТ, до платного prescreen. Довжина не рятує: короткий
+            # анкер проходить під max_len і йде в LLM.
+            reason = ("channel_repost", "автопересилка поста каналу, не репліка людини")
+        elif len(text) < min_len:
             reason = ("too_short", f"len<{min_len}")
         elif len(text) >= max_len:
             reason = ("too_long", f"len≥{max_len} — likely a post, not a comment")
@@ -492,7 +514,7 @@ def mon_prescreen_once(task):
 
 # --------------------------------------------------------------------------- mon_tag
 
-async def _llm_tag(batches, region, model, system):
+async def _llm_tag(batches, fallback_region, model, system):
     sem = asyncio.Semaphore(TAG_CONCURRENCY)
     client = llm.make_client()
     out = {}
@@ -509,7 +531,8 @@ async def _llm_tag(batches, region, model, system):
             for p in batch:
                 chat = (p.channel.username if p.channel else "") or p.channel_name
                 txt = (p.text or "").strip().replace("\n", " ")[:1500]
-                lines.append(f"[id={p.id}] chat=@{chat or '-'} | region={region}\n{txt}")
+                reg = _post_region(p, fallback_region)
+                lines.append(f"[id={p.id}] chat=@{chat or '-'} | region={reg or '-'}\n{txt}")
             user = ("\n\n".join(lines) +
                     "\n\nУ КОЖНОМУ елементі items ОБОВ'ЯЗКОВО додай поле "
                     '"id" = число з [id=...] відповідного коментаря.')
@@ -556,12 +579,16 @@ def mon_tag_once(task):
     if not ids:
         return False
     model = task.llm_model or settings.LLM_MODEL
-    region = _region_of(task)
+    # region_subject обох рівнів — у select_related ОБОВ'ЯЗКОВО: _post_region читає
+    # їх уже в async-контексті (_llm_tag), де лінива підвантажка FK впала б із
+    # SynchronousOnlyOperation.
     posts = list(Post.objects.filter(id__in=ids)
-                 .select_related("channel").order_by("posted_at", "id"))
+                 .select_related("channel", "region_subject",
+                                 "channel__region_subject")
+                 .order_by("posted_at", "id"))
     batches = [posts[i:i + TAG_SUB] for i in range(0, len(posts), TAG_SUB)]
     system = task.tagger_prompt or TAGGER_SYSTEM_PROMPT
-    verdicts = asyncio.run(_llm_tag(batches, region, model, system))
+    verdicts = asyncio.run(_llm_tag(batches, _region_of(task), model, system))
 
     done, missing = [], []
     n_rel = 0
