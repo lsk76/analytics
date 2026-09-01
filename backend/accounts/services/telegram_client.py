@@ -58,6 +58,10 @@ class TelegramUserClient:
         return TelegramClient(
             StringSession(account.session_string or ""),
             int(account.api_id), account.api_hash, proxy=proxy,
+            # Відбиток пристрою імпортованої сесії. Без нього Telethon підставить
+            # свій дефолт, і в «Активних сесіях» акаунта пристрій СТРИБНЕ — для
+            # Telegram це ознака вкраденої сесії. Порожні поля = дефолти Telethon.
+            **account.client_kwargs(),
         )
 
     # ---- auth (code flow) ----

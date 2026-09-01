@@ -45,7 +45,8 @@ from analysis.models import AnalysisTask, Post, Tag
 from analysis.services.monitor_stages import sync_comment_event
 
 
-VALID_CATEGORIES = {"criticism_target", "topic", "opinion"}
+VALID_CATEGORIES = {"criticism_target", "topic", "opinion", "fed_crit"}
+FED_CRIT_YES = "критика_фед_влади"      # головна вісь задач із категорією fed_crit
 
 
 class Command(BaseCommand):
@@ -142,9 +143,16 @@ class Command(BaseCommand):
                         "_ingest_batch": data.get("meta", {}).get("batch_id"),
                     }
                     post.is_classified = True
-                    # is_relevant: True if any criticism_target found
-                    cl_targets = verdict.get("criticism_target") or []
-                    post.is_relevant = bool(cl_targets)
+                    # is_relevant. Дві схеми, розрізняються вердиктом:
+                    #   fed_crit  — бінарна вісь «критика фед. влади / інше»
+                    #               (решта тегів лишається деталізацією);
+                    #   інакше    — стара схема: будь-який criticism_target.
+                    fed = verdict.get("fed_crit")
+                    if fed is not None:
+                        vals = fed if isinstance(fed, list) else [fed]
+                        post.is_relevant = FED_CRIT_YES in [str(v).strip() for v in vals]
+                    else:
+                        post.is_relevant = bool(verdict.get("criticism_target") or [])
                     post.classification = cl
                     post.save(update_fields=["classification", "is_classified",
                                              "is_relevant"])

@@ -97,9 +97,38 @@ class TelegramAccount(models.Model):
         related_name="accounts", verbose_name="Проксі",
     )
     is_active = models.BooleanField(default=True, verbose_name="Активний")
+
+    # --- відбиток клієнта (для імпортованих сесій) ---
+    # Telegram показує ці значення у «Активних сесіях» акаунта і помічає, коли
+    # вони змінюються. Для сесії, створеної іншим клієнтом, треба передавати ТІ САМІ
+    # значення, інакше пристрій «стрибне» на дефолтний Telethon. Порожньо = дефолти Telethon.
+    device_model = models.CharField(
+        max_length=100, blank=True, verbose_name="Модель пристрою",
+        help_text="Напр. «Lenovo G50-80». Порожньо — дефолт Telethon.",
+    )
+    system_version = models.CharField(
+        max_length=64, blank=True, verbose_name="Версія ОС",
+        help_text="Напр. «Windows 10».",
+    )
+    app_version = models.CharField(
+        max_length=64, blank=True, verbose_name="Версія застосунку",
+        help_text="Напр. «3.4.3 x64».",
+    )
+    lang_code = models.CharField(max_length=8, blank=True, verbose_name="Мова клієнта")
+    system_lang_code = models.CharField(max_length=8, blank=True, verbose_name="Мова системи")
+
     last_used_at = models.DateTimeField(null=True, blank=True, verbose_name="Останнє використання")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
+
+    def client_kwargs(self) -> dict:
+        """Непорожні device-параметри для TelegramClient (порожні — дефолти Telethon)."""
+        pairs = (("device_model", self.device_model),
+                 ("system_version", self.system_version),
+                 ("app_version", self.app_version),
+                 ("lang_code", self.lang_code),
+                 ("system_lang_code", self.system_lang_code))
+        return {k: v for k, v in pairs if v}
 
     class Meta:
         verbose_name = "Telegram акаунт"
