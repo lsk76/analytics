@@ -227,6 +227,29 @@ class AnalysisTask(models.Model):
         default=600, verbose_name="Фільтр: макс. довжина",
         help_text="Довші — найімовірніше пости/репости каналу, не коментарі людей.",
     )
+    prescreen_enabled = models.BooleanField(
+        default=True, verbose_name="Прескрін: увімкнено",
+        help_text="Дешевий «так/ні» відсів перед тегуванням. Він різав обсяг у 5-10 разів, "
+                  "коли на вході був СУЦІЛЬНИЙ потік. При ВИБІРКОВОМУ зборі обсяг і так "
+                  "малий, а recall прескріну ~85% — тобто кожен сьомий критичний коментар "
+                  "мовчки стає «нерелевантним» і занижує чисельник метрики. "
+                  "Для вибіркових задач вимикати.",
+    )
+    # --- конвеєр tgsearch: пошук у чатах через Telegram --------------------
+    search_terms = models.TextField(
+        blank=True, verbose_name="Слова пошуку (по одному в рядок)",
+        help_text="Telegram НЕ вміє OR — кожне слово це окремий запит до кожного чату. "
+                  "Тому сміттєві слова сюди класти дорого: вартість лінійна від їх "
+                  "кількості (слів × чатів запитів на прогін).",
+    )
+    search_days = models.PositiveSmallIntegerField(
+        default=7, verbose_name="Глибина пошуку, діб",
+    )
+    search_limit_per_term = models.PositiveSmallIntegerField(
+        default=100, verbose_name="Стеля влучень на слово",
+        help_text="У дуже жвавому чаті число влучень буде впертим у стелю — "
+                  "це «≥ стелі», а не точна кількість.",
+    )
     prescreen_model = models.CharField(
         max_length=100, blank=True, verbose_name="Прескрін: модель (OpenRouter)",
         help_text="Дешева модель для «так/ні» відсіву. Порожньо — дефолт із settings.",
@@ -326,11 +349,13 @@ class AnalysisTask(models.Model):
     PIPELINE_MONITOR = "monitor"
     PIPELINE_RESEARCH = "research"
     PIPELINE_INFOSPACE = "infospace"
+    PIPELINE_TGSEARCH = "tgsearch"
     PIPELINE_CHOICES = [
         (PIPELINE_EVENTS, "Події (enrich→precluster→classify→dedup)"),
         (PIPELINE_MONITOR, "Моніторинг думок (filter→prescreen→tag)"),
         (PIPELINE_RESEARCH, "Тематичне дослідження (канали→рубрики→агенти→дедуп)"),
         (PIPELINE_INFOSPACE, "Інформпростір (полінг джерел→скрін→жива подія)"),
+        (PIPELINE_TGSEARCH, "Пошук у чатах через Telegram (пошук→фільтр→теги→подія)"),
     ]
     pipeline = models.CharField(
         max_length=12, choices=PIPELINE_CHOICES, default=PIPELINE_EVENTS,
@@ -409,6 +434,69 @@ class Channel(models.Model):
         null=True, blank=True, verbose_name="Класифіковано (директорія)",
     )
 
+    # --- Гео до рівня населеного пункту ------------------------------------
+    settlement = models.CharField(
+        max_length=160, blank=True, db_index=True, verbose_name="Населений пункт",
+        help_text="Місто/райцентр, до якого прив'язаний канал. Той самий тип і назва, "
+                  "що в Event.settlement і RegionAlias.settlement — канонізація спільна.",
+    )
+
+    # --- Коментарі: чи є де писати людям ------------------------------------
+    comments_open = models.BooleanField(
+        null=True, blank=True, db_index=True, verbose_name="Коментарі відкриті",
+        help_text="Канал: має linked-групу обговорення. Чат: приймає повідомлення. "
+                  "None = ще не перевіряли (перевіряє Telethon, не TGStat).",
+    )
+    linked_chat = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="linked_from", verbose_name="Група обговорення",
+        help_text="Канал -> його linked-група (там і лежать коментарі). "
+                  "Зворотний бік звʼязку (група -> чий це канал) — related_name linked_from.",
+    )
+    participants_visible = models.BooleanField(
+        null=True, blank=True, verbose_name="Список учасників відкритий",
+        help_text="ChannelFull.can_view_participants: чи можна прочитати склад учасників.",
+    )
+
+    # --- Активність (пише крок замірів, не збір) ----------------------------
+    msgs_per_day = models.FloatField(
+        null=True, blank=True, verbose_name="Повідомлень/добу (сирих)",
+        help_text="З різниці id. УВАГА: рахує і автопересилки постів каналу.",
+    )
+    human_msgs_per_day = models.FloatField(
+        null=True, blank=True, verbose_name="Людських повідомлень/добу",
+        help_text="Без автопересилок каналу — головна метрика відбору джерела.",
+    )
+    last_post_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Останнє повідомлення",
+    )
+    activity_checked_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Активність міряли",
+    )
+
+    # --- Доступ --------------------------------------------------------------
+    ACCESS_CHOICES = [
+        ("public", "Публічний"), ("invite", "За інвайт-лінком"),
+        ("closed", "Закритий"), ("dead", "Мертвий/видалений"),
+    ]
+    access = models.CharField(
+        max_length=16, choices=ACCESS_CHOICES, blank=True, db_index=True,
+        verbose_name="Доступ",
+    )
+    invite_hash = models.CharField(
+        max_length=64, blank=True, verbose_name="Інвайт-лінк",
+    )
+    joined_by = models.ForeignKey(
+        "accounts.TelegramAccount", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="joined_channels", verbose_name="Резолвив/вступав акаунт",
+        help_text="Резолв кешується в сесії ТОГО акаунта, що резолвив, — читати чат "
+                  "треба ним же.",
+    )
+    check_error = models.CharField(
+        max_length=200, blank=True, verbose_name="Помилка перевірки",
+        help_text="Чому не вдалося: приватний, бан, немає історії, мертвий юзернейм.",
+    )
+
     class Meta:
         verbose_name = "Канал"
         verbose_name_plural = "Канали"
@@ -419,6 +507,7 @@ class Channel(models.Model):
         indexes = [
             models.Index(fields=["region_subject", "discusses_problems"]),
             models.Index(fields=["chat_type", "subscribers"]),
+            models.Index(fields=["settlement", "comments_open"]),
         ]
 
     def __str__(self):
@@ -631,6 +720,77 @@ class CollectChunk(models.Model):
 # Пости та події
 # ---------------------------------------------------------------------------
 
+class MonitorSample(models.Model):
+    """
+    Вікно вибіркового збору: один чат × один період.
+
+    Збираємо не суцільно, а ВИПАДКОВОЮ вибіркою id повідомлень у межах періоду.
+    Цей рядок — паспорт вибірки: межі id, скільки id запитали, скільки повернулось
+    і скільки з них із текстом. З нього рахується ЗНАМЕННИК метрики:
+
+        оцінка обсягу чату за період = (id_hi - id_lo) × (n_text / n_requested)
+
+    (частина id витрачається на службові події, видалені й медіа без тексту, тому
+    сирий діапазон id — лише верхня межа). Без цього рядка вибірка невідтворювана
+    і частку порахувати неможливо.
+    """
+    task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,
+                             related_name="samples", verbose_name="Задача")
+    channel = models.ForeignKey(Channel, on_delete=models.CASCADE,
+                                related_name="samples", verbose_name="Чат")
+    period_start = models.DateField(verbose_name="Початок періоду")
+    period_end = models.DateField(verbose_name="Кінець періоду")
+    id_lo = models.BigIntegerField(verbose_name="id на початку періоду")
+    id_hi = models.BigIntegerField(verbose_name="id у кінці періоду")
+    n_requested = models.PositiveIntegerField(default=0, verbose_name="Запитано id")
+    n_returned = models.PositiveIntegerField(default=0, verbose_name="Повернуто повідомлень")
+    n_text = models.PositiveIntegerField(default=0, verbose_name="З них із текстом")
+    n_user = models.PositiveIntegerField(
+        default=0, verbose_name="З них написані людьми",
+        help_text="Решта — автопересилки постів каналу в групу обговорень (анкери, "
+                  "під якими пишуть коментарі). У групі новинного каналу вони можуть "
+                  "давати 99% потоку, тому «повідомлень на добу» без цієї поправки "
+                  "міряє активність КАНАЛУ, а не людей.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Вибірка (вікно)"
+        verbose_name_plural = "Вибірки (вікна)"
+        ordering = ["-period_start", "channel_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["task", "channel", "period_start"],
+                                    name="uniq_sample_task_channel_period"),
+        ]
+
+    @property
+    def span(self) -> int:
+        """Сирий діапазон id — верхня межа обсягу за період."""
+        return max(0, self.id_hi - self.id_lo)
+
+    @property
+    def estimated_total(self) -> int:
+        """Оцінка реального числа текстових повідомлень за період (знаменник)."""
+        if not self.n_requested:
+            return 0
+        return int(round(self.span * self.n_text / self.n_requested))
+
+    @property
+    def estimated_user_total(self) -> int:
+        """Оцінка числа повідомлень ВІД ЛЮДЕЙ — саме він знаменник метрики."""
+        if not self.n_requested:
+            return 0
+        return int(round(self.span * self.n_user / self.n_requested))
+
+    @property
+    def people_rate(self) -> float:
+        """Частка живих людей у потоці чату (0..1). Низька = це не чат, а рупор."""
+        return (self.n_user / self.n_text) if self.n_text else 0.0
+
+    def __str__(self):
+        return f"{self.channel} {self.period_start:%Y-%m}: {self.n_text}/{self.n_requested}"
+
+
 class Post(models.Model):
     # конвеєр стадій (claim-based черга, кожен воркер дивиться «свій» статус)
     STAGE_COLLECTED = "collected"
@@ -647,6 +807,9 @@ class Post(models.Model):
     STAGE_MON_PRESCREENED = "mon_prescreened"
     # infospace-конвеєр (pipeline="infospace"): полінг джерел (Source), скрін,
     # зіставлення з живими подіями — docs/infospace-monitoring-pipeline.md
+    STAGE_TGS_COLLECTED = "tgs_collected"
+    STAGE_TGS_SCREENED = "tgs_screened"
+    STAGE_TGS_TAGGED = "tgs_tagged"
     STAGE_INFO_COLLECTED = "info_collected"
     STAGE_INFO_SCREENED = "info_screened"
     STAGE_CHOICES = [
@@ -658,6 +821,9 @@ class Post(models.Model):
         (STAGE_MON_COLLECTED, "Монітор: зібрано"),
         (STAGE_MON_FILTERED, "Монітор: відфільтровано"),
         (STAGE_MON_PRESCREENED, "Монітор: прескрін+"),
+        (STAGE_TGS_COLLECTED, "TG-пошук: знайдено"),
+        (STAGE_TGS_SCREENED, "TG-пошук: релевантне"),
+        (STAGE_TGS_TAGGED, "TG-пошук: протеговано"),
         (STAGE_INFO_COLLECTED, "Інформпростір: зібрано"),
         (STAGE_INFO_SCREENED, "Інформпростір: скрін+"),
         (STAGE_DONE, "Готово"),
@@ -862,11 +1028,23 @@ class MonitorChat(models.Model):
         default=False, db_index=True, verbose_name="Критичне джерело",
         help_text="Особливо важливий чат — пріоритет у звітах.",
     )
+    tg_account = models.ForeignKey(
+        "accounts.TelegramAccount", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="monitor_chats", verbose_name="Акаунт збору",
+        help_text="Яким акаунтом читаємо цей чат. Резолв юзернейма має добовий ліміт "
+                  "(~200/акаунт) і кешується В СЕСІЇ того акаунта, що резолвив, — тож "
+                  "чат треба читати ТИМ САМИМ акаунтом, інакше резолв платиться заново.",
+    )
     priority = models.PositiveSmallIntegerField(
         default=100, verbose_name="Пріоритет",
         help_text="Менше = вище у списку. Для сортування при показі.",
     )
     notes = models.TextField(blank=True, verbose_name="Нотатки")
+    last_searched_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, verbose_name="Останній TG-пошук",
+        help_text="Конвеєр tgsearch: коли цей чат востаннє обшукували. "
+                  "Порожньо = ще жодного разу.",
+    )
     added_by = models.CharField(
         max_length=80, blank=True, verbose_name="Хто додав",
         help_text="Хто/коли додав чат у whitelist (ручний рядок).",

@@ -16,7 +16,7 @@ from django.db import connection
 from django.db.models import Count, Sum, F, Q
 from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, Coalesce
 from django.shortcuts import render
-from django.urls import path
+from django.urls import path, reverse
 from django.utils.functional import cached_property
 from django.utils import timezone as djtz
 from django.utils.html import format_html, format_html_join
@@ -963,6 +963,38 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
         }),
     )
 
+    _FS_TGSEARCH = (
+        ("🔎 Етап 1 — Пошук у чатах через Telegram", {
+            "classes": ("tgs-search-fs",),
+            "description": "Список чатів — у блоці «Чати моніторингу» нижче. "
+                           "Telegram НЕ вміє OR: кожне слово це окремий запит до "
+                           "кожного чату, тож вартість лінійна від їх кількості "
+                           "(слів × чатів запитів на прогін). Чат читає той акаунт, "
+                           "що вже його читав — резолв кешується в його сесії.",
+            "fields": ("search_terms", "search_days", "search_limit_per_term"),
+        }),
+        ("🔎 Етап 2 — Фільтр релевантності (ШІ API)", {
+            "description": "Дешева LLM «так/ні». УВАГА: промпт МУСИТЬ повертати "
+                           'формат {"positive":[{"i":0,"c":0.9}]} — інакше вердиктів '
+                           "не буде і всі пости підуть у нескінченний повтор.",
+            "fields": ("prescreen_enabled", "prescreen_model", "prescreen_prompt"),
+        }),
+        ("🔎 Етап 3 — Тегування (ШІ API)", {
+            "description": "Теги за обраними категоріями. Промпт МУСИТЬ повертати "
+                           '{"items":[{"id":123,"<категорія>":["тег"]}]} з полем id '
+                           "кожного повідомлення. Релевантним стає повідомлення, "
+                           "у якому знайшовся бодай один тег.",
+            "fields": ("tag_categories", "tagger_prompt", "llm_model"),
+        }),
+        ("🔎 Етап 4 — Подія", {
+            "classes": ("collapse",),
+            "description": "1 повідомлення = 1 подія, БЕЗ дедупу: репліка людини — "
+                           "окрема одиниця сигналу. Пост лишається джерелом, тому "
+                           "текст видно в картці події. Налаштувань не має.",
+            "fields": (),
+        }),
+    )
+
     def get_urls(self):
         my = [
             path("<path:object_id>/run-now/",
@@ -1035,6 +1067,8 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
             stages = self._FS_RESEARCH
         elif pipeline == AnalysisTask.PIPELINE_INFOSPACE:
             stages = self._FS_INFOSPACE
+        elif pipeline == AnalysisTask.PIPELINE_TGSEARCH:
+            stages = self._FS_TGSEARCH
         else:
             stages = self._FS_EVENTS
         head = self._inject_owner_fieldset(request, self._FS_HEAD)
@@ -1258,17 +1292,30 @@ class ChannelSubjectFilter(SubjectFilter):
 
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
-    list_display = ("username", "title", "subscribers", "region_subject", "chat_type",
-                    "discusses_problems", "topics_display", "directory_focus")
-    list_filter = (ChannelSubjectFilter, "chat_type", "discusses_problems", ChannelTopicFilter,
-                   ("subscribers", SubscribersRangeFilter), ClassifiedFilter,
-                   "enriched", "is_channel", "language")
-    search_fields = ("username", "title", "description")
+    list_display = ("username", "title", "subscribers", "region_subject", "settlement",
+                    "chat_type", "comments_open", "linked_chat_display",
+                    "participants_visible", "human_msgs_per_day",
+                    "discusses_problems", "topics_display")
+    list_filter = (ChannelSubjectFilter, "chat_type", "comments_open",
+                   "participants_visible", "access", "discusses_problems",
+                   ChannelTopicFilter, ("subscribers", SubscribersRangeFilter),
+                   ClassifiedFilter, "enriched", "is_channel", "language")
+    search_fields = ("username", "title", "description", "settlement")
     ordering = ("-subscribers",)
-    list_select_related = ("region_subject",)
+    list_select_related = ("region_subject", "linked_chat")
     list_per_page = 50
     show_full_result_count = False          # 108k rows — skip the slow full COUNT(*)
-    autocomplete_fields = ("region_subject",)
+    autocomplete_fields = ("region_subject", "linked_chat", "joined_by")
+
+    @admin.display(description="Група обговорення", ordering="linked_chat__subscribers")
+    def linked_chat_display(self, obj):
+        """Канал -> його linked-група: саме там лежать коментарі, тож лінк туди."""
+        lc = obj.linked_chat
+        if not lc:
+            return "—"
+        return format_html('<a href="{}">{}</a>',
+                           reverse("admin:analysis_channel_change", args=[lc.pk]),
+                           lc.username or lc.title or f"#{lc.pk}")
 
     @admin.display(description="Теми")
     def topics_display(self, obj):
@@ -1560,6 +1607,13 @@ class PostAdmin(admin.ModelAdmin):
         tag_category_filter("criticism_target", "Об'єкт критики"),
         tag_category_filter("topic", "Тема"),
         tag_category_filter("opinion", "Тип думки"),
+        # research-конвеєр: критерій, оцінка центру й тип згадки. Частка критики
+        # рахується ПО ПОСТАХ (події склеюють дублі), тож усі три зрізи потрібні
+        # саме тут; на подіях фасети будуються автоматично з реєстру TagCategory.
+        tag_category_filter("fed_criterion", "Критерій (федтиск)"),
+        tag_category_filter("fed_stance", "Оцінка центру"),
+        tag_category_filter("fed_mention", "Тип згадки центру"),
+        tag_category_filter("fed_tone", "Тон подачі (стара схема)"),
         PrescreenFilter,
     )
     search_fields = ("url", "text")

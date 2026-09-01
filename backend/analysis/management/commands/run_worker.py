@@ -33,7 +33,8 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from analysis.models import AnalysisTask
-from analysis.services import monitor_stages, pipeline_runs, research_stages, stages
+from analysis.services import (monitor_stages, pipeline_runs, research_stages,
+                               stages, tgsearch_stages)
 
 ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                # гібридні ранери запусків (див. services/pipeline_runs.py):
@@ -45,7 +46,10 @@ ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                # research-конвеєр (тематичні дослідження, services/research_stages.py)
                "res_collect": monitor_stages.mon_collect_once,
                "res_filter": research_stages.res_filter_once,
-               "res_runs": research_stages.res_runs_once}
+               "res_runs": research_stages.res_runs_once,
+               # tgsearch-конвеєр (services/tgsearch_stages.py):
+               # пошук у чатах через Telegram -> ШІ-фільтр -> теги -> подія
+               **tgsearch_stages.STAGE_RUNNERS}
 
 # infospace-стадії (services/infospace/stages.py). Захисний імпорт: якщо
 # опційні deps (feedparser/trafilatura) не встановлені, наявні воркери
@@ -104,6 +108,8 @@ class Command(BaseCommand):
             pipeline = AnalysisTask.PIPELINE_RESEARCH
         elif stage.startswith("info_"):
             pipeline = AnalysisTask.PIPELINE_INFOSPACE
+        elif stage.startswith("tgs_"):
+            pipeline = AnalysisTask.PIPELINE_TGSEARCH
         else:
             pipeline = AnalysisTask.PIPELINE_EVENTS
         return list(qs.filter(pipeline=pipeline))

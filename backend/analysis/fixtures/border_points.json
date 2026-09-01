@@ -1,0 +1,62 @@
+{
+  "_comment": "Сітка точок збору для задачі «чати й канали з відкритими коментарями в 11 прикордонних суб'єктах». Єдине джерело правди для TGStat-збору (tools/discovery/tgstat_parser/border_01_collect.py), лонг-ліста і шорт-ліста. План: docs/border-regions-chats-plan.md. kind: city | raicentr | city_raicentr. min_subs — поріг TGStat-пошуку (для сіл 800 відсікає все). in_about=1 — шукати і в описі (для малих точок «Подслушано» часто без назви в заголовку). ambiguous=true — назва збігається з іншими НП/словами по РФ, потрібна сувора перевірка city_ok на кроці 3.",
+  "points": [
+    {"point": "Тюмень", "region_id": 74, "region": "Тюменська область", "kind": "city", "population": 850000, "queries": ["Тюмень"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Тобольск", "region_id": 74, "region": "Тюменська область", "kind": "city", "population": 102000, "queries": ["Тобольск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Казанское", "region_id": 74, "region": "Тюменська область", "kind": "raicentr", "population": 6000, "queries": ["Казанское", "Казанский район Тюменская"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+
+    {"point": "Сургут", "region_id": 82, "region": "Ханти-Мансійський АО — Югра", "kind": "city", "population": 400000, "queries": ["Сургут"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Нижневартовск", "region_id": 82, "region": "Ханти-Мансійський АО — Югра", "kind": "city", "population": 280000, "queries": ["Нижневартовск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Нефтеюганск", "region_id": 82, "region": "Ханти-Мансійський АО — Югра", "kind": "city", "population": 125000, "queries": ["Нефтеюганск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+
+    {"point": "Новый Уренгой", "region_id": 84, "region": "Ямало-Ненецький АО", "kind": "city", "population": 118000, "queries": ["Новый Уренгой"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Ноябрьск", "region_id": 84, "region": "Ямало-Ненецький АО", "kind": "city", "population": 108000, "queries": ["Ноябрьск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+
+    {"point": "Омск", "region_id": 58, "region": "Омська область", "kind": "city", "population": 1100000, "queries": ["Омск"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Тара", "region_id": 58, "region": "Омська область", "kind": "city", "population": 27000, "queries": ["Тара Омская", "Тарский район"], "min_subs": 200, "in_about": 1, "ambiguous": true},
+    {"point": "Калачинск", "region_id": 58, "region": "Омська область", "kind": "city", "population": 21000, "queries": ["Калачинск"], "min_subs": 200, "in_about": 1, "ambiguous": false},
+    {"point": "Исилькуль", "region_id": 58, "region": "Омська область", "kind": "city_raicentr", "population": 19000, "queries": ["Исилькуль"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+    {"point": "Одесское", "region_id": 58, "region": "Омська область", "kind": "raicentr", "population": 5000, "queries": ["Одесское", "Одесский район Омская"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+    {"point": "Черлак", "region_id": 58, "region": "Омська область", "kind": "raicentr", "population": 10000, "queries": ["Черлак"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+
+    {"point": "Новосибирск", "region_id": 57, "region": "Новосибірська область", "kind": "city", "population": 1620000, "queries": ["Новосибирск"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Бердск", "region_id": 57, "region": "Новосибірська область", "kind": "city", "population": 103000, "queries": ["Бердск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Искитим", "region_id": 57, "region": "Новосибірська область", "kind": "city", "population": 55000, "queries": ["Искитим"], "min_subs": 200, "in_about": 1, "ambiguous": false},
+    {"point": "Куйбышев", "region_id": 57, "region": "Новосибірська область", "kind": "city", "population": 43000, "queries": ["Куйбышев Новосибирская", "Каинск"], "min_subs": 200, "in_about": 1, "ambiguous": true},
+    {"point": "Карасук", "region_id": 57, "region": "Новосибірська область", "kind": "raicentr", "population": 27000, "queries": ["Карасук"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+
+    {"point": "Улан-Удэ", "region_id": 4, "region": "Бурятія", "kind": "city", "population": 435000, "queries": ["Улан-Удэ"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Северобайкальск", "region_id": 4, "region": "Бурятія", "kind": "city", "population": 24000, "queries": ["Северобайкальск"], "min_subs": 200, "in_about": 1, "ambiguous": false},
+    {"point": "Гусиноозёрск", "region_id": 4, "region": "Бурятія", "kind": "city", "population": 24000, "queries": ["Гусиноозерск", "Гусиноозёрск"], "min_subs": 200, "in_about": 1, "ambiguous": false},
+    {"point": "Кяхта", "region_id": 4, "region": "Бурятія", "kind": "city_raicentr", "population": 17000, "queries": ["Кяхта"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+    {"point": "Кырен", "region_id": 4, "region": "Бурятія", "kind": "raicentr", "population": 5000, "queries": ["Кырен", "Тункинский район"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+
+    {"point": "Барнаул", "region_id": 23, "region": "Алтайський край", "kind": "city", "population": 630000, "queries": ["Барнаул"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Бийск", "region_id": 23, "region": "Алтайський край", "kind": "city", "population": 183000, "queries": ["Бийск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Рубцовск", "region_id": 23, "region": "Алтайський край", "kind": "city_raicentr", "population": 126000, "queries": ["Рубцовск", "Веселоярск"], "min_subs": 200, "in_about": 0, "ambiguous": false},
+    {"point": "Новоалтайск", "region_id": 23, "region": "Алтайський край", "kind": "city", "population": 73000, "queries": ["Новоалтайск"], "min_subs": 200, "in_about": 1, "ambiguous": false},
+    {"point": "Кулунда", "region_id": 23, "region": "Алтайський край", "kind": "raicentr", "population": 14000, "queries": ["Кулунда"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+    {"point": "Михайловское", "region_id": 23, "region": "Алтайський край", "kind": "raicentr", "population": 9000, "queries": ["Михайловское Алтайский", "Михайловский район Алтайский"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+
+    {"point": "Чита", "region_id": 24, "region": "Забайкальський край", "kind": "city", "population": 337000, "queries": ["Чита"], "min_subs": 800, "in_about": 0, "ambiguous": true},
+    {"point": "Краснокаменск", "region_id": 24, "region": "Забайкальський край", "kind": "city", "population": 51000, "queries": ["Краснокаменск"], "min_subs": 200, "in_about": 1, "ambiguous": false},
+    {"point": "Борзя", "region_id": 24, "region": "Забайкальський край", "kind": "city", "population": 29000, "queries": ["Борзя"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+    {"point": "Кыра", "region_id": 24, "region": "Забайкальський край", "kind": "raicentr", "population": 3000, "queries": ["Кыра", "Кыринский район"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+    {"point": "Забайкальск", "region_id": 24, "region": "Забайкальський край", "kind": "raicentr", "population": 11000, "queries": ["Забайкальск"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+
+    {"point": "Владивосток", "region_id": 29, "region": "Приморський край", "kind": "city", "population": 594000, "queries": ["Владивосток"], "min_subs": 800, "in_about": 0, "ambiguous": false},
+    {"point": "Уссурийск", "region_id": 29, "region": "Приморський край", "kind": "city", "population": 178000, "queries": ["Уссурийск"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Находка", "region_id": 29, "region": "Приморський край", "kind": "city", "population": 133000, "queries": ["Находка Приморье", "Находка город"], "min_subs": 200, "in_about": 0, "ambiguous": true},
+    {"point": "Артём", "region_id": 29, "region": "Приморський край", "kind": "city", "population": 108000, "queries": ["Артём Приморье", "Артем Приморский"], "min_subs": 200, "in_about": 0, "ambiguous": true},
+    {"point": "Камень-Рыболов", "region_id": 29, "region": "Приморський край", "kind": "raicentr", "population": 9000, "queries": ["Камень-Рыболов", "Ханкайский район"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+    {"point": "Покровка", "region_id": 29, "region": "Приморський край", "kind": "raicentr", "population": 9000, "queries": ["Покровка Приморье", "Октябрьский район Приморский"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+
+    {"point": "Горно-Алтайск", "region_id": 2, "region": "Алтай", "kind": "city", "population": 65000, "queries": ["Горно-Алтайск"], "min_subs": 200, "in_about": 0, "ambiguous": false},
+    {"point": "Кош-Агач", "region_id": 2, "region": "Алтай", "kind": "raicentr", "population": 10000, "queries": ["Кош-Агач", "Ташанта"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+
+    {"point": "Кызыл", "region_id": 18, "region": "Тива", "kind": "city", "population": 125000, "queries": ["Кызыл"], "min_subs": 500, "in_about": 0, "ambiguous": false},
+    {"point": "Ак-Довурак", "region_id": 18, "region": "Тива", "kind": "city", "population": 13000, "queries": ["Ак-Довурак"], "min_subs": 100, "in_about": 1, "ambiguous": false},
+    {"point": "Чадан", "region_id": 18, "region": "Тива", "kind": "city", "population": 9000, "queries": ["Чадан", "Дзун-Хемчикский"], "min_subs": 100, "in_about": 1, "ambiguous": true},
+    {"point": "Хандагайты", "region_id": 18, "region": "Тива", "kind": "raicentr", "population": 3000, "queries": ["Хандагайты", "Овюрский кожуун"], "min_subs": 100, "in_about": 1, "ambiguous": true}
+  ]
+}

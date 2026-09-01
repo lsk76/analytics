@@ -117,7 +117,10 @@ def sync_comment_event(post) -> str | None:
     Повертає "created" | "updated" | "removed" | None (нічого не робилось).
     """
     from analysis.models import Event
-    if post.task.pipeline != post.task.PIPELINE_MONITOR:
+    # tgsearch користується тим самим дзеркалом: 1 повідомлення = 1 подія, без
+    # дедупу. Логіка ідентична monitor, відрізняється лише спосіб збору.
+    if post.task.pipeline not in (post.task.PIPELINE_MONITOR,
+                                  post.task.PIPELINE_TGSEARCH):
         return None
     if not post.is_relevant:
         if post.event_id:
@@ -479,6 +482,13 @@ def mon_prescreen_once(task):
     ids = _claim(task, Post.STAGE_MON_FILTERED, PRESCREEN_TICK)
     if not ids:
         return False
+    if not task.prescreen_enabled:
+        # Вибірковий збір: тегуємо все. Прескрін тут не економить (обсяг і так малий),
+        # зате його ~85% recall систематично занижував би чисельник метрики.
+        Post.objects.filter(id__in=ids).update(
+            stage=Post.STAGE_MON_PRESCREENED, stage_locked_at=None)
+        logger.info("mon_prescreen: вимкнено для задачі, пропущено далі %d", len(ids))
+        return True
     model = task.prescreen_model or task.llm_model or settings.LLM_MODEL
     posts = list(Post.objects.filter(id__in=ids).order_by("posted_at", "id"))
     batches = [posts[i:i + PRESCREEN_SUB] for i in range(0, len(posts), PRESCREEN_SUB)]
