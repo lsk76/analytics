@@ -224,4 +224,6 @@ docker compose exec -T web python manage.py shell -c \
 - `docs/econ-events-pipeline.md` — економічні події E1-E4: keyword-регекси, усі промпти.
 - `docs/infospace-monitoring-pipeline.md` — **ДИЗАЙН (не реалізовано)**: конвеєр
   «моніторинг інформпростору» (RSS/сайти/TG-акаунти → Post → AI-скрін → живі Event).
+- `docs/telemetrio-vs-telezip.md` — Telemetr.io API: клієнт, квоти, чим він НЕ є
+  заміною TeleZip, і план порівняльного тесту.
 - Пам'ять Claude (`~/.claude/projects/...-sm-analytics/memory/`) — операційні уроки.

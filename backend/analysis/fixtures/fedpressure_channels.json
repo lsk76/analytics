@@ -1,0 +1,482 @@
+[
+ {
+  "handle": "nabatnews_tg",
+  "name": "Набат",
+  "region": "Єврейська АО"
+ },
+ {
+  "handle": "prok_eao79",
+  "name": "Прокуратура Еврейской автономной области",
+  "region": "Єврейська АО"
+ },
+ {
+  "handle": "riabir79",
+  "name": "РИА Биробиджан",
+  "region": "Єврейська АО"
+ },
+ {
+  "handle": "irkutsx",
+  "name": "ИРКУТСК СЕГОДНЯ",
+  "region": "Іркутська область"
+ },
+ {
+  "handle": "irkutsx8",
+  "name": "Иркутск Онлайн",
+  "region": "Іркутська область"
+ },
+ {
+  "handle": "irk01",
+  "name": "Иркутск №1",
+  "region": "Іркутська область"
+ },
+ {
+  "handle": "irkutsk",
+  "name": "Типичный Иркутск",
+  "region": "Іркутська область"
+ },
+ {
+  "handle": "solundar04",
+  "name": "Республика Алтай в Telegram",
+  "region": "Алтай"
+ },
+ {
+  "handle": "katun24new",
+  "name": "Катунь 24 — новости Барнаула и Алтайского края",
+  "region": "Алтайський край"
+ },
+ {
+  "handle": "Rubtsovsk_Novoaltaisk",
+  "name": "Телеблог АЛТАЙ Барнаул Бийск Рубцовск Новоалтайск новости реклама афиша объявления",
+  "region": "Алтайський край"
+ },
+ {
+  "handle": "svbstar",
+  "name": "SVBSTAR ⚡ Свободный",
+  "region": "Амурська область"
+ },
+ {
+  "handle": "amurlife1",
+  "name": "Аmur.life",
+  "region": "Амурська область"
+ },
+ {
+  "handle": "asn24ru",
+  "name": "АСН24 — Амурская служба новостей",
+  "region": "Амурська область"
+ },
+ {
+  "handle": "AmurInfo_news",
+  "name": "Амур.Инфо",
+  "region": "Амурська область"
+ },
+ {
+  "handle": "belogorskinfo",
+  "name": "Белогорск ИНФО",
+  "region": "Амурська область"
+ },
+ {
+  "handle": "notsvb",
+  "name": "Непростой Свободный",
+  "region": "Амурська область"
+ },
+ {
+  "handle": "arigus",
+  "name": "Ариг Ус (Бурятія)",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "burassr",
+  "name": "БурАССР 2.0",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "burunen",
+  "name": "Буряад Үнэн / Бурятія",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "burextra",
+  "name": "Бурятия экстренно",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "vesti_buryatia",
+  "name": "Вести Бурятия (ГТРК)",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "newbur_true",
+  "name": "Новая Бурятия",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "ulan_smi",
+  "name": "Новини Улан-Уде і Бурятії",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "novosti_ulanude",
+  "name": "Новости Улан-Удэ и не только",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "Torboznoe_radio",
+  "name": "ТОРБОЗНОЕ РАДИО",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "TVcom_news",
+  "name": "Тивиком (Бурятія)",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "ulanude_news",
+  "name": "Улан-Удэ новости",
+  "region": "Бурятія"
+ },
+ {
+  "handle": "zabru_chita",
+  "name": "ZAB.RU",
+  "region": "Забайкальський край"
+ },
+ {
+  "handle": "chita_smi",
+  "name": "Новости Чита и Забайкалье",
+  "region": "Забайкальський край"
+ },
+ {
+  "handle": "chita",
+  "name": "ЧВК Чита - о жизни в Чите и Забайкалье",
+  "region": "Забайкальський край"
+ },
+ {
+  "handle": "chita_news75",
+  "name": "Чита и Забайкалье. Ох и Новости",
+  "region": "Забайкальський край"
+ },
+ {
+  "handle": "kamchatka01",
+  "name": "Камчатка №1",
+  "region": "Камчатський край"
+ },
+ {
+  "handle": "kamreporter",
+  "name": "Камчатский Репортёр",
+  "region": "Камчатський край"
+ },
+ {
+  "handle": "massmediakam",
+  "name": "Масс Медиа Камчатка",
+  "region": "Камчатський край"
+ },
+ {
+  "handle": "kamextremist",
+  "name": "Подполье Камчатки",
+  "region": "Камчатський край"
+ },
+ {
+  "handle": "suskr41",
+  "name": "Следком Камчатки",
+  "region": "Камчатський край"
+ },
+ {
+  "handle": "chpkamchatka",
+  "name": "ЧП Камчатка",
+  "region": "Камчатський край"
+ },
+ {
+  "handle": "kemerovogo",
+  "name": "Кемерово Онлайн",
+  "region": "Кемеровська область"
+ },
+ {
+  "handle": "kemertop",
+  "name": "Кемерово с огоньком",
+  "region": "Кемеровська область"
+ },
+ {
+  "handle": "kemerovo_smi",
+  "name": "Новости Кемерово и Кузбасс",
+  "region": "Кемеровська область"
+ },
+ {
+  "handle": "ngs24_krsk",
+  "name": "NGS24.RU — Новости Красноярска",
+  "region": "Красноярський край"
+ },
+ {
+  "handle": "sibpatriki",
+  "name": "КРАСНОЯРСКИЕ ПАТРИКИ 🔥",
+  "region": "Красноярський край"
+ },
+ {
+  "handle": "krasnoyarsk",
+  "name": "КрасноярскДА | Новости Красноярска",
+  "region": "Красноярський край"
+ },
+ {
+  "handle": "krasnoyarsk_smi",
+  "name": "Новости Красноярска и Края",
+  "region": "Красноярський край"
+ },
+ {
+  "handle": "kol49",
+  "name": "Колыма инсайд",
+  "region": "Магаданська область"
+ },
+ {
+  "handle": "magadan_live1",
+  "name": "МАГАДАН LIVE",
+  "region": "Магаданська область"
+ },
+ {
+  "handle": "magadanCHP",
+  "name": "Магадан. ЧП",
+  "region": "Магаданська область"
+ },
+ {
+  "handle": "ngs_news",
+  "name": "НГС — новости Новосибирска",
+  "region": "Новосибірська область"
+ },
+ {
+  "handle": "nsk_smi",
+  "name": "Новости Новосибирска и Области",
+  "region": "Новосибірська область"
+ },
+ {
+  "handle": "kanal12omsk",
+  "name": "12 Канал | Новости Омска",
+  "region": "Омська область"
+ },
+ {
+  "handle": "omsk_smi",
+  "name": "Новости Омска и Области",
+  "region": "Омська область"
+ },
+ {
+  "handle": "omsks",
+  "name": "ОМСК СЕГОДНЯ",
+  "region": "Омська область"
+ },
+ {
+  "handle": "omsx9",
+  "name": "Омск Онлайн",
+  "region": "Омська область"
+ },
+ {
+  "handle": "NBS24",
+  "name": "Newsbox24",
+  "region": "Приморський край"
+ },
+ {
+  "handle": "svodka25",
+  "name": "Svodka25 l Новости Приморья и Владивостока",
+  "region": "Приморський край"
+ },
+ {
+  "handle": "ussur_mikh_kray",
+  "name": "НОВОСТИ Уссурийск - Михайловка + Приморский край",
+  "region": "Приморський край"
+ },
+ {
+  "handle": "newsvlru",
+  "name": "Новости VL.ru | Владивосток",
+  "region": "Приморський край"
+ },
+ {
+  "handle": "prosecutor_pk",
+  "name": "Прокуратура Приморья",
+  "region": "Приморський край"
+ },
+ {
+  "handle": "chpprim",
+  "name": "ЧП Приморский край",
+  "region": "Приморський край"
+ },
+ {
+  "handle": "arcticpost",
+  "name": "ArcticPost",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "sakhaliferu",
+  "name": "SakhaLife",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "yk24ru",
+  "name": "YK24 (Якутія)",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "kyymsakha",
+  "name": "Кыым (Якутія)",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "nvk_sakha",
+  "name": "НВК Саха",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "pryanayayakutia",
+  "name": "Пряная Якутия",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "ysiaru",
+  "name": "ЯСИА (Якутія)",
+  "region": "Саха (Якутія)"
+ },
+ {
+  "handle": "sakhalinmedianews",
+  "name": "SakhalinMedia | Новости Сахалина и Курил",
+  "region": "Сахалінська область"
+ },
+ {
+  "handle": "crimesakh",
+  "name": "ЧП Сахалин",
+  "region": "Сахалінська область"
+ },
+ {
+  "handle": "tochka_65",
+  "name": "ЧП, ДТП. Сахалин - Точка отсчёта",
+  "region": "Сахалінська область"
+ },
+ {
+  "handle": "tmgnews",
+  "name": "TMG News (Тива)",
+  "region": "Тива"
+ },
+ {
+  "handle": "gtrktyva",
+  "name": "ГТРК Тыва",
+  "region": "Тива"
+ },
+ {
+  "handle": "kyzylstorm",
+  "name": "Кызылские грозы",
+  "region": "Тива"
+ },
+ {
+  "handle": "tomsknews",
+  "name": "TomskNews",
+  "region": "Томська область"
+ },
+ {
+  "handle": "gtrktomsk",
+  "name": "ВЕСТИ-ТОМСК",
+  "region": "Томська область"
+ },
+ {
+  "handle": "tomsk_smi",
+  "name": "Новости Томска и Области",
+  "region": "Томська область"
+ },
+ {
+  "handle": "tomsk1",
+  "name": "Томск Онлайн",
+  "region": "Томська область"
+ },
+ {
+  "handle": "dvhab_novosti",
+  "name": "DVHAB.ru",
+  "region": "Хабаровський край"
+ },
+ {
+  "handle": "komcitynews",
+  "name": "Komcity News • Новости Комсомольска-на-Амуре",
+  "region": "Хабаровський край"
+ },
+ {
+  "handle": "komsagram",
+  "name": "Komsagram",
+  "region": "Хабаровський край"
+ },
+ {
+  "handle": "newskhv",
+  "name": "NewsKhv",
+  "region": "Хабаровський край"
+ },
+ {
+  "handle": "vehernij_habarovsk",
+  "name": "Вечерний Хабаровск",
+  "region": "Хабаровський край"
+ },
+ {
+  "handle": "guberniaonline",
+  "name": "Губерния l Хабаровск",
+  "region": "Хабаровський край"
+ },
+ {
+  "handle": "konovalov_khakasia19",
+  "name": "Коновалов | Хакасия",
+  "region": "Хакасія"
+ },
+ {
+  "handle": "chp_live_19russ",
+  "name": "ЧП Хакасия LIVE",
+  "region": "Хакасія"
+ },
+ {
+  "handle": "abakan_chp19",
+  "name": "🔥ЧП Хакасия l Абакан | Черногорск | Саяногорск",
+  "region": "Хакасія"
+ },
+ {
+  "handle": "hm_life86",
+  "name": "\"Не\" Типичный Ханты-Мансийск",
+  "region": "Ханти-Мансійський АО — Югра"
+ },
+ {
+  "handle": "surgut_smi",
+  "name": "Новости Сургута и ХМАО",
+  "region": "Ханти-Мансійський АО — Югра"
+ },
+ {
+  "handle": "podslushanovhm",
+  "name": "Подслушано в Ханты-Мансийске 🫎",
+  "region": "Ханти-Мансійський АО — Югра"
+ },
+ {
+  "handle": "dpc_chukotka",
+  "name": "ДПЧ (Доска позора Чукотки)",
+  "region": "Чукотський АО"
+ },
+ {
+  "handle": "bilibino1",
+  "name": "Жители Билибино",
+  "region": "Чукотський АО"
+ },
+ {
+  "handle": "prochukotku",
+  "name": "Про Чукотку | Новости",
+  "region": "Чукотський АО"
+ },
+ {
+  "handle": "ksyamal",
+  "name": "Красный Север | Новости ЯНАО",
+  "region": "Ямало-Ненецький АО"
+ },
+ {
+  "handle": "nur_adm",
+  "name": "НУР. Официально | Новый Уренгой",
+  "region": "Ямало-Ненецький АО"
+ },
+ {
+  "handle": "tvimpulse",
+  "name": "Новый Уренгой | Ямал-Медиа",
+  "region": "Ямало-Ненецький АО"
+ },
+ {
+  "handle": "YANAO_official",
+  "name": "ЯМАЛ. Официально",
+  "region": "Ямало-Ненецький АО"
+ },
+ {
+  "handle": "yamalmedia_89",
+  "name": "Ямал-Медиа | Салехард | Надым | Новый Уренгой | Ноябрьск",
+  "region": "Ямало-Ненецький АО"
+ }
+]

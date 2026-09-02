@@ -155,6 +155,15 @@ TELEZIP_BASE_URL = os.getenv("TELEZIP_BASE_URL", "https://api.telezip.net/v3")
 # Max CONCURRENT TeleZip requests (API allows very few). Enforced in TelezipClient.
 TELEZIP_MAX_CONCURRENCY = int(os.getenv("TELEZIP_MAX_CONCURRENCY", "2"))
 
+# --- Telemetr.io Public API (кандидат на заміну/дубль TeleZip) ---
+# Auth: header x-api-key. Квота ДВОвимірна: окремо запити, окремо УНІКАЛЬНІ
+# пошукові терміни та унікальні канали — див. docstring services/telemetrio.py.
+TELEMETRIO_API_KEY = os.getenv("TELEMETRIO_API_KEY", "")
+TELEMETRIO_BASE_URL = os.getenv("TELEMETRIO_BASE_URL", "https://api.tlmtr.io")
+# Локальний реєстр уже витрачених search-термінів (API каже СКІЛЬКИ, але не ЯКІ).
+TELEMETRIO_TERMS_FILE = os.getenv("TELEMETRIO_TERMS_FILE",
+                                  str(BASE_DIR / ".telemetrio_terms.json"))
+
 # Проксі для infospace-скрапінгу (сайти, що блокують IP сервера або віддають
 # контент лише з РФ). Використовується ЛИШЕ джерелами з config {"proxy": true};
 # явний рядок у config.proxy має пріоритет. Формат: http://user:pass@host:port
