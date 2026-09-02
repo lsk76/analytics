@@ -67,7 +67,12 @@ else
     echo "!! Спершу з локальної машини: ssh-copy-id ${ADMIN_USER}@<server>"
     echo "!! Вхід по паролю НЕ вимикаю (щоб не замкнути)."
   else
-    cat >/etc/ssh/sshd_config.d/99-hardening.conf <<EOF
+    # УВАГА: 00-, а НЕ 99-. sshd бере ПЕРШЕ входження параметра, а drop-in читаються
+# в лексичному порядку. Хмарні образи кладуть /etc/ssh/sshd_config.d/50-cloud-init.conf
+# з "PasswordAuthentication yes", і при імені 99-* він перебивав наш файл —
+# вхід по паролю лишався увімкненим попри «успішний» хардинг (ловили на Ubuntu 26.04).
+rm -f /etc/ssh/sshd_config.d/99-hardening.conf
+cat >/etc/ssh/sshd_config.d/00-hardening.conf <<EOF
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
