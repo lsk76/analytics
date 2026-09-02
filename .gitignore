@@ -57,3 +57,7 @@ cookies.txt
 
 # DB backups
 backups/
+
+# Telemetr.io: local ledger of spent unique search terms (quota bookkeeping)
+.telemetrio_terms.json
+backend/.telemetrio_terms.json
