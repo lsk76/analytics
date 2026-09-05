@@ -85,7 +85,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         ]
         return custom + super().get_urls()
 
-    TEST_BOT_CHOICES = ["@regionalnaya_programa_bot"]
+    TEST_BOT_CHOICES = ["@regionalnaya_programa_bot", "@RegionalnayaProgrammaBot"]
     TEST_BOT_FEEDBACK = "хорошего не много"
     TEST_BOT_PAUSE_MIN_DEFAULT = 10
     TEST_BOT_PAUSE_MAX_DEFAULT = 30
