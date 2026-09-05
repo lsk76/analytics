@@ -3,60 +3,40 @@
 <div class="breadcrumbs">
   <a href="{% url 'admin:index' %}">Головна</a> ›
   <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
-  <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">{{ account.name }}</a> ›
   Тестовий прогін бота
 </div>
 {% endblock %}
 
 {% block content %}
-<div style="max-width:640px">
-  <p><b>Акаунт:</b> {{ account.name }} &nbsp; <b>Телефон:</b> {{ account.phone_number }}</p>
+<div style="max-width:720px">
+  <p><b>Акаунти ({{ accounts|length }}):</b>
+    {% for account in accounts %}{{ account.name }} ({{ account.phone_number }}){% if not forloop.last %}, {% endif %}{% endfor %}
+  </p>
   <p class="help">
-    Акаунт заходить у вибраного бота, шле /start, на кожному кроці з кнопками тисне
-    випадковий варіант (1-4), а на кроці без кнопок надсилає відгук «хорошего не много».
-    Фактичні тексти й кнопки кожного кроку показуються нижче — звір їх вручну з очікуваними.
+    Акаунти опрацьовуються по черзі у фоні: /start → на кожному кроці з кнопками
+    випадковий варіант (1-4) → відгук «хорошего не много». Між акаунтами — довільна
+    пауза в заданому діапазоні (щоб не бити всі акаунти в бота одночасно). Прогрес
+    дивись на сторінці статусу, куди потрапиш після запуску.
   </p>
 
   <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
-    <form method="post">{% csrf_token %}
+    <form method="post" action="?ids={{ ids }}">{% csrf_token %}
       <p><label>Бот:<br>
            <select name="bot_username" style="width:100%">
              {% for choice in bot_choices %}
                <option value="{{ choice }}">{{ choice }}</option>
              {% endfor %}
            </select></label></p>
-      <button type="submit" class="button default">▶️ Запустити прогін</button>
+      <p>
+        <label style="display:inline-block; width:48%">Пауза між акаунтами, хв, від:<br>
+          <input type="number" name="pause_min" min="0" value="{{ pause_min }}" style="width:100%"></label>
+        <label style="display:inline-block; width:48%">до:<br>
+          <input type="number" name="pause_max" min="0" value="{{ pause_max }}" style="width:100%"></label>
+      </p>
+      <button type="submit" class="button default">▶️ Запустити чергу</button>
     </form>
   </div>
 
-  {% if result %}
-  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
-    <h3 style="margin-top:0">
-      Результат:
-      {% if result.ok %}<span style="color:#16a34a">✓ завершено</span>
-      {% else %}<span style="color:#b91c1c">✗ {{ result.error }}</span>{% endif %}
-    </h3>
-    <ol>
-      {% for step in result.steps %}
-      <li style="margin-bottom:10px">
-        {% if step.error %}
-          <span style="color:#b91c1c">{{ step.error }}</span>
-        {% else %}
-          <div><b>Текст:</b> {{ step.text }}</div>
-          {% if step.buttons %}
-            <div><b>Кнопки:</b> {{ step.buttons|join:" | " }}</div>
-            {% if step.clicked %}<div><b>Натиснуто:</b> {{ step.clicked }}</div>{% endif %}
-          {% endif %}
-          {% if step.sent_feedback %}
-            <div><b>Надіслано відгук:</b> {{ step.sent_feedback }}</div>
-          {% endif %}
-        {% endif %}
-      </li>
-      {% endfor %}
-    </ol>
-  </div>
-  {% endif %}
-
-  <p><a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a></p>
+  <p><a href="{% url 'admin:accounts_telegramaccount_changelist' %}">← назад до списку акаунтів</a></p>
 </div>
 {% endblock %}

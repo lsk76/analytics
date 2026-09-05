@@ -1,10 +1,77 @@
+import json
+import random
+import threading
+import time
+import uuid
+from pathlib import Path
+
+from django.conf import settings
 from django.contrib import admin, messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from .models import Proxy, TelegramAccount
 from .services.telegram_client import TelegramUserClient
+
+TEST_BOT_RUNS_DIR = Path(settings.BASE_DIR) / "_dir" / "_test_bot_runs"
+
+
+def _test_bot_status_path(run_id: str) -> Path:
+    TEST_BOT_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    return TEST_BOT_RUNS_DIR / f"{run_id}.json"
+
+
+def _write_test_bot_status(run_id: str, status: dict) -> None:
+    _test_bot_status_path(run_id).write_text(json.dumps(status, ensure_ascii=False, default=str))
+
+
+def _read_test_bot_status(run_id: str) -> dict | None:
+    path = _test_bot_status_path(run_id)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def _run_test_bot_queue(run_id: str, account_ids: list, bot_username: str,
+                        pause_min: int, pause_max: int, feedback_text: str) -> None:
+    """Фоновий тред: акаунти по черзі, з довільною паузою pause_min..pause_max хв між ними.
+
+    Живе, поки живий процес web (daemon-тред) — переживає лише в межах поточного
+    контейнера; рестарт/деплой обірве недороблену чергу. Прогрес пишеться у файл
+    на спільному томі, щоб його бачили всі gunicorn-воркери, що обслуговують
+    сторінку статусу.
+    """
+    accounts = list(TelegramAccount.objects.filter(pk__in=account_ids).order_by("id"))
+    status = {
+        "run_id": run_id, "bot_username": bot_username,
+        "pause_min": pause_min, "pause_max": pause_max,
+        "total": len(accounts), "entries": [], "done": False,
+        "started_at": timezone.now().isoformat(),
+    }
+    _write_test_bot_status(run_id, status)
+    for i, account in enumerate(accounts):
+        if i > 0:
+            delay = random.uniform(pause_min * 60, pause_max * 60)
+            status["entries"].append({
+                "wait": True, "waiting_minutes": round(delay / 60, 1),
+                "before_account": account.name,
+            })
+            _write_test_bot_status(run_id, status)
+            time.sleep(delay)
+        res = TelegramUserClient.test_bot_flow_sync(account, bot_username,
+                                                     feedback_text=feedback_text)
+        status["entries"].append({
+            "account_id": account.id, "account": account.name,
+            "phone": account.phone_number, "ok": res.get("ok"),
+            "error": res.get("error"), "steps": res.get("steps", []),
+            "finished_at": timezone.now().isoformat(),
+        })
+        _write_test_bot_status(run_id, status)
+    status["done"] = True
+    status["finished_at"] = timezone.now().isoformat()
+    _write_test_bot_status(run_id, status)
 
 
 @admin.register(Proxy)
@@ -52,14 +119,10 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         self.message_user(request, f"Готово: живих {alive}, проблемних {dead} із {alive+dead}.",
                           level=messages.INFO if not dead else messages.WARNING)
 
-    @admin.action(description="🤖 Тестовий прогін бота (опитування через акаунт)")
+    @admin.action(description="🤖 Тестовий прогін бота (опитування через акаунт(и))")
     def test_bot_flow(self, request, queryset):
-        if queryset.count() != 1:
-            self.message_user(request, "Вибери рівно один акаунт для тестового прогону.",
-                              level=messages.ERROR)
-            return
-        account = queryset.first()
-        return redirect("admin:accounts_telegramaccount_test_bot", account.pk)
+        ids = ",".join(str(pk) for pk in queryset.order_by("id").values_list("id", flat=True))
+        return redirect(reverse("admin:accounts_telegramaccount_test_bot") + f"?ids={ids}")
 
     # ---- authorize button on the change page ----
     @admin.display(description="Авторизація")
@@ -78,38 +141,73 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("<int:account_id>/authorize/",
                  self.admin_site.admin_view(self.authorize_view),
                  name="accounts_telegramaccount_authorize"),
-            path("<int:account_id>/test-bot/",
+            path("test-bot/",
                  self.admin_site.admin_view(self.test_bot_view),
                  name="accounts_telegramaccount_test_bot"),
+            path("test-bot/<str:run_id>/status/",
+                 self.admin_site.admin_view(self.test_bot_status_view),
+                 name="accounts_telegramaccount_test_bot_status"),
         ]
         return custom + super().get_urls()
 
     TEST_BOT_CHOICES = ["@regionalnaya_programa_bot"]
     TEST_BOT_FEEDBACK = "хорошего не много"
+    TEST_BOT_PAUSE_MIN_DEFAULT = 10
+    TEST_BOT_PAUSE_MAX_DEFAULT = 30
 
-    def test_bot_view(self, request, account_id):
-        account = get_object_or_404(TelegramAccount, pk=account_id)
-        result = None
+    def test_bot_view(self, request):
+        ids_raw = request.GET.get("ids", "")
+        ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
+        accounts = list(TelegramAccount.objects.filter(pk__in=ids).order_by("id"))
+        if not accounts:
+            messages.error(request, "Не вибрано жодного акаунта.")
+            return redirect("admin:accounts_telegramaccount_changelist")
+
         if request.method == "POST":
             bot_username = request.POST.get("bot_username", "").strip() or self.TEST_BOT_CHOICES[0]
-            result = TelegramUserClient.test_bot_flow_sync(
-                account, bot_username, feedback_text=self.TEST_BOT_FEEDBACK,
-            )
-            if result.get("ok"):
-                messages.success(request,
-                                 f"Прогін завершено, кроків: {len(result.get('steps', []))}.")
-            else:
-                messages.error(request, f"Помилка прогону: {result.get('error')}")
+            try:
+                pause_min = int(request.POST.get("pause_min", self.TEST_BOT_PAUSE_MIN_DEFAULT))
+                pause_max = int(request.POST.get("pause_max", self.TEST_BOT_PAUSE_MAX_DEFAULT))
+            except ValueError:
+                messages.error(request, "Пауза — ціле число хвилин.")
+                return redirect(f"{request.path}?ids={ids_raw}")
+            if pause_min < 0 or pause_max < pause_min:
+                messages.error(request, "Мін. пауза ≥ 0, макс. пауза ≥ мін.")
+                return redirect(f"{request.path}?ids={ids_raw}")
+
+            run_id = uuid.uuid4().hex[:12]
+            threading.Thread(
+                target=_run_test_bot_queue,
+                args=(run_id, ids, bot_username, pause_min, pause_max, self.TEST_BOT_FEEDBACK),
+                daemon=True,
+            ).start()
+            messages.success(request,
+                             f"Чергу запущено: {len(accounts)} акаунт(и), пауза {pause_min}-{pause_max} "
+                             "хв між ними. Онови сторінку статусу, щоб побачити прогрес.")
+            return redirect("admin:accounts_telegramaccount_test_bot_status", run_id)
 
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
-            "account": account,
-            "result": result,
+            "accounts": accounts,
+            "ids": ids_raw,
             "bot_choices": self.TEST_BOT_CHOICES,
-            "title": f"Тестовий прогін бота: {account.name}",
+            "pause_min": self.TEST_BOT_PAUSE_MIN_DEFAULT,
+            "pause_max": self.TEST_BOT_PAUSE_MAX_DEFAULT,
+            "title": "Тестовий прогін бота",
         }
         return render(request, "admin/accounts/telegramaccount/test_bot.html", ctx)
+
+    def test_bot_status_view(self, request, run_id):
+        status = _read_test_bot_status(run_id)
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "run_id": run_id,
+            "status": status,
+            "title": f"Прогін бота — статус {run_id}",
+        }
+        return render(request, "admin/accounts/telegramaccount/test_bot_status.html", ctx)
 
     def authorize_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)
