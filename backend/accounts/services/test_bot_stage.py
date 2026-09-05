@@ -1,0 +1,60 @@
+"""test_bot — taskless-стадія для run_worker.py: черга TestBotJob.
+
+Патерн claim'у (SELECT ... FOR UPDATE SKIP LOCKED, гейт по scheduled_at) —
+той самий, що й у analysis/services/stages.py::_claim_chunk для CollectChunk.
+"""
+import random
+from datetime import timedelta
+
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone as djtz
+
+from ..models import TestBotJob
+from .telegram_client import TelegramUserClient
+
+LOCK_TIMEOUT = timedelta(minutes=10)
+
+
+def _claim_job():
+    now = djtz.now()
+    cutoff = now - LOCK_TIMEOUT
+    with transaction.atomic():
+        job = (TestBotJob.objects
+               .filter(Q(status="pending") | Q(status="running", locked_at__lt=cutoff))
+               .filter(Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now))
+               .select_for_update(skip_locked=True)
+               .order_by("created_at")
+               .first())
+        if job:
+            job.status = "running"
+            job.locked_at = now
+            job.attempts += 1
+            job.save(update_fields=["status", "locked_at", "attempts"])
+    return job
+
+
+def test_bot_once() -> bool:
+    """Забрати одне готове завдання, виконати, розблокувати наступне в batch. True = була робота."""
+    job = _claim_job()
+    if not job:
+        return False
+
+    res = TelegramUserClient.test_bot_flow_sync(
+        job.account, job.bot_username, feedback_text=job.feedback_text,
+    )
+    job.result = res
+    job.error = res.get("error") or ""
+    job.status = "done" if res.get("ok") else "failed"
+    job.finished_at = djtz.now()
+    job.save(update_fields=["status", "result", "error", "finished_at"])
+
+    next_job = (TestBotJob.objects
+               .filter(batch_id=job.batch_id, order=job.order + 1, status="queued")
+               .first())
+    if next_job:
+        delay = random.uniform(next_job.pause_min * 60, next_job.pause_max * 60)
+        next_job.status = "pending"
+        next_job.scheduled_at = djtz.now() + timedelta(seconds=delay)
+        next_job.save(update_fields=["status", "scheduled_at"])
+    return True

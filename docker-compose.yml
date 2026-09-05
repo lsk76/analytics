@@ -90,5 +90,10 @@ services:
   # TELEGRAM_BOT_TOKEN в env (або bot_token на профілі).
   worker-publish:        { <<: *worker, command: python manage.py run_worker --stage publish --interval 30 }
 
+  # --- test-bot worker (accounts.TestBotJob: тестовий прогін бота через акаунт) --
+  # TASKLESS: черга з паузою 10-30 хв між акаунтами вже закладена в next-job
+  # scheduled_at, тож --interval тут — лише idle-сон між перевірками черги.
+  worker-test-bot:       { <<: *worker, command: python manage.py run_worker --stage test_bot --interval 60 }
+
 volumes:
   pgdata:

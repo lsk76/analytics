@@ -3,60 +3,66 @@
 <div class="breadcrumbs">
   <a href="{% url 'admin:index' %}">Головна</a> ›
   <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
-  Статус прогону {{ run_id }}
+  Статус прогону {{ batch_id }}
 </div>
 {% endblock %}
 
-{% if status and not status.done %}
+{% if not all_finished %}
 {% block extrahead %}<meta http-equiv="refresh" content="15">{% endblock %}
 {% endif %}
 
 {% block content %}
 <div style="max-width:720px">
-  {% if not status %}
-    <p>Прогін <code>{{ run_id }}</code> не знайдено (можливо, ще не встиг стартувати — онови сторінку).</p>
-  {% else %}
-    <p>
-      <b>Бот:</b> {{ status.bot_username }} &nbsp;
-      <b>Пауза між акаунтами:</b> {{ status.pause_min }}-{{ status.pause_max }} хв &nbsp;
-      <b>Акаунтів:</b> {{ status.total }} &nbsp;
-      <b>Стан:</b>
-      {% if status.done %}<span style="color:#16a34a">✓ завершено</span>
-      {% else %}<span style="color:#b45309">⏳ виконується… (сторінка сама оновиться за 15с)</span>{% endif %}
-    </p>
+  <p>
+    <b>Стан:</b>
+    {% if all_finished %}<span style="color:#16a34a">✓ завершено</span>
+    {% else %}<span style="color:#b45309">⏳ виконується… (сторінка сама оновиться за 15с)</span>{% endif %}
+  </p>
 
-    {% for entry in status.entries %}
-      {% if entry.wait %}
-        <p style="color:#6b7280">⏸ пауза ~{{ entry.waiting_minutes }} хв перед «{{ entry.before_account }}»…</p>
-      {% else %}
-      <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
-        <h3 style="margin-top:0">
-          {{ entry.account }} ({{ entry.phone }}):
-          {% if entry.ok %}<span style="color:#16a34a">✓ завершено</span>
-          {% else %}<span style="color:#b91c1c">✗ {{ entry.error }}</span>{% endif %}
-        </h3>
-        <ol>
-          {% for step in entry.steps %}
-          <li style="margin-bottom:10px">
-            {% if step.error %}
-              <span style="color:#b91c1c">{{ step.error }}</span>
-            {% else %}
-              <div><b>Текст:</b> {{ step.text }}</div>
-              {% if step.buttons %}
-                <div><b>Кнопки:</b> {{ step.buttons|join:" | " }}</div>
-                {% if step.clicked %}<div><b>Натиснуто:</b> {{ step.clicked }}</div>{% endif %}
-              {% endif %}
-              {% if step.sent_feedback %}
-                <div><b>Надіслано відгук:</b> {{ step.sent_feedback }}</div>
-              {% endif %}
-            {% endif %}
-          </li>
-          {% endfor %}
-        </ol>
-      </div>
-      {% endif %}
-    {% endfor %}
+  {% if can_cancel %}
+  <form method="post" style="margin-bottom:18px">{% csrf_token %}
+    <button type="submit" name="action" value="cancel" class="button"
+            style="background:#b91c1c;color:#fff"
+            onclick="return confirm('Скасувати завдання, що ще не почались?')">
+      ⏹ Скасувати чергу
+    </button>
+  </form>
   {% endif %}
+
+  {% for job in jobs %}
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <h3 style="margin-top:0">
+      {{ job.account.name }} ({{ job.account.phone_number }}):
+      {% if job.status == "done" %}<span style="color:#16a34a">✓ завершено</span>
+      {% elif job.status == "failed" %}<span style="color:#b91c1c">✗ {{ job.error }}</span>
+      {% elif job.status == "running" %}<span style="color:#b45309">⏳ виконується</span>
+      {% elif job.status == "pending" %}<span style="color:#6b7280">🕓 у черзі, готове до запуску</span>
+      {% elif job.status == "queued" %}<span style="color:#6b7280">⏸ чекає попереднього (пауза {{ job.pause_min }}-{{ job.pause_max }} хв)</span>
+      {% elif job.status == "cancelled" %}<span style="color:#6b7280">— скасовано</span>
+      {% endif %}
+    </h3>
+    {% if job.result.steps %}
+    <ol>
+      {% for step in job.result.steps %}
+      <li style="margin-bottom:10px">
+        {% if step.error %}
+          <span style="color:#b91c1c">{{ step.error }}</span>
+        {% else %}
+          <div><b>Текст:</b> {{ step.text }}</div>
+          {% if step.buttons %}
+            <div><b>Кнопки:</b> {{ step.buttons|join:" | " }}</div>
+            {% if step.clicked %}<div><b>Натиснуто:</b> {{ step.clicked }}</div>{% endif %}
+          {% endif %}
+          {% if step.sent_feedback %}
+            <div><b>Надіслано відгук:</b> {{ step.sent_feedback }}</div>
+          {% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </div>
+  {% endfor %}
 
   <p><a href="{% url 'admin:accounts_telegramaccount_changelist' %}">← назад до списку акаунтів</a></p>
 </div>

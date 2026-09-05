@@ -20,6 +20,9 @@ Stage worker — polls the DB for posts/chunks at its stage and processes them.
     python manage.py run_worker --stage info_screen
     python manage.py run_worker --stage info_event
 
+    # accounts: тестовий прогін бота (taskless, черга accounts.TestBotJob)
+    python manage.py run_worker --stage test_bot
+
     # options
     --task <slug>     only this task (default: all active tasks of the
                       stage's pipeline — mon_* → "monitor", res_* → "research",
@@ -70,6 +73,15 @@ except ImportError as _e:  # noqa: BLE001
     import sys
     print(f"[run_worker] publish-стадія недоступна: {_e!r}", file=sys.stderr)
 
+# accounts: тестовий прогін бота (services/test_bot_stage.py, черга TestBotJob).
+# Захисний імпорт (залежить від telethon, вже потрібного і для check_alive/authorize).
+try:
+    from accounts.services.test_bot_stage import test_bot_once
+    ALL_RUNNERS["test_bot"] = test_bot_once
+except ImportError as _e:  # noqa: BLE001
+    import sys
+    print(f"[run_worker] test_bot-стадія недоступна: {_e!r}", file=sys.stderr)
+
 # Стадії, що працюють НЕ по задачах (ранер викликається без аргументу).
 # info_collect полить ДЖЕРЕЛА (Source): одне джерело живить кілька задач,
 # тож цикл «for task» для нього не має сенсу — черга полінгу глобальна.
@@ -77,7 +89,7 @@ except ImportError as _e:  # noqa: BLE001
 # Ретеншн (info_retention) — навпаки, ПЕР-ЗАДАЧНА операція (чистить пости
 # task.info_retention_days), тож іде звичайним циклом задач (не тут).
 # publish — теж по НЕ-задачах: ітерує PublishConfig-профілі, а не AnalysisTask.
-TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish"}
+TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish", "test_bot"}
 
 
 class Command(BaseCommand):

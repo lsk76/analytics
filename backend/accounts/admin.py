@@ -1,77 +1,12 @@
-import json
-import random
-import threading
-import time
 import uuid
-from pathlib import Path
 
-from django.conf import settings
 from django.contrib import admin, messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
-from django.utils import timezone
 from django.utils.html import format_html
 
-from .models import Proxy, TelegramAccount
+from .models import Proxy, TelegramAccount, TestBotJob
 from .services.telegram_client import TelegramUserClient
-
-TEST_BOT_RUNS_DIR = Path(settings.BASE_DIR) / "_dir" / "_test_bot_runs"
-
-
-def _test_bot_status_path(run_id: str) -> Path:
-    TEST_BOT_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    return TEST_BOT_RUNS_DIR / f"{run_id}.json"
-
-
-def _write_test_bot_status(run_id: str, status: dict) -> None:
-    _test_bot_status_path(run_id).write_text(json.dumps(status, ensure_ascii=False, default=str))
-
-
-def _read_test_bot_status(run_id: str) -> dict | None:
-    path = _test_bot_status_path(run_id)
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
-
-
-def _run_test_bot_queue(run_id: str, account_ids: list, bot_username: str,
-                        pause_min: int, pause_max: int, feedback_text: str) -> None:
-    """Фоновий тред: акаунти по черзі, з довільною паузою pause_min..pause_max хв між ними.
-
-    Живе, поки живий процес web (daemon-тред) — переживає лише в межах поточного
-    контейнера; рестарт/деплой обірве недороблену чергу. Прогрес пишеться у файл
-    на спільному томі, щоб його бачили всі gunicorn-воркери, що обслуговують
-    сторінку статусу.
-    """
-    accounts = list(TelegramAccount.objects.filter(pk__in=account_ids).order_by("id"))
-    status = {
-        "run_id": run_id, "bot_username": bot_username,
-        "pause_min": pause_min, "pause_max": pause_max,
-        "total": len(accounts), "entries": [], "done": False,
-        "started_at": timezone.now().isoformat(),
-    }
-    _write_test_bot_status(run_id, status)
-    for i, account in enumerate(accounts):
-        if i > 0:
-            delay = random.uniform(pause_min * 60, pause_max * 60)
-            status["entries"].append({
-                "wait": True, "waiting_minutes": round(delay / 60, 1),
-                "before_account": account.name,
-            })
-            _write_test_bot_status(run_id, status)
-            time.sleep(delay)
-        res = TelegramUserClient.test_bot_flow_sync(account, bot_username,
-                                                     feedback_text=feedback_text)
-        status["entries"].append({
-            "account_id": account.id, "account": account.name,
-            "phone": account.phone_number, "ok": res.get("ok"),
-            "error": res.get("error"), "steps": res.get("steps", []),
-            "finished_at": timezone.now().isoformat(),
-        })
-        _write_test_bot_status(run_id, status)
-    status["done"] = True
-    status["finished_at"] = timezone.now().isoformat()
-    _write_test_bot_status(run_id, status)
 
 
 @admin.register(Proxy)
@@ -144,7 +79,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("test-bot/",
                  self.admin_site.admin_view(self.test_bot_view),
                  name="accounts_telegramaccount_test_bot"),
-            path("test-bot/<str:run_id>/status/",
+            path("test-bot/<str:batch_id>/status/",
                  self.admin_site.admin_view(self.test_bot_status_view),
                  name="accounts_telegramaccount_test_bot_status"),
         ]
@@ -156,6 +91,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     TEST_BOT_PAUSE_MAX_DEFAULT = 30
 
     def test_bot_view(self, request):
+        """Поставити в чергу TestBotJob по одному на акаунт. Виконує воркер `run_worker --stage test_bot`."""
         ids_raw = request.GET.get("ids", "")
         ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
         accounts = list(TelegramAccount.objects.filter(pk__in=ids).order_by("id"))
@@ -175,16 +111,19 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                 messages.error(request, "Мін. пауза ≥ 0, макс. пауза ≥ мін.")
                 return redirect(f"{request.path}?ids={ids_raw}")
 
-            run_id = uuid.uuid4().hex[:12]
-            threading.Thread(
-                target=_run_test_bot_queue,
-                args=(run_id, ids, bot_username, pause_min, pause_max, self.TEST_BOT_FEEDBACK),
-                daemon=True,
-            ).start()
+            batch_id = uuid.uuid4().hex[:12]
+            for i, account in enumerate(accounts):
+                TestBotJob.objects.create(
+                    batch_id=batch_id, order=i, account=account,
+                    bot_username=bot_username, feedback_text=self.TEST_BOT_FEEDBACK,
+                    pause_min=pause_min, pause_max=pause_max,
+                    status="pending" if i == 0 else "queued",
+                )
             messages.success(request,
-                             f"Чергу запущено: {len(accounts)} акаунт(и), пауза {pause_min}-{pause_max} "
-                             "хв між ними. Онови сторінку статусу, щоб побачити прогрес.")
-            return redirect("admin:accounts_telegramaccount_test_bot_status", run_id)
+                             f"У чергу поставлено {len(accounts)} акаунт(и), пауза "
+                             f"{pause_min}-{pause_max} хв між ними. Виконує воркер "
+                             "`run_worker --stage test_bot` — онови сторінку статусу для прогресу.")
+            return redirect("admin:accounts_telegramaccount_test_bot_status", batch_id)
 
         ctx = {
             **self.admin_site.each_context(request),
@@ -198,14 +137,28 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         }
         return render(request, "admin/accounts/telegramaccount/test_bot.html", ctx)
 
-    def test_bot_status_view(self, request, run_id):
-        status = _read_test_bot_status(run_id)
+    def test_bot_status_view(self, request, batch_id):
+        if request.method == "POST" and request.POST.get("action") == "cancel":
+            n = (TestBotJob.objects.filter(batch_id=batch_id, status__in=["queued", "pending"])
+                 .update(status="cancelled"))
+            messages.success(request, f"Скасовано {n} завдання(нь), що ще не почались.")
+            return redirect(request.path)
+
+        jobs = list(TestBotJob.objects.filter(batch_id=batch_id).select_related("account")
+                    .order_by("order"))
+        if not jobs:
+            messages.error(request, "Такого запуску не знайдено.")
+            return redirect("admin:accounts_telegramaccount_changelist")
+
+        can_cancel = any(j.status in ("queued", "pending") for j in jobs)
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
-            "run_id": run_id,
-            "status": status,
-            "title": f"Прогін бота — статус {run_id}",
+            "batch_id": batch_id,
+            "jobs": jobs,
+            "can_cancel": can_cancel,
+            "all_finished": all(j.status in ("done", "failed", "cancelled") for j in jobs),
+            "title": f"Прогін бота — статус {batch_id}",
         }
         return render(request, "admin/accounts/telegramaccount/test_bot_status.html", ctx)
 

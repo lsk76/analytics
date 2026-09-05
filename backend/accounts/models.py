@@ -138,3 +138,62 @@ class TelegramAccount(models.Model):
 
     def __str__(self):
         return f"{'✓' if self.is_authenticated else '○'} {self.name} ({self.phone_number})"
+
+
+class TestBotJob(models.Model):
+    """Черга «тестовий прогін бота» — один запис на акаунт у межах одного запуску (batch).
+
+    Ланцюжок у batch виконується послідовно: перше завдання одразу `pending`,
+    решта створюються `queued` і переходять у `pending` (з `scheduled_at` — випадкова
+    пауза pause_min..pause_max хв від моменту завершення попереднього) лише коли
+    попереднє в цьому ж batch завершилось. Воркер (`test_bot` стадія, taskless,
+    claim через SELECT ... FOR UPDATE SKIP LOCKED) забирає найдавніше добуте
+    `pending`-завдання; `scheduled_at` — той самий гейт-патерн, що й
+    `CollectChunk.next_retry_at` у events-конвеєрі.
+    """
+    STATUS_CHOICES = [
+        ("queued", "У черзі (чекає попереднього)"),
+        ("pending", "Готове до запуску"),
+        ("running", "Виконується"),
+        ("done", "Завершено"),
+        ("failed", "Помилка"),
+        ("cancelled", "Скасовано"),
+    ]
+
+    batch_id = models.CharField(max_length=32, db_index=True, verbose_name="Запуск")
+    order = models.PositiveIntegerField(default=0, verbose_name="Порядок у запуску")
+    account = models.ForeignKey(
+        TelegramAccount, on_delete=models.CASCADE, related_name="test_bot_jobs",
+        verbose_name="Акаунт",
+    )
+    bot_username = models.CharField(max_length=64, verbose_name="Бот")
+    feedback_text = models.CharField(max_length=200, verbose_name="Текст відгуку")
+    pause_min = models.PositiveIntegerField(verbose_name="Пауза від, хв")
+    pause_max = models.PositiveIntegerField(verbose_name="Пауза до, хв")
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="queued",
+                              db_index=True, verbose_name="Статус")
+    scheduled_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, verbose_name="Не раніше",
+        help_text="Гейт готовності: pending-завдання забирається воркером лише після цього часу.",
+    )
+    locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Захоплено")
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="Спроб")
+
+    result = models.JSONField(null=True, blank=True, verbose_name="Результат (кроки)")
+    error = models.TextField(blank=True, verbose_name="Помилка")
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Завершено")
+
+    class Meta:
+        verbose_name = "Тестовий прогін бота — завдання"
+        verbose_name_plural = "Тестовий прогін бота — завдання"
+        ordering = ["batch_id", "order"]
+        indexes = [
+            models.Index(fields=["status", "scheduled_at"]),
+            models.Index(fields=["batch_id", "order"]),
+        ]
+
+    def __str__(self):
+        return f"{self.batch_id}#{self.order} {self.account.name} [{self.status}]"
