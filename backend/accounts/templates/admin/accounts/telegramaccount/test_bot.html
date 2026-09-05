@@ -12,21 +12,19 @@
 <div style="max-width:640px">
   <p><b>Акаунт:</b> {{ account.name }} &nbsp; <b>Телефон:</b> {{ account.phone_number }}</p>
   <p class="help">
-    Акаунт заходить у вказаного бота, шле /start, натискає кнопки (по черзі, або за
-    заданими варіантами), а на кроці без кнопок надсилає текст відгуку. Фактичні
-    тексти й кнопки кожного кроку показуються нижче — звір їх вручну з очікуваними.
+    Акаунт заходить у вибраного бота, шле /start, на кожному кроці з кнопками тисне
+    випадковий варіант (1-4), а на кроці без кнопок надсилає відгук «хорошего не много».
+    Фактичні тексти й кнопки кожного кроку показуються нижче — звір їх вручну з очікуваними.
   </p>
 
   <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
     <form method="post">{% csrf_token %}
-      <p><label>Username бота:<br>
-           <input type="text" name="bot_username" placeholder="@regionalnaya_programa_bot"
-                  style="width:100%" autofocus></label></p>
-      <p><label>Текст відгуку (на кроці без кнопок):<br>
-           <input type="text" name="feedback_text" placeholder="Автотест: все працює"
-                  style="width:100%"></label></p>
-      <p><label>Варіанти відповідей по кроках, через кому (необов'язково, з 1; порожньо — завжди перший):<br>
-           <input type="text" name="choices" placeholder="4,1,3,2,1,2" style="width:100%"></label></p>
+      <p><label>Бот:<br>
+           <select name="bot_username" style="width:100%">
+             {% for choice in bot_choices %}
+               <option value="{{ choice }}">{{ choice }}</option>
+             {% endfor %}
+           </select></label></p>
       <button type="submit" class="button default">▶️ Запустити прогін</button>
     </form>
   </div>

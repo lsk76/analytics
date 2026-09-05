@@ -225,9 +225,10 @@ class TelegramUserClient:
         тексти й кнопки кожного кроку, щоб оператор звірив їх вручну.
         choices — індекси кнопок (з 0) для кожного кроку з кнопками; якщо
         коротший за кількість кроків або не заданий — решта кроків тиснуть
-        першу кнопку. Крок без кнопок після відправки відгуку вважається
-        фінальним.
+        випадкову кнопку (з перших чотирьох варіантів, як типовий опитувальник
+        1-4). Крок без кнопок після відправки відгуку вважається фінальним.
         """
+        import random
         async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
             loop = asyncio.get_event_loop()
             deadline = loop.time() + timeout
@@ -262,7 +263,10 @@ class TelegramUserClient:
                     steps.append(step)
                     last_id, last_text = msg.id, msg.text or ""
                     if buttons:
-                        idx = choices[q_index] if choices and q_index < len(choices) else 0
+                        if choices and q_index < len(choices):
+                            idx = choices[q_index]
+                        else:
+                            idx = random.randint(0, min(3, len(buttons) - 1))
                         idx = max(0, min(idx, len(buttons) - 1))
                         step["clicked"] = buttons[idx]
                         q_index += 1

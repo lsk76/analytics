@@ -84,39 +84,29 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         ]
         return custom + super().get_urls()
 
+    TEST_BOT_CHOICES = ["@regionalnaya_programa_bot"]
+    TEST_BOT_FEEDBACK = "хорошего не много"
+
     def test_bot_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)
         result = None
         if request.method == "POST":
-            bot_username = request.POST.get("bot_username", "").strip()
-            feedback_text = (request.POST.get("feedback_text", "").strip()
-                             or "Автотест: все працює")
-            choices_raw = request.POST.get("choices", "").strip()
-            choices = None
-            if not bot_username:
-                messages.error(request, "Вкажи username бота (наприклад @regionalnaya_programa_bot).")
+            bot_username = request.POST.get("bot_username", "").strip() or self.TEST_BOT_CHOICES[0]
+            result = TelegramUserClient.test_bot_flow_sync(
+                account, bot_username, feedback_text=self.TEST_BOT_FEEDBACK,
+            )
+            if result.get("ok"):
+                messages.success(request,
+                                 f"Прогін завершено, кроків: {len(result.get('steps', []))}.")
             else:
-                if choices_raw:
-                    try:
-                        choices = [int(x) - 1 for x in choices_raw.split(",") if x.strip()]
-                    except ValueError:
-                        messages.error(request, "Варіанти відповідей — це числа через кому (1,3,2…).")
-                        choices = "invalid"
-                if choices != "invalid":
-                    result = TelegramUserClient.test_bot_flow_sync(
-                        account, bot_username, feedback_text=feedback_text, choices=choices,
-                    )
-                    if result.get("ok"):
-                        messages.success(request,
-                                         f"Прогін завершено, кроків: {len(result.get('steps', []))}.")
-                    else:
-                        messages.error(request, f"Помилка прогону: {result.get('error')}")
+                messages.error(request, f"Помилка прогону: {result.get('error')}")
 
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
             "account": account,
             "result": result,
+            "bot_choices": self.TEST_BOT_CHOICES,
             "title": f"Тестовий прогін бота: {account.name}",
         }
         return render(request, "admin/accounts/telegramaccount/test_bot.html", ctx)
