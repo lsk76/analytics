@@ -10,6 +10,9 @@ import re
 from typing import Optional, Tuple
 
 from telethon import TelegramClient
+from telethon.errors import (AuthKeyUnregisteredError, PhoneNumberBannedError,
+                             SessionRevokedError, UserDeactivatedBanError,
+                             UserDeactivatedError)
 from telethon.sessions import StringSession
 
 
@@ -63,6 +66,44 @@ class TelegramUserClient:
             # Telegram це ознака вкраденої сесії. Порожні поля = дефолти Telethon.
             **account.client_kwargs(),
         )
+
+    # ---- перевірка живості (лише читання: get_me, нічого не надсилає) ----
+    @classmethod
+    def check_alive_sync(cls, account) -> dict:
+        """Стан акаунта БЕЗ надсилання повідомлень: connect + get_me.
+
+        Розрізняє живий / розлогінений / забанений / деактивований /
+        відкликаний / таймаут проксі. НЕ пише в @SpamBot і нікому іншому.
+        """
+        async def _run():
+            client = cls._client(account)
+            try:
+                await asyncio.wait_for(client.connect(), timeout=25)
+                if not await client.is_user_authorized():
+                    return {"state": "розлогінений", "ok": False}
+                me = await client.get_me()
+                uname = f"@{me.username}" if me.username else "—"
+                prem = " · premium" if getattr(me, "premium", False) else ""
+                return {"state": "живий", "ok": True, "detail": f"{uname}{prem}"}
+            except (UserDeactivatedBanError, PhoneNumberBannedError):
+                return {"state": "ЗАБАНЕНИЙ", "ok": False}
+            except UserDeactivatedError:
+                return {"state": "деактивований", "ok": False}
+            except (AuthKeyUnregisteredError, SessionRevokedError):
+                return {"state": "сесію відкликано", "ok": False}
+            except Exception as e:  # noqa: BLE001
+                return {"state": f"помилка: {type(e).__name__}", "ok": False,
+                        "detail": str(e)[:80]}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=75)) or {"state": "?", "ok": False}
+        except Exception:
+            return {"state": "таймаут (75с, найімовірніше мертва проксі)", "ok": False}
 
     # ---- auth (code flow) ----
     @classmethod

@@ -15,10 +15,42 @@ class ProxyAdmin(admin.ModelAdmin):
 
 @admin.register(TelegramAccount)
 class TelegramAccountAdmin(admin.ModelAdmin):
-    list_display = ("name", "phone_number", "is_authenticated", "is_active", "last_used_at")
+    list_display = ("name", "phone_number", "proxy", "is_authenticated", "is_active",
+                    "last_used_at")
     list_filter = ("is_authenticated", "is_active")
     search_fields = ("name", "phone_number")
     readonly_fields = ("authorize_button",)
+    actions = ["check_alive"]
+
+    @admin.action(description="🔎 Перевірити живість (get_me через проксі, без надсилання)")
+    def check_alive(self, request, queryset):
+        """Прогнати кожен виділений акаунт через check_alive_sync і показати стан.
+
+        Читання: connect + get_me. Нічого не надсилає. Послідовно, з паузою,
+        щоб не бити всі акаунти в мережу одночасно.
+        """
+        import time as _time
+        from django.utils import timezone as _tz
+
+        alive = dead = 0
+        for acc in queryset.order_by("id"):
+            res = TelegramUserClient.check_alive_sync(acc)
+            detail = f" — {res['detail']}" if res.get("detail") else ""
+            if res.get("ok"):
+                alive += 1
+                acc.last_used_at = _tz.now()
+                acc.save(update_fields=["last_used_at"])
+                self.message_user(request,
+                                  f"#{acc.id} {acc.phone_number}: {res['state']}{detail}",
+                                  level=messages.SUCCESS)
+            else:
+                dead += 1
+                self.message_user(request,
+                                  f"#{acc.id} {acc.phone_number}: {res['state']}{detail}",
+                                  level=messages.WARNING)
+            _time.sleep(2)
+        self.message_user(request, f"Готово: живих {alive}, проблемних {dead} із {alive+dead}.",
+                          level=messages.INFO if not dead else messages.WARNING)
 
     # ---- authorize button on the change page ----
     @admin.display(description="Авторизація")
