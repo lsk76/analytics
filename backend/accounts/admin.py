@@ -15,6 +15,26 @@ class ProxyAdmin(admin.ModelAdmin):
     list_filter = ("proxy_type", "is_active", "is_working")
 
 
+@admin.register(TestBotJob)
+class TestBotJobAdmin(admin.ModelAdmin):
+    list_display = ("batch_id", "order", "account", "bot_username", "status",
+                    "pause_min", "pause_max", "created_at", "finished_at", "status_link")
+    list_filter = ("status", "bot_username")
+    search_fields = ("batch_id", "account__name", "account__phone_number")
+    readonly_fields = ("batch_id", "order", "account", "bot_username", "feedback_text",
+                      "pause_min", "pause_max", "status", "scheduled_at", "locked_at",
+                      "attempts", "result", "error", "created_at", "finished_at")
+    ordering = ("-created_at", "order")
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.display(description="Статус запуску")
+    def status_link(self, obj):
+        url = reverse("admin:accounts_telegramaccount_test_bot_status", args=[obj.batch_id])
+        return format_html('<a href="{}">переглянути →</a>', url)
+
+
 @admin.register(TelegramAccount)
 class TelegramAccountAdmin(admin.ModelAdmin):
     list_display = ("name", "phone_number", "proxy", "is_authenticated", "is_active",
