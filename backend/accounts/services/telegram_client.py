@@ -55,6 +55,16 @@ class TelegramUserClient:
             return (m.group(1), int(m.group(2)))
         return None
 
+    @staticmethod
+    def _prime_proxy(account) -> None:
+        """Force-load account.proxy (FK) синхронно, поки ще немає активного event loop.
+
+        Ліниве звернення до FK усередині asyncio.run() (з _client, викликаного
+        з корутини) валить Django SynchronousOnlyOperation — ORM забороняє
+        неявний доступ з активного loop'а.
+        """
+        account.proxy  # noqa: B018 — навмисно, лише щоб прогріти кеш FK
+
     @classmethod
     def _client(cls, account) -> TelegramClient:
         proxy = account.proxy.to_telethon_proxy() if account.proxy else None
@@ -100,6 +110,7 @@ class TelegramUserClient:
                 except Exception:
                     pass
 
+        cls._prime_proxy(account)
         try:
             return run_async(asyncio.wait_for(_run(), timeout=75)) or {"state": "?", "ok": False}
         except Exception:
@@ -119,6 +130,7 @@ class TelegramUserClient:
                         "session_string": client.session.save()}
             finally:
                 await client.disconnect()
+        cls._prime_proxy(account)
         res = run_async(_run())
         if res and res.get("success"):
             account.session_string = res["session_string"]
@@ -143,6 +155,7 @@ class TelegramUserClient:
                 return {"success": True, "session_string": client.session.save()}
             finally:
                 await client.disconnect()
+        cls._prime_proxy(account)
         res = run_async(_run())
         if res and res.get("success"):
             account.session_string = res["session_string"]
@@ -267,6 +280,7 @@ class TelegramUserClient:
                 except Exception:
                     pass
 
+        cls._prime_proxy(account)
         try:
             return run_async(asyncio.wait_for(_run(), timeout=180)) or {
                 "ok": False, "error": "порожній результат", "steps": []}
