@@ -6,12 +6,17 @@ DC          = docker compose
 #   DC_ANALYTICS — сервер аналітики (важкий конвеєр collect…dedup + графіки)
 DC_PROD      = docker compose -f docker-compose.monitor.yml
 DC_ANALYTICS = docker compose -f docker-compose.prod.yml
+# Жива розкладка сервера analytics.matter-d.pro (переїзд 02.09.2026): базовий
+# compose + monitor разом. НЕ prod.yml — на ньому прод НЕ запущений. Уточнено
+# кровʼю: команди з одним файлом не бачать половини воркерів.
+DC_LIVE      = docker compose -f docker-compose.yml -f docker-compose.monitor.yml
 
 .PHONY: help dev prod build start stop restart logs ps shell dbshell \
         migrate makemigrations superuser changepassword collectstatic \
         seed run backup restore list-backups prod-build prod-logs prod-stop clean \
         prod-analytics prod-analytics-build prod-analytics-logs prod-analytics-ps prod-analytics-stop \
-        workers workers-logs workers-stop scale-workers worker
+        workers workers-logs workers-stop scale-workers worker \
+        live-restart-web live-restart live-ps live-logs live-collectstatic
 
 # Default
 help:
@@ -182,6 +187,22 @@ restore:
 	@echo "Restoring $(FILE) into tg_events (existing data will be replaced)..."
 	$(DC) exec -T db pg_restore -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-tg_events} --clean --if-exists < $(FILE)
 	@echo "Restored."
+
+# ---------- Живий прод (analytics.matter-d.pro): docker-compose.yml + monitor.yml ----------
+live-ps:                   # статус контейнерів живого прода
+	$(DC_LIVE) ps
+
+live-logs:                 # логи web (Ctrl-C щоб вийти)
+	$(DC_LIVE) logs -f --tail=50 web
+
+live-collectstatic:        # перезібрати статику адмінки
+	$(DC_LIVE) exec -T web python manage.py collectstatic --noinput
+
+live-restart-web:          # перезапустити лише web (підхопити зміни .py-коду адмінки)
+	$(DC_LIVE) restart web
+
+live-restart:              # перезапустити ВЕСЬ живий стек (не чіпаючи том БД)
+	$(DC_LIVE) restart
 
 clean:
 	$(DC) down -v
