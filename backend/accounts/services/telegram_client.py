@@ -202,6 +202,77 @@ class TelegramUserClient:
             return out
         return await cls._with_client(account, fn)
 
+    # ---- тестовий прогін довільного бота (опитувальники тощо) ----
+    @classmethod
+    def test_bot_flow_sync(cls, account, bot_username: str, feedback_text: str = "",
+                           choices: Optional[list] = None, max_steps: int = 15) -> dict:
+        """Пройти /start → серію кнопкових кроків → (за наявності) відгук текстом.
+
+        Не знає наперед текстів/варіантів конкретного бота — фіксує фактичні
+        тексти й кнопки кожного кроку, щоб оператор звірив їх вручну.
+        choices — індекси кнопок (з 0) для кожного кроку з кнопками; якщо
+        коротший за кількість кроків або не заданий — решта кроків тиснуть
+        першу кнопку. Крок без кнопок після відправки відгуку вважається
+        фінальним.
+        """
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            steps = []
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "steps": steps}
+                bot = await client.get_entity(bot_username)
+                await client.send_message(bot, "/start")
+                last_id, last_text, q_index, sent_feedback = 0, "", 0, False
+                for i in range(max_steps):
+                    msg = await _wait_reply(client, bot, last_id, last_text)
+                    if msg is None:
+                        steps.append({"step": i + 1, "error": "немає відповіді за 15с"})
+                        return {"ok": False, "error": "таймаут очікування відповіді бота",
+                                "steps": steps}
+                    buttons = [b.text for row in (msg.buttons or []) for b in row]
+                    step = {"step": i + 1, "text": msg.text or "", "buttons": buttons}
+                    steps.append(step)
+                    last_id, last_text = msg.id, msg.text or ""
+                    if buttons:
+                        idx = choices[q_index] if choices and q_index < len(choices) else 0
+                        idx = max(0, min(idx, len(buttons) - 1))
+                        step["clicked"] = buttons[idx]
+                        q_index += 1
+                        await msg.click(idx)
+                    elif not sent_feedback and feedback_text:
+                        await client.send_message(bot, feedback_text)
+                        step["sent_feedback"] = feedback_text
+                        sent_feedback = True
+                    else:
+                        break
+                return {"ok": True, "steps": steps}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=180)) or {
+                "ok": False, "error": "порожній результат", "steps": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "steps": []}
+
     @classmethod
     async def get_channel_meta(cls, account, handle: str) -> dict:
         async def fn(client):

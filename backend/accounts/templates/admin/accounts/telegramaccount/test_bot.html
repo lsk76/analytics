@@ -1,0 +1,64 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">{{ account.name }}</a> ›
+  Тестовий прогін бота
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:640px">
+  <p><b>Акаунт:</b> {{ account.name }} &nbsp; <b>Телефон:</b> {{ account.phone_number }}</p>
+  <p class="help">
+    Акаунт заходить у вказаного бота, шле /start, натискає кнопки (по черзі, або за
+    заданими варіантами), а на кроці без кнопок надсилає текст відгуку. Фактичні
+    тексти й кнопки кожного кроку показуються нижче — звір їх вручну з очікуваними.
+  </p>
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <form method="post">{% csrf_token %}
+      <p><label>Username бота:<br>
+           <input type="text" name="bot_username" placeholder="@regionalnaya_programa_bot"
+                  style="width:100%" autofocus></label></p>
+      <p><label>Текст відгуку (на кроці без кнопок):<br>
+           <input type="text" name="feedback_text" placeholder="Автотест: все працює"
+                  style="width:100%"></label></p>
+      <p><label>Варіанти відповідей по кроках, через кому (необов'язково, з 1; порожньо — завжди перший):<br>
+           <input type="text" name="choices" placeholder="4,1,3,2,1,2" style="width:100%"></label></p>
+      <button type="submit" class="button default">▶️ Запустити прогін</button>
+    </form>
+  </div>
+
+  {% if result %}
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <h3 style="margin-top:0">
+      Результат:
+      {% if result.ok %}<span style="color:#16a34a">✓ завершено</span>
+      {% else %}<span style="color:#b91c1c">✗ {{ result.error }}</span>{% endif %}
+    </h3>
+    <ol>
+      {% for step in result.steps %}
+      <li style="margin-bottom:10px">
+        {% if step.error %}
+          <span style="color:#b91c1c">{{ step.error }}</span>
+        {% else %}
+          <div><b>Текст:</b> {{ step.text }}</div>
+          {% if step.buttons %}
+            <div><b>Кнопки:</b> {{ step.buttons|join:" | " }}</div>
+            {% if step.clicked %}<div><b>Натиснуто:</b> {{ step.clicked }}</div>{% endif %}
+          {% endif %}
+          {% if step.sent_feedback %}
+            <div><b>Надіслано відгук:</b> {{ step.sent_feedback }}</div>
+          {% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+
+  <p><a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a></p>
+</div>
+{% endblock %}

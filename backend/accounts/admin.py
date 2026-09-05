@@ -20,7 +20,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     list_filter = ("is_authenticated", "is_active")
     search_fields = ("name", "phone_number")
     readonly_fields = ("authorize_button",)
-    actions = ["check_alive"]
+    actions = ["check_alive", "test_bot_flow"]
 
     @admin.action(description="🔎 Перевірити живість (get_me через проксі, без надсилання)")
     def check_alive(self, request, queryset):
@@ -52,6 +52,15 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         self.message_user(request, f"Готово: живих {alive}, проблемних {dead} із {alive+dead}.",
                           level=messages.INFO if not dead else messages.WARNING)
 
+    @admin.action(description="🤖 Тестовий прогін бота (опитування через акаунт)")
+    def test_bot_flow(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(request, "Вибери рівно один акаунт для тестового прогону.",
+                              level=messages.ERROR)
+            return
+        account = queryset.first()
+        return redirect("admin:accounts_telegramaccount_test_bot", account.pk)
+
     # ---- authorize button on the change page ----
     @admin.display(description="Авторизація")
     def authorize_button(self, obj):
@@ -69,8 +78,48 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("<int:account_id>/authorize/",
                  self.admin_site.admin_view(self.authorize_view),
                  name="accounts_telegramaccount_authorize"),
+            path("<int:account_id>/test-bot/",
+                 self.admin_site.admin_view(self.test_bot_view),
+                 name="accounts_telegramaccount_test_bot"),
         ]
         return custom + super().get_urls()
+
+    def test_bot_view(self, request, account_id):
+        account = get_object_or_404(TelegramAccount, pk=account_id)
+        result = None
+        if request.method == "POST":
+            bot_username = request.POST.get("bot_username", "").strip()
+            feedback_text = (request.POST.get("feedback_text", "").strip()
+                             or "Автотест: все працює")
+            choices_raw = request.POST.get("choices", "").strip()
+            choices = None
+            if not bot_username:
+                messages.error(request, "Вкажи username бота (наприклад @regionalnaya_programa_bot).")
+            else:
+                if choices_raw:
+                    try:
+                        choices = [int(x) - 1 for x in choices_raw.split(",") if x.strip()]
+                    except ValueError:
+                        messages.error(request, "Варіанти відповідей — це числа через кому (1,3,2…).")
+                        choices = "invalid"
+                if choices != "invalid":
+                    result = TelegramUserClient.test_bot_flow_sync(
+                        account, bot_username, feedback_text=feedback_text, choices=choices,
+                    )
+                    if result.get("ok"):
+                        messages.success(request,
+                                         f"Прогін завершено, кроків: {len(result.get('steps', []))}.")
+                    else:
+                        messages.error(request, f"Помилка прогону: {result.get('error')}")
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "account": account,
+            "result": result,
+            "title": f"Тестовий прогін бота: {account.name}",
+        }
+        return render(request, "admin/accounts/telegramaccount/test_bot.html", ctx)
 
     def authorize_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)
