@@ -25,6 +25,7 @@ class TestBotJobAdmin(admin.ModelAdmin):
                       "pause_min", "pause_max", "status", "scheduled_at", "locked_at",
                       "attempts", "result", "error", "created_at", "finished_at")
     ordering = ("-created_at", "order")
+    actions = ["retry_job"]
 
     def has_add_permission(self, request):
         return False
@@ -33,6 +34,26 @@ class TestBotJobAdmin(admin.ModelAdmin):
     def status_link(self, obj):
         url = reverse("admin:accounts_telegramaccount_test_bot_status", args=[obj.batch_id])
         return format_html('<a href="{}">переглянути →</a>', url)
+
+    @admin.action(description="🔁 Повторити (скинути в чергу негайно)")
+    def retry_job(self, request, queryset):
+        n = 0
+        for job in queryset:
+            if job.status not in ("failed", "cancelled"):
+                continue
+            job.status = "pending"
+            job.scheduled_at = None
+            job.locked_at = None
+            job.error = ""
+            job.result = None
+            job.save(update_fields=["status", "scheduled_at", "locked_at", "error", "result"])
+            n += 1
+        if n:
+            self.message_user(request, f"Повернуто в чергу: {n}. Воркер підхопить негайно.",
+                              level=messages.SUCCESS)
+        else:
+            self.message_user(request, "Нічого не повторено — обирай завдання зі статусом "
+                              "«Помилка» або «Скасовано».", level=messages.WARNING)
 
 
 @admin.register(TelegramAccount)
