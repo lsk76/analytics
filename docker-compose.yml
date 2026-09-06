@@ -95,5 +95,8 @@ services:
   # scheduled_at, тож --interval тут — лише idle-сон між перевірками черги.
   worker-test-bot:       { <<: *worker, command: python manage.py run_worker --stage test_bot --interval 60 }
 
+  # --- warm-up worker (accounts.WarmUpJob: підписка акаунта на випадкові канали) --
+  worker-warm-up:        { <<: *worker, command: python manage.py run_worker --stage warm_up --interval 60 }
+
 volumes:
   pgdata:

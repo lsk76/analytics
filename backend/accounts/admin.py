@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .models import Proxy, TelegramAccount, TestBotJob
+from .models import Proxy, TelegramAccount, TestBotJob, WarmUpJob
 from .services.telegram_client import TelegramUserClient
 
 
@@ -13,6 +13,23 @@ from .services.telegram_client import TelegramUserClient
 class ProxyAdmin(admin.ModelAdmin):
     list_display = ("proxy_string", "proxy_type", "is_active", "is_working", "fail_count")
     list_filter = ("proxy_type", "is_active", "is_working")
+
+
+@admin.register(WarmUpJob)
+class WarmUpJobAdmin(admin.ModelAdmin):
+    list_display = ("account", "status", "handles_count", "created_at", "finished_at")
+    list_filter = ("status",)
+    search_fields = ("account__name", "account__phone_number")
+    readonly_fields = ("account", "handles", "status", "locked_at", "attempts",
+                      "result", "error", "created_at", "finished_at")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.display(description="Каналів")
+    def handles_count(self, obj):
+        return len(obj.handles or [])
 
 
 @admin.register(TestBotJob)
@@ -110,9 +127,14 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     def warm_up_channels(self, request, queryset):
         """Новий/обмежений акаунт не резолвить чужі юзернейми (UsernameNotOccupiedError),
         поки не має звичайної активності. Підписуємо на канали з довідника моніторингу
-        (analysis.Channel) — ті самі, що акаунт і так читає для збагачення/скрейпінгу."""
+        (analysis.Channel) — ті самі, що акаунт і так читає для збагачення/скрейпінгу.
+
+        Лише ставить у чергу (WarmUpJob) — join кожного каналу займає секунди-
+        десятки секунд (мережа + пауза 3-8с між ними), і кілька акаунтів одразу
+        синхронно в одному HTTP-запиті надійно валять 504 (nginx/gunicorn — 120с).
+        Виконує окремий воркер `run_worker --stage warm_up`.
+        """
         import random as _random
-        import time as _time
 
         from analysis.models import Channel
 
@@ -123,22 +145,15 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                               level=messages.ERROR)
             return
 
-        for i, acc in enumerate(queryset.order_by("id")):
+        n = 0
+        for acc in queryset.order_by("id"):
             handles = _random.sample(pool, min(_random.randint(5, 10), len(pool)))
-            res = TelegramUserClient.join_channels_sync(acc, handles)
-            if res.get("ok"):
-                self.message_user(request,
-                                  f"#{acc.id} {acc.phone_number}: підписано на "
-                                  f"{len(res['joined'])}/{len(handles)} "
-                                  f"({', '.join(res['joined']) or '—'})"
-                                  + (f"; не вдалось: {'; '.join(res['failed'])}"
-                                     if res['failed'] else ""),
-                                  level=messages.SUCCESS if res["joined"] else messages.WARNING)
-            else:
-                self.message_user(request, f"#{acc.id} {acc.phone_number}: {res.get('error')}",
-                                  level=messages.ERROR)
-            if i < queryset.count() - 1:
-                _time.sleep(3)
+            WarmUpJob.objects.create(account=acc, handles=handles)
+            n += 1
+        self.message_user(request,
+                          f"У чергу поставлено {n} акаунт(и). Виконує воркер "
+                          "`run_worker --stage warm_up` — прогрес дивись у "
+                          "«Прогрів акаунта — завдання».", level=messages.SUCCESS)
 
     # ---- authorize button on the change page ----
     @admin.display(description="Авторизація")

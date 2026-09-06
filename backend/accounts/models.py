@@ -197,3 +197,45 @@ class TestBotJob(models.Model):
 
     def __str__(self):
         return f"{self.batch_id}#{self.order} {self.account.name} [{self.status}]"
+
+
+class WarmUpJob(models.Model):
+    """Черга «прогрів акаунта» — підписка на кілька випадкових каналів.
+
+    Join кожного каналу займає секунди-десятки секунд (мережа + пауза 3-8с між
+    каналами) — забагато для одного HTTP-запиту адмінки (504 при кількох
+    акаунтах одразу, gunicorn/nginx timeout 120с). Тому виконує окрема
+    taskless-стадія `warm_up` (той самий claim-патерн, що й `test_bot`).
+    """
+    STATUS_CHOICES = [
+        ("pending", "Очікує"),
+        ("running", "Виконується"),
+        ("done", "Завершено"),
+        ("failed", "Помилка"),
+    ]
+
+    account = models.ForeignKey(
+        TelegramAccount, on_delete=models.CASCADE, related_name="warm_up_jobs",
+        verbose_name="Акаунт",
+    )
+    handles = models.JSONField(verbose_name="Канали (username без @)")
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending",
+                              db_index=True, verbose_name="Статус")
+    locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Захоплено")
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="Спроб")
+
+    result = models.JSONField(null=True, blank=True, verbose_name="Результат (joined/failed)")
+    error = models.TextField(blank=True, verbose_name="Помилка")
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Завершено")
+
+    class Meta:
+        verbose_name = "Прогрів акаунта — завдання"
+        verbose_name_plural = "Прогрів акаунта — завдання"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status"])]
+
+    def __str__(self):
+        return f"{self.account.name} [{self.status}] ({len(self.handles)} каналів)"
