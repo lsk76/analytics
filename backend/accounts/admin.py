@@ -35,22 +35,28 @@ class TestBotJobAdmin(admin.ModelAdmin):
         url = reverse("admin:accounts_telegramaccount_test_bot_status", args=[obj.batch_id])
         return format_html('<a href="{}">переглянути →</a>', url)
 
-    @admin.action(description="🔁 Повторити (скинути в чергу негайно)")
+    @admin.action(description="🔁 Повторити (з паузою pause_min-pause_max, як і решта черги)")
     def retry_job(self, request, queryset):
+        import random
+        from datetime import timedelta
+
+        from django.utils import timezone as _tz
+
         n = 0
         for job in queryset:
             if job.status not in ("failed", "cancelled"):
                 continue
+            delay = random.uniform(job.pause_min * 60, job.pause_max * 60)
             job.status = "pending"
-            job.scheduled_at = None
+            job.scheduled_at = _tz.now() + timedelta(seconds=delay)
             job.locked_at = None
             job.error = ""
             job.result = None
             job.save(update_fields=["status", "scheduled_at", "locked_at", "error", "result"])
             n += 1
         if n:
-            self.message_user(request, f"Повернуто в чергу: {n}. Воркер підхопить негайно.",
-                              level=messages.SUCCESS)
+            self.message_user(request, f"Повернуто в чергу: {n}, з паузою "
+                              "pause_min-pause_max цього завдання.", level=messages.SUCCESS)
         else:
             self.message_user(request, "Нічого не повторено — обирай завдання зі статусом "
                               "«Помилка» або «Скасовано».", level=messages.WARNING)
