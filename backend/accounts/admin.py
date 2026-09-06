@@ -68,8 +68,8 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                     "last_used_at")
     list_filter = ("is_authenticated", "is_active")
     search_fields = ("name", "phone_number")
-    readonly_fields = ("authorize_button",)
-    actions = ["check_alive", "test_bot_flow"]
+    readonly_fields = ("authorize_button", "channels_button")
+    actions = ["check_alive", "test_bot_flow", "warm_up_channels"]
 
     @admin.action(description="🔎 Перевірити живість (get_me через проксі, без надсилання)")
     def check_alive(self, request, queryset):
@@ -106,6 +106,40 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         ids = ",".join(str(pk) for pk in queryset.order_by("id").values_list("id", flat=True))
         return redirect(reverse("admin:accounts_telegramaccount_test_bot") + f"?ids={ids}")
 
+    @admin.action(description="🌱 Прогріти (підписати на 5-10 випадкових каналів з моніторингу)")
+    def warm_up_channels(self, request, queryset):
+        """Новий/обмежений акаунт не резолвить чужі юзернейми (UsernameNotOccupiedError),
+        поки не має звичайної активності. Підписуємо на канали з довідника моніторингу
+        (analysis.Channel) — ті самі, що акаунт і так читає для збагачення/скрейпінгу."""
+        import random as _random
+        import time as _time
+
+        from analysis.models import Channel
+
+        pool = list(Channel.objects.exclude(username="")
+                   .values_list("username", flat=True).distinct())
+        if not pool:
+            self.message_user(request, "У довіднику Channel немає жодного каналу з username.",
+                              level=messages.ERROR)
+            return
+
+        for i, acc in enumerate(queryset.order_by("id")):
+            handles = _random.sample(pool, min(_random.randint(5, 10), len(pool)))
+            res = TelegramUserClient.join_channels_sync(acc, handles)
+            if res.get("ok"):
+                self.message_user(request,
+                                  f"#{acc.id} {acc.phone_number}: підписано на "
+                                  f"{len(res['joined'])}/{len(handles)} "
+                                  f"({', '.join(res['joined']) or '—'})"
+                                  + (f"; не вдалось: {'; '.join(res['failed'])}"
+                                     if res['failed'] else ""),
+                                  level=messages.SUCCESS if res["joined"] else messages.WARNING)
+            else:
+                self.message_user(request, f"#{acc.id} {acc.phone_number}: {res.get('error')}",
+                                  level=messages.ERROR)
+            if i < queryset.count() - 1:
+                _time.sleep(3)
+
     # ---- authorize button on the change page ----
     @admin.display(description="Авторизація")
     def authorize_button(self, obj):
@@ -118,11 +152,21 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return format_html('<a class="button" style="background:#2563eb;color:#fff" href="{}">'
                            '🔑 Авторизувати</a>', url)
 
+    @admin.display(description="Підписки")
+    def channels_button(self, obj):
+        if not obj or not obj.pk:
+            return "— (спершу збережи акаунт)"
+        url = reverse("admin:accounts_telegramaccount_channels", args=[obj.pk])
+        return format_html('<a class="button" href="{}">📡 Переглянути канали</a>', url)
+
     def get_urls(self):
         custom = [
             path("<int:account_id>/authorize/",
                  self.admin_site.admin_view(self.authorize_view),
                  name="accounts_telegramaccount_authorize"),
+            path("<int:account_id>/channels/",
+                 self.admin_site.admin_view(self.channels_view),
+                 name="accounts_telegramaccount_channels"),
             path("test-bot/",
                  self.admin_site.admin_view(self.test_bot_view),
                  name="accounts_telegramaccount_test_bot"),
@@ -209,6 +253,18 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             "title": f"Прогін бота — статус {batch_id}",
         }
         return render(request, "admin/accounts/telegramaccount/test_bot_status.html", ctx)
+
+    def channels_view(self, request, account_id):
+        account = get_object_or_404(TelegramAccount, pk=account_id)
+        res = TelegramUserClient.list_dialogs_sync(account)
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "account": account,
+            "result": res,
+            "title": f"Підписки: {account.name}",
+        }
+        return render(request, "admin/accounts/telegramaccount/channels.html", ctx)
 
     def authorize_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)

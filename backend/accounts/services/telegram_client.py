@@ -291,6 +291,91 @@ class TelegramUserClient:
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "steps": []}
 
+    # ---- підписки акаунта (перегляд + прогрів випадковими каналами) ----
+    @classmethod
+    def list_dialogs_sync(cls, account) -> dict:
+        """Список діалогів акаунта (канали/групи/приват) — для перевірки «прогрітості»."""
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "dialogs": []}
+                out = []
+                async for d in client.iter_dialogs(limit=200):
+                    kind = "канал" if d.is_channel else ("група" if d.is_group else "приват")
+                    out.append({
+                        "kind": kind, "name": d.name,
+                        "username": getattr(d.entity, "username", None),
+                        "id": d.id,
+                    })
+                return {"ok": True, "dialogs": out}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "ok": False, "error": "порожній результат", "dialogs": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "dialogs": []}
+
+    @classmethod
+    def join_channels_sync(cls, account, handles: list) -> dict:
+        """Підписати акаунт на список каналів (@handle або t.me/handle), з паузою між ними.
+
+        Для «прогріву» нового/обмеженого акаунта — Telegram довіряє акаунтам
+        зі звичайною активністю (підписки, читання) більше, ніж голим сесіям.
+        """
+        import random as _random
+
+        async def _run():
+            from telethon.errors import (ChannelPrivateError, FloodWaitError,
+                                        UsernameInvalidError, UsernameNotOccupiedError)
+            from telethon.tl.functions.channels import JoinChannelRequest
+
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            joined, failed = [], []
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований",
+                            "joined": [], "failed": []}
+                for handle in handles:
+                    clean = handle.strip().lstrip("@").replace("https://t.me/", "").strip("/")
+                    if not clean:
+                        continue
+                    try:
+                        entity = await client.get_entity(clean)
+                        await client(JoinChannelRequest(entity))
+                        joined.append(clean)
+                    except FloodWaitError as e:
+                        failed.append(f"{clean}: flood-wait {e.seconds}с")
+                        break  # решту цього разу не пробуємо — акаунт і так у cooldown
+                    except (ChannelPrivateError, UsernameInvalidError,
+                           UsernameNotOccupiedError) as e:
+                        failed.append(f"{clean}: {type(e).__name__}")
+                    except Exception as e:  # noqa: BLE001
+                        failed.append(f"{clean}: {type(e).__name__}: {str(e)[:80]}")
+                    await asyncio.sleep(_random.uniform(3, 8))
+                return {"ok": True, "joined": joined, "failed": failed}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=300)) or {
+                "ok": False, "error": "порожній результат", "joined": [], "failed": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}",
+                    "joined": [], "failed": []}
+
     @classmethod
     async def get_channel_meta(cls, account, handle: str) -> dict:
         async def fn(client):

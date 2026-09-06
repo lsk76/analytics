@@ -1,0 +1,43 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">{{ account.name }}</a> ›
+  Підписки
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:640px">
+  <p><b>Акаунт:</b> {{ account.name }} &nbsp; <b>Телефон:</b> {{ account.phone_number }}</p>
+
+  {% if not result.ok %}
+    <p style="color:#b91c1c">✗ {{ result.error }}</p>
+  {% else %}
+    <p><b>Всього діалогів:</b> {{ result.dialogs|length }}</p>
+    <table style="width:100%; border-collapse:collapse">
+      <thead>
+        <tr style="text-align:left; border-bottom:1px solid var(--border-color,#ddd)">
+          <th style="padding:6px 8px">Тип</th>
+          <th style="padding:6px 8px">Назва</th>
+          <th style="padding:6px 8px">Username</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in result.dialogs %}
+        <tr style="border-bottom:1px solid var(--border-color,#eee)">
+          <td style="padding:6px 8px">{{ d.kind }}</td>
+          <td style="padding:6px 8px">{{ d.name }}</td>
+          <td style="padding:6px 8px">{% if d.username %}@{{ d.username }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <p style="margin-top:18px">
+    <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a>
+  </p>
+</div>
+{% endblock %}
