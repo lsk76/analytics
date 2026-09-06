@@ -17,12 +17,13 @@ class ProxyAdmin(admin.ModelAdmin):
 
 @admin.register(WarmUpJob)
 class WarmUpJobAdmin(admin.ModelAdmin):
-    list_display = ("account", "status", "handles_count", "created_at", "finished_at")
+    list_display = ("account", "status", "handles_count", "attempts", "created_at", "finished_at")
     list_filter = ("status",)
     search_fields = ("account__name", "account__phone_number")
-    readonly_fields = ("account", "handles", "status", "locked_at", "attempts",
+    readonly_fields = ("account", "handles", "status", "scheduled_at", "locked_at", "attempts",
                       "result", "error", "created_at", "finished_at")
     ordering = ("-created_at",)
+    actions = ["retry_job"]
 
     def has_add_permission(self, request):
         return False
@@ -31,10 +32,22 @@ class WarmUpJobAdmin(admin.ModelAdmin):
     def handles_count(self, obj):
         return len(obj.handles or [])
 
+    @admin.action(description="🔁 Повторити (скидає лічильник спроб — знову 3 автоспроби)")
+    def retry_job(self, request, queryset):
+        n = (queryset.filter(status="failed")
+             .update(status="pending", scheduled_at=None, locked_at=None,
+                     attempts=0, error="", result=None))
+        if n:
+            self.message_user(request, f"Повернуто в чергу: {n}. Воркер підхопить негайно.",
+                              level=messages.SUCCESS)
+        else:
+            self.message_user(request, "Нічого не повторено — обирай завдання зі статусом "
+                              "«Помилка».", level=messages.WARNING)
+
 
 @admin.register(TestBotJob)
 class TestBotJobAdmin(admin.ModelAdmin):
-    list_display = ("batch_id", "order", "account", "bot_username", "status",
+    list_display = ("batch_id", "order", "account", "bot_username", "status", "attempts",
                     "pause_min", "pause_max", "created_at", "finished_at", "status_link")
     list_filter = ("status", "bot_username")
     search_fields = ("batch_id", "account__name", "account__phone_number")
@@ -52,7 +65,7 @@ class TestBotJobAdmin(admin.ModelAdmin):
         url = reverse("admin:accounts_telegramaccount_test_bot_status", args=[obj.batch_id])
         return format_html('<a href="{}">переглянути →</a>', url)
 
-    @admin.action(description="🔁 Повторити (з паузою pause_min-pause_max, як і решта черги)")
+    @admin.action(description="🔁 Повторити (скидає лічильник спроб, з паузою pause_min-pause_max)")
     def retry_job(self, request, queryset):
         import random
         from datetime import timedelta
@@ -67,13 +80,16 @@ class TestBotJobAdmin(admin.ModelAdmin):
             job.status = "pending"
             job.scheduled_at = _tz.now() + timedelta(seconds=delay)
             job.locked_at = None
+            job.attempts = 0
             job.error = ""
             job.result = None
-            job.save(update_fields=["status", "scheduled_at", "locked_at", "error", "result"])
+            job.save(update_fields=["status", "scheduled_at", "locked_at", "attempts",
+                                    "error", "result"])
             n += 1
         if n:
             self.message_user(request, f"Повернуто в чергу: {n}, з паузою "
-                              "pause_min-pause_max цього завдання.", level=messages.SUCCESS)
+                              "pause_min-pause_max цього завдання (знову 3 автоспроби).",
+                              level=messages.SUCCESS)
         else:
             self.message_user(request, "Нічого не повторено — обирай завдання зі статусом "
                               "«Помилка» або «Скасовано».", level=messages.WARNING)
@@ -250,6 +266,22 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                  .update(status="cancelled"))
             messages.success(request, f"Скасовано {n} завдання(нь), що ще не почались.")
             return redirect(request.path)
+
+        if request.method == "POST" and request.POST.get("action") == "restart":
+            old_jobs = list(TestBotJob.objects.filter(batch_id=batch_id).order_by("order"))
+            if not old_jobs:
+                messages.error(request, "Такого запуску не знайдено.")
+                return redirect("admin:accounts_telegramaccount_changelist")
+            new_batch_id = uuid.uuid4().hex[:12]
+            for j in old_jobs:
+                TestBotJob.objects.create(
+                    batch_id=new_batch_id, order=j.order, account=j.account,
+                    bot_username=j.bot_username, feedback_text=j.feedback_text,
+                    pause_min=j.pause_min, pause_max=j.pause_max,
+                    status="pending" if j.order == 0 else "queued",
+                )
+            messages.success(request, f"Новий прогін запущено: {len(old_jobs)} акаунт(и).")
+            return redirect("admin:accounts_telegramaccount_test_bot_status", new_batch_id)
 
         jobs = list(TestBotJob.objects.filter(batch_id=batch_id).select_related("account")
                     .order_by("order"))

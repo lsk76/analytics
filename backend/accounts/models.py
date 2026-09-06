@@ -222,6 +222,10 @@ class WarmUpJob(models.Model):
 
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending",
                               db_index=True, verbose_name="Статус")
+    scheduled_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, verbose_name="Не раніше",
+        help_text="Гейт готовності для ретраю — pending-завдання забирається лише після цього часу.",
+    )
     locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Захоплено")
     attempts = models.PositiveSmallIntegerField(default=0, verbose_name="Спроб")
 
@@ -235,7 +239,7 @@ class WarmUpJob(models.Model):
         verbose_name = "Прогрів акаунта — завдання"
         verbose_name_plural = "Прогрів акаунта — завдання"
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["status"])]
+        indexes = [models.Index(fields=["status", "scheduled_at"])]
 
     def __str__(self):
         return f"{self.account.name} [{self.status}] ({len(self.handles)} каналів)"

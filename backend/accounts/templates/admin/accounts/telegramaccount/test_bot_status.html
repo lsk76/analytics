@@ -19,23 +19,32 @@
     {% else %}<span style="color:#b45309">⏳ виконується… (сторінка сама оновиться за 15с)</span>{% endif %}
   </p>
 
-  {% if can_cancel %}
-  <form method="post" style="margin-bottom:18px">{% csrf_token %}
-    <button type="submit" name="action" value="cancel" class="button"
-            style="background:#b91c1c;color:#fff"
-            onclick="return confirm('Скасувати завдання, що ще не почались?')">
-      ⏹ Скасувати чергу
-    </button>
-  </form>
-  {% endif %}
+  <p style="display:flex; gap:10px">
+    {% if can_cancel %}
+    <form method="post">{% csrf_token %}
+      <button type="submit" name="action" value="cancel" class="button"
+              style="background:#b91c1c;color:#fff"
+              onclick="return confirm('Скасувати завдання, що ще не почались?')">
+        ⏹ Скасувати чергу
+      </button>
+    </form>
+    {% endif %}
+    <form method="post">{% csrf_token %}
+      <button type="submit" name="action" value="restart" class="button"
+              onclick="return confirm('Запустити новий прогін з тими самими акаунтами/ботом/паузою?')">
+        🔄 Перезапустити прогін
+      </button>
+    </form>
+  </p>
 
   {% for job in jobs %}
   <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
     <h3 style="margin-top:0">
       {{ job.account.name }} ({{ job.account.phone_number }}):
-      {% if job.status == "done" %}<span style="color:#16a34a">✓ завершено</span>
-      {% elif job.status == "failed" %}<span style="color:#b91c1c">✗ {{ job.error }}</span>
-      {% elif job.status == "running" %}<span style="color:#b45309">⏳ виконується</span>
+      {% if job.status == "done" %}<span style="color:#16a34a">✓ завершено{% if job.attempts > 1 %} (спроба {{ job.attempts }}){% endif %}</span>
+      {% elif job.status == "failed" %}<span style="color:#b91c1c">✗ {{ job.error }} (після {{ job.attempts }} спроб)</span>
+      {% elif job.status == "running" %}<span style="color:#b45309">⏳ виконується (спроба {{ job.attempts }})</span>
+      {% elif job.status == "pending" and job.attempts > 0 %}<span style="color:#b45309">🔁 чекає повторної спроби {{ job.attempts|add:1 }} (після помилки: {{ job.error }})</span>
       {% elif job.status == "pending" %}<span style="color:#6b7280">🕓 у черзі, готове до запуску</span>
       {% elif job.status == "queued" %}<span style="color:#6b7280">⏸ чекає попереднього (пауза {{ job.pause_min }}-{{ job.pause_max }} хв)</span>
       {% elif job.status == "cancelled" %}<span style="color:#6b7280">— скасовано</span>

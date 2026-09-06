@@ -14,6 +14,7 @@ from ..models import TestBotJob
 from .telegram_client import TelegramUserClient
 
 LOCK_TIMEOUT = timedelta(minutes=10)
+RETRY_DELAYS = [30, 60, 90]  # секунд, після 1-ї/2-ї/3-ї помилки; 4-та — вже failed остаточно
 
 
 def _claim_job():
@@ -34,8 +35,20 @@ def _claim_job():
     return job
 
 
+def _unlock_next(job) -> None:
+    """Розблокувати наступне завдання в batch (лише коли поточне дійшло до фінального стану)."""
+    next_job = (TestBotJob.objects
+               .filter(batch_id=job.batch_id, order=job.order + 1, status="queued")
+               .first())
+    if next_job:
+        delay = random.uniform(next_job.pause_min * 60, next_job.pause_max * 60)
+        next_job.status = "pending"
+        next_job.scheduled_at = djtz.now() + timedelta(seconds=delay)
+        next_job.save(update_fields=["status", "scheduled_at"])
+
+
 def test_bot_once() -> bool:
-    """Забрати одне готове завдання, виконати, розблокувати наступне в batch. True = була робота."""
+    """Забрати одне готове завдання, виконати. True = була робота (незалежно від результату)."""
     job = _claim_job()
     if not job:
         return False
@@ -45,16 +58,20 @@ def test_bot_once() -> bool:
     )
     job.result = res
     job.error = res.get("error") or ""
-    job.status = "done" if res.get("ok") else "failed"
-    job.finished_at = djtz.now()
-    job.save(update_fields=["status", "result", "error", "finished_at"])
 
-    next_job = (TestBotJob.objects
-               .filter(batch_id=job.batch_id, order=job.order + 1, status="queued")
-               .first())
-    if next_job:
-        delay = random.uniform(next_job.pause_min * 60, next_job.pause_max * 60)
-        next_job.status = "pending"
-        next_job.scheduled_at = djtz.now() + timedelta(seconds=delay)
-        next_job.save(update_fields=["status", "scheduled_at"])
+    if res.get("ok"):
+        job.status = "done"
+        job.finished_at = djtz.now()
+        job.save(update_fields=["status", "result", "error", "finished_at"])
+        _unlock_next(job)
+    elif job.attempts <= len(RETRY_DELAYS):
+        delay = RETRY_DELAYS[job.attempts - 1]
+        job.status = "pending"
+        job.scheduled_at = djtz.now() + timedelta(seconds=delay)
+        job.save(update_fields=["status", "scheduled_at", "result", "error"])
+    else:
+        job.status = "failed"
+        job.finished_at = djtz.now()
+        job.save(update_fields=["status", "result", "error", "finished_at"])
+        _unlock_next(job)
     return True
