@@ -1,11 +1,13 @@
 import uuid
 
 from django.contrib import admin, messages
+from django.db import IntegrityError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
 from .models import AccountTag, Proxy, TelegramAccount, TestBotJob, WarmUpJob
+from .services.tdata_import import import_tdata_account_from_uploads
 from .services.telegram_client import TelegramUserClient
 
 
@@ -253,8 +255,40 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("add-tag/",
                  self.admin_site.admin_view(self.add_tag_view),
                  name="accounts_telegramaccount_add_tag"),
+            path("import-tdata/",
+                 self.admin_site.admin_view(self.import_tdata_view),
+                 name="accounts_telegramaccount_import_tdata"),
         ]
         return custom + super().get_urls()
+
+    def import_tdata_view(self, request):
+        if request.method == "POST":
+            json_file = request.FILES.get("json_file")
+            session_file = request.FILES.get("session_file")
+            tag_names = [t.strip() for t in request.POST.get("tags", "").split(",") if t.strip()]
+            if not json_file or not session_file:
+                messages.error(request, "Потрібні обидва файли: JSON і .session.")
+            else:
+                try:
+                    account = import_tdata_account_from_uploads(
+                        json_file, session_file, request.user, tag_names,
+                    )
+                    messages.success(request,
+                                     f"✓ Акаунт «{account.name}» ({account.phone_number}) "
+                                     "імпортовано й авторизовано.")
+                    return redirect("admin:accounts_telegramaccount_change", account.pk)
+                except IntegrityError:
+                    messages.error(request, "Акаунт з таким номером телефону вже є в базі.")
+                except Exception as e:  # noqa: BLE001
+                    messages.error(request, f"Не вдалось імпортувати: {type(e).__name__}: {e}")
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "existing_tags": AccountTag.objects.order_by("name"),
+            "title": "Додати акаунт через файли (tdata JSON + .session)",
+        }
+        return render(request, "admin/accounts/telegramaccount/import_tdata.html", ctx)
 
     def add_tag_view(self, request):
         ids_raw = request.GET.get("ids") or request.POST.get("ids", "")

@@ -111,6 +111,11 @@ class TelegramAccount(models.Model):
         max_length=100, blank=True, verbose_name="Хеш коду",
         help_text="Тимчасовий хеш для верифікації коду",
     )
+    two_fa_password = models.CharField(
+        max_length=200, blank=True, verbose_name="Пароль 2FA",
+        help_text="Хмарний пароль (2FA), якщо відомий — знадобиться для повторної авторизації, "
+                  "якщо сесія злетить. Зберігається як є (без хешування), як і session_string.",
+    )
     proxy = models.ForeignKey(
         Proxy, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="accounts", verbose_name="Проксі",
