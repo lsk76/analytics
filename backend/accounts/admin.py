@@ -11,8 +11,10 @@ from .services.telegram_client import TelegramUserClient
 
 @admin.register(Proxy)
 class ProxyAdmin(admin.ModelAdmin):
-    list_display = ("proxy_string", "proxy_type", "is_active", "is_working", "fail_count")
+    list_display = ("proxy_string", "proxy_type", "is_active", "is_working", "fail_count",
+                    "last_tested_at")
     list_filter = ("proxy_type", "is_active", "is_working")
+    ordering = ("-last_tested_at",)
 
 
 @admin.register(WarmUpJob)

@@ -96,5 +96,8 @@ services:
   # --- warm-up worker (accounts.WarmUpJob: підписка акаунта на випадкові канали) --
   worker-warm-up:          { <<: *worker, command: python manage.py run_worker --stage warm_up --interval 60 }
 
+  # --- proxy healthcheck worker (accounts.Proxy: автоперевірка + авторемонт sticky-сесій) --
+  worker-proxy-health:     { <<: *worker, command: python manage.py run_worker --stage proxy_healthcheck --interval 600 }
+
 volumes:
   pgdata:

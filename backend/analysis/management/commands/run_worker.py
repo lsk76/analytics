@@ -24,6 +24,8 @@ Stage worker — polls the DB for posts/chunks at its stage and processes them.
     python manage.py run_worker --stage test_bot
     # accounts: прогрів акаунта підпискою на канали (taskless, accounts.WarmUpJob)
     python manage.py run_worker --stage warm_up
+    # accounts: автоперевірка й авторемонт пулу проксі (taskless, кожні 4 год/проксі)
+    python manage.py run_worker --stage proxy_healthcheck --interval 600
 
     # options
     --task <slug>     only this task (default: all active tasks of the
@@ -92,6 +94,17 @@ except ImportError as _e:  # noqa: BLE001
     import sys
     print(f"[run_worker] warm_up-стадія недоступна: {_e!r}", file=sys.stderr)
 
+# accounts: автоперевірка й авторемонт пулу проксі (services/proxy_health.py).
+# Marsproxies sticky-сесії не гарантують IP на весь заявлений термін — на
+# невдалий конект сама генерує новий session-id (не потребує API-виклику
+# провайдеру) і перевіряє його; жодних ручних списків від оператора.
+try:
+    from accounts.services.proxy_health import proxy_healthcheck_once
+    ALL_RUNNERS["proxy_healthcheck"] = proxy_healthcheck_once
+except ImportError as _e:  # noqa: BLE001
+    import sys
+    print(f"[run_worker] proxy_healthcheck-стадія недоступна: {_e!r}", file=sys.stderr)
+
 # Стадії, що працюють НЕ по задачах (ранер викликається без аргументу).
 # info_collect полить ДЖЕРЕЛА (Source): одне джерело живить кілька задач,
 # тож цикл «for task» для нього не має сенсу — черга полінгу глобальна.
@@ -99,7 +112,8 @@ except ImportError as _e:  # noqa: BLE001
 # Ретеншн (info_retention) — навпаки, ПЕР-ЗАДАЧНА операція (чистить пости
 # task.info_retention_days), тож іде звичайним циклом задач (не тут).
 # publish — теж по НЕ-задачах: ітерує PublishConfig-профілі, а не AnalysisTask.
-TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish", "test_bot", "warm_up"}
+TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish", "test_bot", "warm_up",
+                   "proxy_healthcheck"}
 
 
 class Command(BaseCommand):
