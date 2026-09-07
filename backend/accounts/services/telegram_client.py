@@ -429,6 +429,200 @@ class TelegramUserClient:
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}",
                     "joined": [], "failed": []}
 
+    # ---- завести нового бота через @BotFather (/newbot) ----
+    @classmethod
+    def create_bot_via_botfather_sync(cls, account, name: str, username: str,
+                                      photo_bytes: Optional[bytes] = None) -> dict:
+        """/newbot -> назва -> username -> токен. За наявності фото — /setuserpic."""
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                bot = await client.get_entity("BotFather")
+
+                await client.send_message(bot, "/newbot")
+                msg = await _wait_reply(client, bot, 0, "")
+                if msg is None:
+                    return {"ok": False, "error": "BotFather не відповів на /newbot"}
+
+                await client.send_message(bot, name)
+                msg2 = await _wait_reply(client, bot, msg.id, msg.text or "")
+                if msg2 is None:
+                    return {"ok": False, "error": "BotFather не відповів на назву",
+                            "detail": (msg.text or "")[:300]}
+
+                await client.send_message(bot, username)
+                msg3 = await _wait_reply(client, bot, msg2.id, msg2.text or "", timeout=20)
+                if msg3 is None:
+                    return {"ok": False, "error": "BotFather не відповів на username",
+                            "detail": (msg2.text or "")[:300]}
+
+                text = msg3.text or ""
+                m = re.search(r"\d{6,}:[A-Za-z0-9_-]{30,}", text)
+                if not m:
+                    return {"ok": False, "error": "не вдалось знайти токен у відповіді",
+                            "detail": text[:400]}
+                token = m.group(0)
+
+                photo_ok = None
+                if photo_bytes:
+                    photo_ok = await cls._set_bot_photo(client, bot, msg3, username, photo_bytes)
+
+                return {"ok": True, "token": token, "username": username, "photo_ok": photo_ok}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=120)) or {
+                "ok": False, "error": "порожній результат"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # ---- синхронізація списку ботів акаунта через @BotFather (/token) ----
+    @classmethod
+    def sync_bots_via_botfather_sync(cls, account) -> dict:
+        """/token показує кнопки з усіма ботами акаунта; клік на кожну — видає токен.
+
+        Після кожного кліку список кнопок «з'їдається» відповіддю з токеном,
+        тож перед наступним ботом шлемо /token знову.
+        """
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "bots": []}
+                bot = await client.get_entity("BotFather")
+
+                await client.send_message(bot, "/token")
+                msg = await _wait_reply(client, bot, 0, "")
+                if msg is None:
+                    return {"ok": False, "error": "BotFather не відповів на /token", "bots": []}
+
+                usernames = [b.text.lstrip("@") for row in (msg.buttons or []) for b in row
+                            if b.text]
+                found = []
+                for uname in usernames:
+                    clicked = False
+                    for row in msg.buttons or []:
+                        for b in row:
+                            if b.text.lstrip("@") == uname:
+                                await msg.click(text=b.text)
+                                clicked = True
+                                break
+                        if clicked:
+                            break
+                    if not clicked:
+                        continue
+                    reply = await _wait_reply(client, bot, msg.id, msg.text or "")
+                    token = None
+                    if reply and reply.text:
+                        m = re.search(r"\d{6,}:[A-Za-z0-9_-]{30,}", reply.text)
+                        token = m.group(0) if m else None
+                    display_name = ""
+                    try:
+                        ent = await client.get_entity(uname)
+                        display_name = getattr(ent, "first_name", "") or ""
+                    except Exception:
+                        pass
+                    found.append({"username": uname, "token": token, "name": display_name})
+
+                    await client.send_message(bot, "/token")
+                    last_id = reply.id if reply else msg.id
+                    last_text = reply.text if reply else (msg.text or "")
+                    msg2 = await _wait_reply(client, bot, last_id, last_text)
+                    if msg2 is None:
+                        break
+                    msg = msg2
+
+                return {"ok": True, "bots": found}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=180)) or {
+                "ok": False, "error": "порожній результат", "bots": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "bots": []}
+
+    @classmethod
+    async def _set_bot_photo(cls, client, bot, last_msg, username: str, photo_bytes: bytes) -> bool:
+        import io
+
+        async def _wait_reply(after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        try:
+            await client.send_message(bot, "/setuserpic")
+            pm = await _wait_reply(last_msg.id, last_msg.text or "")
+            if pm is None or not pm.buttons:
+                return False
+            clicked = False
+            for row in pm.buttons:
+                for b in row:
+                    if username.lower() in (b.text or "").lower():
+                        await pm.click(text=b.text)
+                        clicked = True
+                        break
+                if clicked:
+                    break
+            if not clicked:
+                return False
+            pm2 = await _wait_reply(pm.id, pm.text or "")
+            if pm2 is None:
+                return False
+            await client.send_file(bot, io.BytesIO(photo_bytes))
+            pm3 = await _wait_reply(pm2.id, pm2.text or "", timeout=20)
+            return bool(pm3 and "success" in (pm3.text or "").lower())
+        except Exception:
+            return False
+
     @classmethod
     async def get_channel_meta(cls, account, handle: str) -> dict:
         async def fn(client):

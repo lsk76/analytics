@@ -283,3 +283,24 @@ class WarmUpJob(models.Model):
 
     def __str__(self):
         return f"{self.account.name} [{self.status}] ({len(self.handles)} каналів)"
+
+
+class TelegramBot(models.Model):
+    """Бот, заведений (або знайдений через /token-синк) через акаунт-власника в @BotFather."""
+    account = models.ForeignKey(
+        TelegramAccount, on_delete=models.CASCADE, related_name="bots",
+        verbose_name="Акаунт-власник",
+    )
+    username = models.CharField(max_length=64, unique=True, verbose_name="Username")
+    name = models.CharField(max_length=100, blank=True, verbose_name="Назва")
+    token = models.CharField(max_length=100, blank=True, verbose_name="Токен")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
+
+    class Meta:
+        verbose_name = "Бот"
+        verbose_name_plural = "Боти"
+        ordering = ["username"]
+
+    def __str__(self):
+        return f"@{self.username}"

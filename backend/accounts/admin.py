@@ -2,13 +2,73 @@ import uuid
 
 from django.contrib import admin, messages
 from django.db import IntegrityError
+from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .models import AccountTag, Proxy, TelegramAccount, TestBotJob, WarmUpJob
+from analysis.multiselect_filter import MultiSelectFilter
+
+from .models import AccountTag, Proxy, TelegramAccount, TelegramBot, TestBotJob, WarmUpJob
 from .services.tdata_import import import_tdata_account_from_uploads
 from .services.telegram_client import TelegramUserClient
+from .services.translit import normalize_bot_username, slugify_bot_username
+
+
+class AccountTagFilter(MultiSelectFilter):
+    """Теги акаунтів з включенням/виключенням (той самий патерн, що й теги подій —
+    TagCategoryMultiSelectFilter у analysis/admin.py, лише без категорій/фасетних лічильників
+    проти інших активних фільтрів — тегів акаунтів мало, повний facet_base тут зайвий)."""
+    title = "Теги"
+    parameter_name = "tag"
+    template = "admin/filters/multi_select_with_exclude.html"
+
+    @property
+    def exclude_param(self):
+        return f"{self.parameter_name}_excl"
+
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        params.pop(self.exclude_param, None)
+
+    def expected_parameters(self):
+        return [self.parameter_name, self.exclude_param]
+
+    def queryset(self, request, queryset):
+        inc = self.request.GET.getlist(self.parameter_name)
+        exc = self.request.GET.getlist(self.exclude_param)
+        if inc:
+            queryset = queryset.filter(tags__id__in=inc).distinct()
+        if exc:
+            queryset = queryset.exclude(tags__id__in=exc).distinct()
+        return queryset
+
+    def filter_queryset(self, queryset, values):  # kept for base-class contract
+        return queryset.filter(tags__id__in=values)
+
+    def lookups(self, request, model_admin):
+        return [(str(t.id), t.name) for t in AccountTag.objects.order_by("name")]
+
+    def choices(self, changelist):
+        included = self.request.GET.getlist(self.parameter_name)
+        excluded = self.request.GET.getlist(self.exclude_param)
+        yield {
+            "selected": not (included or excluded),
+            "query_string": changelist.get_query_string(
+                remove=[self.parameter_name, self.exclude_param]),
+            "display": "Всі",
+            "value": "__all__",
+        }
+        counts = dict(AccountTag.objects.annotate(n=Count("accounts", distinct=True))
+                      .values_list("id", "n"))
+        for tag in AccountTag.objects.order_by("name"):
+            tid = str(tag.id)
+            yield {
+                "included": tid in included,
+                "excluded": tid in excluded,
+                "display": f"{tag.name} ({counts.get(tag.id, 0)})",
+                "value": tid,
+            }
 
 
 @admin.register(AccountTag)
@@ -27,6 +87,17 @@ class ProxyAdmin(admin.ModelAdmin):
                     "last_tested_at")
     list_filter = ("proxy_type", "is_active", "is_working")
     ordering = ("-last_tested_at",)
+
+
+@admin.register(TelegramBot)
+class TelegramBotAdmin(admin.ModelAdmin):
+    list_display = ("username", "name", "account", "token", "updated_at")
+    search_fields = ("username", "name", "account__name")
+    list_filter = ("account",)
+    readonly_fields = ("username", "name", "token", "account", "created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(WarmUpJob)
@@ -113,16 +184,48 @@ class TestBotJobAdmin(admin.ModelAdmin):
 class TelegramAccountAdmin(admin.ModelAdmin):
     list_display = ("name", "phone_number", "is_authenticated", "is_active",
                     "tag_list", "spam_status", "spam_status_checked_at", "last_used_at")
-    list_filter = ("is_authenticated", "is_active", "spam_status", "tags")
+    list_filter = ("is_authenticated", "is_active", "spam_status", AccountTagFilter)
     search_fields = ("name", "phone_number", "tags__name")
     readonly_fields = ("authorize_button", "channels_button")
     filter_horizontal = ("tags",)
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
-              "add_tag_action"]
+              "add_tag_action", "create_bot_action", "sync_bots_action"]
 
     @admin.display(description="Теги")
     def tag_list(self, obj):
         return ", ".join(obj.tags.values_list("name", flat=True)) or "—"
+
+    @admin.action(description="🐣 Завести бота (через @BotFather)")
+    def create_bot_action(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(request, "Вибери рівно один акаунт — саме він піде до @BotFather.",
+                              level=messages.ERROR)
+            return
+        account = queryset.first()
+        return redirect(reverse("admin:accounts_telegramaccount_create_bot", args=[account.pk]))
+
+    @admin.action(description="🔄 Оновити список ботів (синк через @BotFather /token)")
+    def sync_bots_action(self, request, queryset):
+        import time as _time
+
+        accounts = list(queryset.order_by("id"))
+        for i, acc in enumerate(accounts):
+            res = TelegramUserClient.sync_bots_via_botfather_sync(acc)
+            if not res.get("ok"):
+                self.message_user(request, f"#{acc.id} {acc.name}: {res.get('error')}",
+                                  level=messages.ERROR)
+            else:
+                n = 0
+                for b in res.get("bots", []):
+                    defaults = {"account": acc, "name": b.get("name") or ""}
+                    if b.get("token"):
+                        defaults["token"] = b["token"]
+                    TelegramBot.objects.update_or_create(username=b["username"], defaults=defaults)
+                    n += 1
+                self.message_user(request, f"#{acc.id} {acc.name}: синхронізовано {n} бот(ів).",
+                                  level=messages.SUCCESS)
+            if i < len(accounts) - 1:
+                _time.sleep(2)
 
     @admin.action(description="🏷️ Додати тег (за назвою — вводиш у наступному діалозі)")
     def add_tag_action(self, request, queryset):
@@ -246,6 +349,9 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("<int:account_id>/channels/",
                  self.admin_site.admin_view(self.channels_view),
                  name="accounts_telegramaccount_channels"),
+            path("<int:account_id>/create-bot/",
+                 self.admin_site.admin_view(self.create_bot_view),
+                 name="accounts_telegramaccount_create_bot"),
             path("test-bot/",
                  self.admin_site.admin_view(self.test_bot_view),
                  name="accounts_telegramaccount_test_bot"),
@@ -425,6 +531,43 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             "title": f"Підписки: {account.name}",
         }
         return render(request, "admin/accounts/telegramaccount/channels.html", ctx)
+
+    def create_bot_view(self, request, account_id):
+        account = get_object_or_404(TelegramAccount, pk=account_id)
+        result = None
+        if request.method == "POST":
+            name = request.POST.get("name", "").strip()
+            identifier_raw = request.POST.get("identifier", "").strip()
+            if not name:
+                messages.error(request, "Вкажи назву бота.")
+            else:
+                username = (normalize_bot_username(identifier_raw) if identifier_raw
+                           else slugify_bot_username(name))
+                photo = request.FILES.get("photo")
+                photo_bytes = photo.read() if photo else None
+                result = TelegramUserClient.create_bot_via_botfather_sync(
+                    account, name, username, photo_bytes,
+                )
+                if result.get("ok"):
+                    TelegramBot.objects.update_or_create(
+                        username=result["username"],
+                        defaults={"account": account, "name": name, "token": result["token"]},
+                    )
+                    messages.success(request,
+                                     f"✓ Бот @{result['username']} створено й збережено в БД "
+                                     "(«Боти» в адмінці). Токен показано нижче.")
+                else:
+                    messages.error(request, f"Не вдалось: {result.get('error')} "
+                                   f"{result.get('detail', '')[:200]}")
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "account": account,
+            "result": result,
+            "title": f"Завести бота: {account.name}",
+        }
+        return render(request, "admin/accounts/telegramaccount/create_bot.html", ctx)
 
     def authorize_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)

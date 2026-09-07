@@ -1,0 +1,77 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">{{ account.name }}</a> ›
+  Завести бота
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:560px">
+  <p><b>Акаунт:</b> {{ account.name }} ({{ account.phone_number }})</p>
+  <p class="help">
+    Через акаунт вище буде надіслано /newbot до @BotFather, назву і username.
+    Ідентифікатор (username) — автоматично з назви (транслітерація кирилиці,
+    закінчення «bot»), можеш підправити вручну перед відправкою.
+  </p>
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <form method="post" enctype="multipart/form-data">{% csrf_token %}
+      <p><label>Назва бота:<br>
+           <input type="text" name="name" id="id_name" style="width:100%" required autofocus></label></p>
+      <p><label>Ідентифікатор (username, без @):<br>
+           <input type="text" name="identifier" id="id_identifier" style="width:100%"></label></p>
+      <p><label>Аватарка (необов'язково):<br>
+           <input type="file" name="photo" accept="image/*"></label></p>
+      <button type="submit" class="button default">🐣 Завести бота</button>
+    </form>
+  </div>
+
+  {% if result and result.ok %}
+  <div style="margin:18px 0; padding:16px; border:1px solid #16a34a; border-radius:8px">
+    <h3 style="margin-top:0; color:#16a34a">✓ Бот @{{ result.username }} створено</h3>
+    <p><b>Токен:</b><br>
+      <code style="user-select:all; word-break:break-all">{{ result.token }}</code>
+    </p>
+    <p class="help">Збережено в «Боти» в адмінці — можна переглянути пізніше.</p>
+    {% if result.photo_ok is not None %}
+      <p>Аватарка: {% if result.photo_ok %}✓ встановлено{% else %}✗ не вдалось встановити{% endif %}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <p><a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a></p>
+</div>
+
+<script>
+(function () {
+  var map = {
+    "а":"a","б":"b","в":"v","г":"g","ґ":"g","д":"d","е":"e","є":"ie","ж":"zh","з":"z",
+    "и":"y","і":"i","ї":"i","й":"i","к":"k","л":"l","м":"m","н":"n","о":"o","п":"p",
+    "р":"r","с":"s","т":"t","у":"u","ф":"f","х":"kh","ц":"ts","ч":"ch","ш":"sh","щ":"shch",
+    "ь":"","ъ":"","ы":"y","э":"e","ю":"iu","я":"ia"
+  };
+  function translit(s) {
+    var out = "";
+    s.toLowerCase().split("").forEach(function (ch) {
+      out += (map[ch] !== undefined) ? map[ch] : ch;
+    });
+    return out;
+  }
+  function suggest() {
+    var idEl = document.getElementById("id_identifier");
+    if (idEl.dataset.touched === "1") return;
+    var base = translit(document.getElementById("id_name").value).replace(/[^a-z0-9]/g, "");
+    if (!base) base = "bot";
+    if (base.slice(-3) !== "bot") base += "bot";
+    idEl.value = base;
+  }
+  document.getElementById("id_name").addEventListener("input", suggest);
+  document.getElementById("id_identifier").addEventListener("input", function () {
+    this.dataset.touched = "1";
+  });
+})();
+</script>
+{% endblock %}
