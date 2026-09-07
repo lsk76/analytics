@@ -1,0 +1,34 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  Додати тег
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:520px">
+  <p><b>Акаунти ({{ accounts|length }}):</b>
+    {% for account in accounts %}{{ account.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+  </p>
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="ids" value="{{ ids }}">
+      <p><label>Назва тегу (існуючий або новий):<br>
+           <input type="text" name="tag_name" list="existing-tags" style="width:100%" autofocus></label></p>
+      <datalist id="existing-tags">
+        {% for tag in existing_tags %}<option value="{{ tag.name }}">{% endfor %}
+      </datalist>
+      <button type="submit" class="button default">🏷️ Додати</button>
+    </form>
+  </div>
+
+  {% if existing_tags %}
+  <p class="help">Наявні теги: {% for tag in existing_tags %}{{ tag.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+  {% endif %}
+
+  <p><a href="{% url 'admin:accounts_telegramaccount_changelist' %}">← назад до списку акаунтів</a></p>
+</div>
+{% endblock %}

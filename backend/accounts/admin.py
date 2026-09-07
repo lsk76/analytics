@@ -5,8 +5,18 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .models import Proxy, TelegramAccount, TestBotJob, WarmUpJob
+from .models import AccountTag, Proxy, TelegramAccount, TestBotJob, WarmUpJob
 from .services.telegram_client import TelegramUserClient
+
+
+@admin.register(AccountTag)
+class AccountTagAdmin(admin.ModelAdmin):
+    list_display = ("name", "accounts_count", "created_at")
+    search_fields = ("name",)
+
+    @admin.display(description="Акаунтів")
+    def accounts_count(self, obj):
+        return obj.accounts.count()
 
 
 @admin.register(Proxy)
@@ -100,11 +110,22 @@ class TestBotJobAdmin(admin.ModelAdmin):
 @admin.register(TelegramAccount)
 class TelegramAccountAdmin(admin.ModelAdmin):
     list_display = ("name", "phone_number", "proxy", "is_authenticated", "is_active",
-                    "spam_status", "spam_status_checked_at", "last_used_at")
-    list_filter = ("is_authenticated", "is_active", "spam_status")
-    search_fields = ("name", "phone_number")
+                    "tag_list", "spam_status", "spam_status_checked_at", "last_used_at")
+    list_filter = ("is_authenticated", "is_active", "spam_status", "tags")
+    search_fields = ("name", "phone_number", "tags__name")
     readonly_fields = ("authorize_button", "channels_button")
-    actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels"]
+    filter_horizontal = ("tags",)
+    actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
+              "add_tag_action"]
+
+    @admin.display(description="Теги")
+    def tag_list(self, obj):
+        return ", ".join(obj.tags.values_list("name", flat=True)) or "—"
+
+    @admin.action(description="🏷️ Додати тег (за назвою — вводиш у наступному діалозі)")
+    def add_tag_action(self, request, queryset):
+        ids = ",".join(str(pk) for pk in queryset.values_list("id", flat=True))
+        return redirect(reverse("admin:accounts_telegramaccount_add_tag") + f"?ids={ids}")
 
     @admin.action(description="🔎 Перевірити живість (get_me через проксі, без надсилання)")
     def check_alive(self, request, queryset):
@@ -229,8 +250,41 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("test-bot/<str:batch_id>/status/",
                  self.admin_site.admin_view(self.test_bot_status_view),
                  name="accounts_telegramaccount_test_bot_status"),
+            path("add-tag/",
+                 self.admin_site.admin_view(self.add_tag_view),
+                 name="accounts_telegramaccount_add_tag"),
         ]
         return custom + super().get_urls()
+
+    def add_tag_view(self, request):
+        ids_raw = request.GET.get("ids") or request.POST.get("ids", "")
+        ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
+        accounts = list(TelegramAccount.objects.filter(pk__in=ids))
+        if not accounts:
+            messages.error(request, "Не вибрано жодного акаунта.")
+            return redirect("admin:accounts_telegramaccount_changelist")
+
+        if request.method == "POST":
+            name = request.POST.get("tag_name", "").strip()
+            if not name:
+                messages.error(request, "Вкажи назву тегу.")
+            else:
+                tag, _ = AccountTag.objects.get_or_create(name=name)
+                for acc in accounts:
+                    acc.tags.add(tag)
+                messages.success(request,
+                                 f"Тег «{name}» додано {len(accounts)} акаунт(ам).")
+                return redirect("admin:accounts_telegramaccount_changelist")
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "accounts": accounts,
+            "ids": ids_raw,
+            "existing_tags": AccountTag.objects.order_by("name"),
+            "title": "Додати тег",
+        }
+        return render(request, "admin/accounts/telegramaccount/add_tag.html", ctx)
 
     TEST_BOT_CHOICES = ["@regionalnaya_programa_bot", "@RegionalnayaProgrammaBot",
                        "@RegProgramaEdRosBot"]

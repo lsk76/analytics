@@ -60,6 +60,25 @@ class Proxy(models.Model):
         return f"{'✓' if self.is_working else '✗'} {self.proxy_string}"
 
 
+class AccountTag(models.Model):
+    """Вільна мітка на акаунт (напр. «прогрітий», «критика», «проблемний»).
+
+    Окремо від analysis.Tag/TagCategory (ті — для тегування Event/Post за
+    фасетами адмінки подій; тут — довільні, нічим не обмежені мітки лише
+    для власного зручного фільтрування списку акаунтів).
+    """
+    name = models.CharField(max_length=50, unique=True, verbose_name="Назва")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+
+    class Meta:
+        verbose_name = "Тег акаунта"
+        verbose_name_plural = "Теги акаунтів"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class TelegramAccount(models.Model):
     """Акаунт Telegram User API (Telethon StringSession) для скрейпінгу/збагачення."""
 
@@ -97,6 +116,8 @@ class TelegramAccount(models.Model):
         related_name="accounts", verbose_name="Проксі",
     )
     is_active = models.BooleanField(default=True, verbose_name="Активний")
+    tags = models.ManyToManyField(AccountTag, blank=True, related_name="accounts",
+                                  verbose_name="Теги")
 
     # --- відбиток клієнта (для імпортованих сесій) ---
     # Telegram показує ці значення у «Активних сесіях» акаунта і помічає, коли
