@@ -25,7 +25,8 @@
       <p><label>Бот:<br>
            <select name="bot_username" style="width:100%">
              {% for choice in bot_choices %}
-               <option value="{{ choice }}">{{ choice }}</option>
+               <option value="{{ choice.username }}">{{ choice.username }}
+                 {% if not choice.feedback_text %}(без відгуку){% endif %}</option>
              {% endfor %}
            </select></label></p>
       <p>

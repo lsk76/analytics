@@ -498,9 +498,14 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         }
         return render(request, "admin/accounts/telegramaccount/add_tag.html", ctx)
 
-    TEST_BOT_CHOICES = ["@regionalnaya_programa_bot", "@RegionalnayaProgrammaBot",
-                       "@RegProgramaEdRosBot"]
-    TEST_BOT_FEEDBACK = "хорошего не много"
+    # feedback_text порожній => бот без кроку відгуку (has_feedback=False) — тест
+    # зупиняється на першому кроці без кнопок (напр. «Спасибо» + фото сертифіката),
+    # нічого зайвого не надсилаючи.
+    TEST_BOT_CHOICES = [
+        {"username": "@regionalnaya_programa_bot", "feedback_text": "хорошего не много"},
+        {"username": "@RegionalnayaProgrammaBot", "feedback_text": "хорошего не много"},
+        {"username": "@RegProgramaEdRosBot", "feedback_text": "хорошего не много"},
+    ]
     TEST_BOT_PAUSE_MIN_DEFAULT = 10
     TEST_BOT_PAUSE_MAX_DEFAULT = 30
 
@@ -514,7 +519,10 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             return redirect("admin:accounts_telegramaccount_changelist")
 
         if request.method == "POST":
-            bot_username = request.POST.get("bot_username", "").strip() or self.TEST_BOT_CHOICES[0]
+            bot_username = request.POST.get("bot_username", "").strip() or \
+                self.TEST_BOT_CHOICES[0]["username"]
+            feedback_text = next((c["feedback_text"] for c in self.TEST_BOT_CHOICES
+                                 if c["username"] == bot_username), "")
             try:
                 pause_min = int(request.POST.get("pause_min", self.TEST_BOT_PAUSE_MIN_DEFAULT))
                 pause_max = int(request.POST.get("pause_max", self.TEST_BOT_PAUSE_MAX_DEFAULT))
@@ -529,7 +537,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             for i, account in enumerate(accounts):
                 TestBotJob.objects.create(
                     batch_id=batch_id, order=i, account=account,
-                    bot_username=bot_username, feedback_text=self.TEST_BOT_FEEDBACK,
+                    bot_username=bot_username, feedback_text=feedback_text,
                     pause_min=pause_min, pause_max=pause_max,
                     status="pending" if i == 0 else "queued",
                 )
