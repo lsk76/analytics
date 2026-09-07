@@ -109,7 +109,7 @@ class TestBotJobAdmin(admin.ModelAdmin):
 
 @admin.register(TelegramAccount)
 class TelegramAccountAdmin(admin.ModelAdmin):
-    list_display = ("name", "phone_number", "proxy", "is_authenticated", "is_active",
+    list_display = ("name", "phone_number", "is_authenticated", "is_active",
                     "tag_list", "spam_status", "spam_status_checked_at", "last_used_at")
     list_filter = ("is_authenticated", "is_active", "spam_status", "tags")
     search_fields = ("name", "phone_number", "tags__name")
