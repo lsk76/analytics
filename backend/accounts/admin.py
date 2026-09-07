@@ -144,10 +144,13 @@ class TelegramBotAdmin(admin.ModelAdmin):
 
             return redirect(request.path)
 
+        botfather_log = TelegramUserClient.get_recent_messages_sync(
+            bot.account, "BotFather", limit=15)
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
             "bot": bot,
+            "botfather_log": botfather_log,
             "title": f"Редагувати бота: @{bot.username}",
         }
         return render(request, "admin/accounts/telegrambot/edit_bot.html", ctx)
@@ -239,7 +242,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                     "tag_list", "spam_status", "spam_status_checked_at", "last_used_at")
     list_filter = ("is_authenticated", "is_active", "spam_status", AccountTagFilter)
     search_fields = ("name", "phone_number", "tags__name")
-    readonly_fields = ("authorize_button", "channels_button")
+    readonly_fields = ("authorize_button", "channels_button", "messages_button")
     filter_horizontal = ("tags",)
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
               "add_tag_action", "create_bot_action", "sync_bots_action"]
@@ -394,6 +397,14 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         url = reverse("admin:accounts_telegramaccount_channels", args=[obj.pk])
         return format_html('<a class="button" href="{}">📡 Переглянути канали</a>', url)
 
+    @admin.display(description="Повідомлення")
+    def messages_button(self, obj):
+        if not obj or not obj.pk:
+            return "— (спершу збережи акаунт)"
+        url = reverse("admin:accounts_telegramaccount_messages", args=[obj.pk])
+        return format_html('<a class="button" href="{}">📨 Останні повідомлення '
+                           '(коди входу тут)</a>', url)
+
     def get_urls(self):
         custom = [
             path("<int:account_id>/authorize/",
@@ -402,6 +413,9 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("<int:account_id>/channels/",
                  self.admin_site.admin_view(self.channels_view),
                  name="accounts_telegramaccount_channels"),
+            path("<int:account_id>/messages/",
+                 self.admin_site.admin_view(self.messages_view),
+                 name="accounts_telegramaccount_messages"),
             path("<int:account_id>/create-bot/",
                  self.admin_site.admin_view(self.create_bot_view),
                  name="accounts_telegramaccount_create_bot"),
@@ -584,6 +598,31 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             "title": f"Підписки: {account.name}",
         }
         return render(request, "admin/accounts/telegramaccount/channels.html", ctx)
+
+    MESSAGES_PEER_CHOICES = [
+        (777000, "Telegram (службові — коди входу, попередження)"),
+        ("BotFather", "@BotFather"),
+        ("SpamBot", "@SpamBot"),
+    ]
+
+    def messages_view(self, request, account_id):
+        account = get_object_or_404(TelegramAccount, pk=account_id)
+        peer_raw = request.GET.get("peer", "777000")
+        try:
+            peer = int(peer_raw)
+        except ValueError:
+            peer = peer_raw
+        res = TelegramUserClient.get_recent_messages_sync(account, peer, limit=30)
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "account": account,
+            "result": res,
+            "peer": str(peer),
+            "peer_choices": self.MESSAGES_PEER_CHOICES,
+            "title": f"Повідомлення: {account.name}",
+        }
+        return render(request, "admin/accounts/telegramaccount/messages.html", ctx)
 
     def create_bot_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)

@@ -377,6 +377,40 @@ class TelegramUserClient:
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "dialogs": []}
 
     @classmethod
+    def get_recent_messages_sync(cls, account, peer, limit: int = 20) -> dict:
+        """Останні повідомлення з одним діалогом (peer — username/int id, напр. 777000 —
+        службовий чат «Telegram», де приходять коди входу для авторизації в іншому клієнті)."""
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "messages": []}
+                entity = await client.get_entity(peer)
+                out = []
+                async for m in client.iter_messages(entity, limit=limit):
+                    out.append({
+                        "id": m.id, "out": bool(m.out), "text": m.text or "",
+                        "date": m.date.isoformat() if m.date else None,
+                    })
+                return {"ok": True, "messages": out}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}",
+                        "messages": []}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=30)) or {
+                "ok": False, "error": "порожній результат", "messages": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "messages": []}
+
+    @classmethod
     def join_channels_sync(cls, account, handles: list) -> dict:
         """Підписати акаунт на список каналів (@handle або t.me/handle), з паузою між ними.
 

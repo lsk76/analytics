@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">{{ account.name }}</a> ›
+  Повідомлення
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:640px">
+  <p><b>Акаунт:</b> {{ account.name }} ({{ account.phone_number }})</p>
+  <p class="help">
+    Тут — свіжі повідомлення прямо з Telegram цього акаунта (читання через API,
+    без входу в застосунок). «Telegram» — службовий чат: сюди прилітають коди
+    підтвердження, коли цей номер вводять в іншому клієнті (Desktop/мобільний) —
+    так можна залогінити акаунт деінде, побачивши код тут.
+  </p>
+
+  <form method="get" style="margin:12px 0">
+    <select name="peer" onchange="this.form.submit()">
+      {% for value, label in peer_choices %}
+        <option value="{{ value }}" {% if value|stringformat:"s" == peer %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit" class="button">Показати</button></noscript>
+  </form>
+
+  <p><a href="{% url 'admin:accounts_telegramaccount_messages' account.pk %}?peer={{ peer }}" class="button">🔄 Оновити</a></p>
+
+  {% if not result.ok %}
+    <p style="color:#b91c1c">✗ {{ result.error }}</p>
+  {% else %}
+    {% if not result.messages %}
+      <p class="help">Повідомлень немає.</p>
+    {% endif %}
+    {% for m in result.messages %}
+    <div style="margin:8px 0; padding:10px 12px; border-radius:8px; max-width:80%;
+                {% if m.out %}margin-left:20%; background:#dbeafe;{% else %}background:#f3f4f6;{% endif %}">
+      <div style="white-space:pre-wrap">{{ m.text }}</div>
+      <div style="font-size:11px; color:#6b7280; margin-top:4px">{{ m.date }}</div>
+    </div>
+    {% endfor %}
+  {% endif %}
+
+  <p style="margin-top:18px"><a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a></p>
+</div>
+{% endblock %}

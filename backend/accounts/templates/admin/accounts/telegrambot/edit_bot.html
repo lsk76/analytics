@@ -25,6 +25,21 @@
     </form>
   </div>
 
+  <h3>Листування з @BotFather <a href="{{ request.path }}" style="font-size:13px">🔄 оновити</a></h3>
+  {% if not botfather_log.ok %}
+    <p style="color:#b91c1c">✗ {{ botfather_log.error }}</p>
+  {% elif not botfather_log.messages %}
+    <p class="help">Повідомлень немає.</p>
+  {% else %}
+    {% for m in botfather_log.messages %}
+    <div style="margin:8px 0; padding:10px 12px; border-radius:8px; max-width:80%;
+                {% if m.out %}margin-left:20%; background:#dbeafe;{% else %}background:#f3f4f6;{% endif %}">
+      <div style="white-space:pre-wrap">{{ m.text }}</div>
+      <div style="font-size:11px; color:#6b7280; margin-top:4px">{{ m.date }}</div>
+    </div>
+    {% endfor %}
+  {% endif %}
+
   <p><a href="{% url 'admin:accounts_telegrambot_changelist' %}">← назад до списку ботів</a></p>
 </div>
 {% endblock %}
