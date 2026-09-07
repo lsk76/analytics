@@ -505,6 +505,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         {"username": "@regionalnaya_programa_bot", "feedback_text": "хорошего не много"},
         {"username": "@RegionalnayaProgrammaBot", "feedback_text": "хорошего не много"},
         {"username": "@RegProgramaEdRosBot", "feedback_text": "хорошего не много"},
+        {"username": "@gotovnostyedynstvobot", "feedback_text": ""},
     ]
     TEST_BOT_PAUSE_MIN_DEFAULT = 10
     TEST_BOT_PAUSE_MAX_DEFAULT = 30
