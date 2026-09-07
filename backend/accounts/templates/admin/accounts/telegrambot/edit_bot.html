@@ -27,15 +27,17 @@
 
   <h3>Листування з @BotFather <a href="{{ request.path }}" style="font-size:13px">🔄 оновити</a></h3>
   {% if not botfather_log.ok %}
-    <p style="color:#b91c1c">✗ {{ botfather_log.error }}</p>
+    <p style="color:var(--error-fg,#b91c1c)">✗ {{ botfather_log.error }}</p>
   {% elif not botfather_log.messages %}
     <p class="help">Повідомлень немає.</p>
   {% else %}
     {% for m in botfather_log.messages %}
     <div style="margin:8px 0; padding:10px 12px; border-radius:8px; max-width:80%;
-                {% if m.out %}margin-left:20%; background:#dbeafe;{% else %}background:#f3f4f6;{% endif %}">
+                {% if m.out %}margin-left:20%; background:var(--selected-bg,#e4e4e4);
+                {% else %}background:var(--darkened-bg,#f8f8f8);{% endif %}
+                color:var(--body-fg,#333)">
       <div style="white-space:pre-wrap">{{ m.text }}</div>
-      <div style="font-size:11px; color:#6b7280; margin-top:4px">{{ m.date }}</div>
+      <div style="font-size:11px; color:var(--body-quiet-color,#666); margin-top:4px">{{ m.date }}</div>
     </div>
     {% endfor %}
   {% endif %}

@@ -3,6 +3,7 @@ import uuid
 from django.contrib import admin, messages
 from django.db import IntegrityError
 from django.db.models import Count
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
@@ -417,6 +418,9 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("<int:account_id>/messages/",
                  self.admin_site.admin_view(self.messages_view),
                  name="accounts_telegramaccount_messages"),
+            path("<int:account_id>/messages/poll/",
+                 self.admin_site.admin_view(self.messages_poll_view),
+                 name="accounts_telegramaccount_messages_poll"),
             path("<int:account_id>/create-bot/",
                  self.admin_site.admin_view(self.create_bot_view),
                  name="accounts_telegramaccount_create_bot"),
@@ -624,6 +628,25 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             "title": f"Повідомлення: {account.name}",
         }
         return render(request, "admin/accounts/telegramaccount/messages.html", ctx)
+
+    def messages_poll_view(self, request, account_id):
+        """Опитується JS-таймером зі сторінки повідомлень — лише нові (id > after_id)."""
+        account = get_object_or_404(TelegramAccount, pk=account_id)
+        peer_raw = request.GET.get("peer", "777000")
+        try:
+            peer = int(peer_raw)
+        except ValueError:
+            peer = peer_raw
+        try:
+            after_id = int(request.GET.get("after_id", 0))
+        except ValueError:
+            after_id = 0
+        res = TelegramUserClient.get_recent_messages_sync(account, peer, limit=10)
+        if not res.get("ok"):
+            return JsonResponse({"ok": False, "error": res.get("error")})
+        new = sorted((m for m in res["messages"] if m["id"] > after_id),
+                    key=lambda m: m["id"])
+        return JsonResponse({"ok": True, "messages": new})
 
     def create_bot_view(self, request, account_id):
         account = get_object_or_404(TelegramAccount, pk=account_id)

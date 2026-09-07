@@ -15,7 +15,8 @@
     Тут — свіжі повідомлення прямо з Telegram цього акаунта (читання через API,
     без входу в застосунок). «Telegram» — службовий чат: сюди прилітають коди
     підтвердження, коли цей номер вводять в іншому клієнті (Desktop/мобільний) —
-    так можна залогінити акаунт деінде, побачивши код тут.
+    так можна залогінити акаунт деінде, побачивши код тут. Нові повідомлення
+    самі спливають тостом у правому нижньому куті, поки сторінка відкрита.
   </p>
 
   <form method="get" style="margin:12px 0">
@@ -30,20 +31,79 @@
   <p><a href="{% url 'admin:accounts_telegramaccount_messages' account.pk %}?peer={{ peer }}" class="button">🔄 Оновити</a></p>
 
   {% if not result.ok %}
-    <p style="color:#b91c1c">✗ {{ result.error }}</p>
+    <p style="color:var(--error-fg,#b91c1c)">✗ {{ result.error }}</p>
   {% else %}
     {% if not result.messages %}
       <p class="help">Повідомлень немає.</p>
     {% endif %}
+    <div id="message-list">
     {% for m in result.messages %}
     <div style="margin:8px 0; padding:10px 12px; border-radius:8px; max-width:80%;
-                {% if m.out %}margin-left:20%; background:#dbeafe;{% else %}background:#f3f4f6;{% endif %}">
+                {% if m.out %}margin-left:20%; background:var(--selected-bg,#e4e4e4);
+                {% else %}background:var(--darkened-bg,#f8f8f8);{% endif %}
+                color:var(--body-fg,#333)">
       <div style="white-space:pre-wrap">{{ m.text }}</div>
-      <div style="font-size:11px; color:#6b7280; margin-top:4px">{{ m.date }}</div>
+      <div style="font-size:11px; color:var(--body-quiet-color,#666); margin-top:4px">{{ m.date }}</div>
     </div>
     {% endfor %}
+    </div>
   {% endif %}
 
   <p style="margin-top:18px"><a href="{% url 'admin:accounts_telegramaccount_change' account.pk %}">← назад до акаунта</a></p>
 </div>
+
+<div id="toast-container"
+     style="position:fixed; bottom:16px; right:16px; z-index:9999; display:flex;
+            flex-direction:column-reverse; gap:8px; max-width:340px"></div>
+
+<script>
+(function () {
+  var peer = "{{ peer }}";
+  var pollUrl = "{% url 'admin:accounts_telegramaccount_messages_poll' account.pk %}";
+  var lastId = {{ result.messages.0.id|default:0 }};
+  var container = document.getElementById("toast-container");
+
+  function toast(text, date) {
+    var el = document.createElement("div");
+    el.style.cssText = "background:var(--body-bg,#fff); color:var(--body-fg,#333); " +
+      "border:1px solid var(--border-color,#ccc); border-radius:8px; padding:10px 14px; " +
+      "box-shadow:0 4px 16px rgba(0,0,0,.2); position:relative;";
+
+    var closeBtn = document.createElement("button");
+    closeBtn.textContent = "✕";
+    closeBtn.title = "Закрити";
+    closeBtn.style.cssText = "position:absolute; top:4px; right:6px; background:none; " +
+      "border:none; cursor:pointer; font-size:13px; color:var(--body-quiet-color,#666); padding:2px 4px";
+    closeBtn.onclick = function () { el.remove(); };
+
+    var textDiv = document.createElement("div");
+    textDiv.style.cssText = "white-space:pre-wrap; padding-right:18px; font-size:13px";
+    textDiv.textContent = text || "(без тексту)";
+
+    var dateDiv = document.createElement("div");
+    dateDiv.style.cssText = "font-size:11px; color:var(--body-quiet-color,#666); margin-top:4px";
+    dateDiv.textContent = date;
+
+    el.appendChild(closeBtn);
+    el.appendChild(textDiv);
+    el.appendChild(dateDiv);
+    container.appendChild(el);
+  }
+
+  function poll() {
+    fetch(pollUrl + "?peer=" + encodeURIComponent(peer) + "&after_id=" + lastId)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok || !data.messages || !data.messages.length) return;
+        data.messages.forEach(function (m) {
+          toast(m.text, m.date);
+          if (m.id > lastId) lastId = m.id;
+        });
+      })
+      .catch(function () {});
+  }
+
+  setInterval(poll, 10000);
+})();
+</script>
 {% endblock %}
