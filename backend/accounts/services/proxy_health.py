@@ -12,6 +12,7 @@ it for as long as possible» — з їхньої документації), то
 цілий гео-пул знятий з обслуговування, авторемонт це не полагодить.
 """
 import asyncio
+import logging
 import random
 import re
 import string
@@ -23,6 +24,8 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone as djtz
 from telethon import TelegramClient
+
+logger = logging.getLogger(__name__)
 from telethon.sessions import StringSession
 
 from ..models import Proxy
@@ -114,24 +117,38 @@ def proxy_healthcheck_once() -> bool:
         return False
 
     if test_proxy_connectivity(p.proxy_string):
+        if not p.is_working:
+            logger.info("proxy_healthcheck: id=%s знову робоча (...%s)",
+                       p.id, p.proxy_string[-25:])
         p.is_working = True
         p.fail_count = 0
         p.save(update_fields=["is_working", "fail_count"])
         return True
 
+    logger.warning("proxy_healthcheck: id=%s не з'єднується (...%s), спроба авторемонту",
+                   p.id, p.proxy_string[-25:])
     p.fail_count += 1
     p.is_working = False
     fixed = False
-    for _ in range(REGEN_ATTEMPTS):
+    for attempt in range(1, REGEN_ATTEMPTS + 1):
         candidate = generate_new_session(p.proxy_string)
         if not candidate:
+            logger.warning("proxy_healthcheck: id=%s не у форматі marsproxies sticky-session "
+                          "— авторемонт неможливий, лишається BROKEN", p.id)
             break
         if test_proxy_connectivity(candidate):
+            logger.info("proxy_healthcheck: id=%s АВТОРЕМОНТ вдався (спроба %d/%d), "
+                       "новий session-id: ...%s", p.id, attempt, REGEN_ATTEMPTS,
+                       candidate[-25:])
             p.proxy_string = candidate
             p.is_working = True
             p.fail_count = 0
             fixed = True
             break
+    if not fixed and generate_new_session(p.proxy_string):
+        logger.error("proxy_healthcheck: id=%s всі %d спроби авторемонту провалились — "
+                     "ймовірно, гео/акаунт провайдера деактивовано, потрібне ручне втручання",
+                     p.id, REGEN_ATTEMPTS)
     p.save(update_fields=(["proxy_string", "is_working", "fail_count"] if fixed
                           else ["is_working", "fail_count"]))
     return True
