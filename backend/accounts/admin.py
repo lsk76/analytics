@@ -137,7 +137,8 @@ class TelegramBotAdmin(admin.ModelAdmin):
                 if res.get("ok"):
                     messages.success(request, "✓ Аватарку оновлено.")
                 else:
-                    messages.error(request, f"Не вдалось змінити аватарку: {res.get('error')}")
+                    messages.error(request, f"Не вдалось змінити аватарку: {res.get('error')} "
+                                   f"{res.get('detail', '')[:200]}")
 
             if not new_name and not photo:
                 messages.error(request, "Вкажи нову назву і/або завантаж зображення.")

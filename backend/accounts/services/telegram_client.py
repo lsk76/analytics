@@ -514,10 +514,14 @@ class TelegramUserClient:
                 token = m.group(0)
 
                 photo_ok = None
+                photo_error = None
                 if photo_bytes:
-                    photo_ok = await cls._set_bot_photo(client, bot, msg3, username, photo_bytes)
+                    photo_res = await cls._set_bot_photo(client, bot, msg3, username, photo_bytes)
+                    photo_ok = photo_res.get("ok")
+                    photo_error = photo_res.get("error")
 
-                return {"ok": True, "token": token, "username": username, "photo_ok": photo_ok}
+                return {"ok": True, "token": token, "username": username,
+                        "photo_ok": photo_ok, "photo_error": photo_error}
             finally:
                 try:
                     await client.disconnect()
@@ -686,9 +690,8 @@ class TelegramUserClient:
                 if not await client.is_user_authorized():
                     return {"ok": False, "error": "акаунт не авторизований"}
                 bot = await client.get_entity("BotFather")
-                ok = await cls._set_bot_photo(client, bot, SimpleNamespace(id=0, text=""),
-                                              username, photo_bytes)
-                return {"ok": ok} if ok else {"ok": False, "error": "не вдалось встановити аватарку"}
+                return await cls._set_bot_photo(client, bot, SimpleNamespace(id=0, text=""),
+                                                username, photo_bytes)
             finally:
                 try:
                     await client.disconnect()
@@ -703,7 +706,7 @@ class TelegramUserClient:
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
 
     @classmethod
-    async def _set_bot_photo(cls, client, bot, last_msg, username: str, photo_bytes: bytes) -> bool:
+    async def _set_bot_photo(cls, client, bot, last_msg, username: str, photo_bytes: bytes) -> dict:
         import io
 
         async def _wait_reply(after_id, after_text, timeout=15.0, interval=0.5):
@@ -723,7 +726,7 @@ class TelegramUserClient:
             await client.send_message(bot, "/setuserpic")
             pm = await _wait_reply(last_msg.id, last_msg.text or "")
             if pm is None or not pm.buttons:
-                return False
+                return {"ok": False, "error": "BotFather не показав список ботів на /setuserpic"}
             clicked = False
             for row in pm.buttons:
                 for b in row:
@@ -734,15 +737,24 @@ class TelegramUserClient:
                 if clicked:
                     break
             if not clicked:
-                return False
+                return {"ok": False, "error": f"бот @{username} не знайдений у списку BotFather"}
             pm2 = await _wait_reply(pm.id, pm.text or "")
             if pm2 is None:
-                return False
-            await client.send_file(bot, io.BytesIO(photo_bytes))
+                return {"ok": False, "error": "BotFather не відповів після вибору бота"}
+            photo_file = io.BytesIO(photo_bytes)
+            # Без .name Telethon не бачить розширення й шле як файл ("unnamed") —
+            # BotFather вимагає саме "Photo", інакше просить надіслати ще раз.
+            photo_file.name = "photo.jpg"
+            await client.send_file(bot, photo_file, force_document=False)
             pm3 = await _wait_reply(pm2.id, pm2.text or "", timeout=20)
-            return bool(pm3 and "success" in (pm3.text or "").lower())
-        except Exception:
-            return False
+            if pm3 is None:
+                return {"ok": False, "error": "BotFather не підтвердив отримання фото"}
+            text = pm3.text or ""
+            if "success" in text.lower():
+                return {"ok": True}
+            return {"ok": False, "error": "BotFather відхилив фото", "detail": text[:300]}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
 
     @classmethod
     async def get_channel_meta(cls, account, handle: str) -> dict:

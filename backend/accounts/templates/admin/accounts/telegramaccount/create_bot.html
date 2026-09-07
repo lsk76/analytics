@@ -37,7 +37,8 @@
     </p>
     <p class="help">Збережено в «Боти» в адмінці — можна переглянути пізніше.</p>
     {% if result.photo_ok is not None %}
-      <p>Аватарка: {% if result.photo_ok %}✓ встановлено{% else %}✗ не вдалось встановити{% endif %}</p>
+      <p>Аватарка: {% if result.photo_ok %}✓ встановлено
+        {% else %}✗ не вдалось встановити ({{ result.photo_error }}){% endif %}</p>
     {% endif %}
   </div>
   {% endif %}
