@@ -121,6 +121,20 @@ class TelegramAccount(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
 
+    # --- статус через @SpamBot (обмеження на резолв юзернеймів/надсилання) ---
+    SPAM_STATUS_CHOICES = [
+        ("unknown", "Невідомо"),
+        ("free", "Без обмежень"),
+        ("limited", "Обмежений"),
+        ("frozen", "Заморожений"),
+    ]
+    spam_status = models.CharField(max_length=10, choices=SPAM_STATUS_CHOICES,
+                                   default="unknown", verbose_name="Статус (SpamBot)")
+    spam_status_detail = models.CharField(max_length=300, blank=True,
+                                          verbose_name="Відповідь SpamBot")
+    spam_status_checked_at = models.DateTimeField(null=True, blank=True,
+                                                   verbose_name="Перевірено (SpamBot)")
+
     def client_kwargs(self) -> dict:
         """Непорожні device-параметри для TelegramClient (порожні — дефолти Telethon)."""
         pairs = (("device_model", self.device_model),

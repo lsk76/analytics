@@ -26,6 +26,8 @@ Stage worker — polls the DB for posts/chunks at its stage and processes them.
     python manage.py run_worker --stage warm_up
     # accounts: автоперевірка й авторемонт пулу проксі (taskless, кожні 4 год/проксі)
     python manage.py run_worker --stage proxy_healthcheck --interval 600
+    # accounts: перевірка обмежень акаунтів через @SpamBot (taskless, кожні 24 год/акаунт)
+    python manage.py run_worker --stage spam_status_check --interval 900
 
     # options
     --task <slug>     only this task (default: all active tasks of the
@@ -105,6 +107,14 @@ except ImportError as _e:  # noqa: BLE001
     import sys
     print(f"[run_worker] proxy_healthcheck-стадія недоступна: {_e!r}", file=sys.stderr)
 
+# accounts: перевірка обмежень акаунтів через @SpamBot (services/spam_status_stage.py).
+try:
+    from accounts.services.spam_status_stage import spam_status_check_once
+    ALL_RUNNERS["spam_status_check"] = spam_status_check_once
+except ImportError as _e:  # noqa: BLE001
+    import sys
+    print(f"[run_worker] spam_status_check-стадія недоступна: {_e!r}", file=sys.stderr)
+
 # Стадії, що працюють НЕ по задачах (ранер викликається без аргументу).
 # info_collect полить ДЖЕРЕЛА (Source): одне джерело живить кілька задач,
 # тож цикл «for task» для нього не має сенсу — черга полінгу глобальна.
@@ -113,7 +123,7 @@ except ImportError as _e:  # noqa: BLE001
 # task.info_retention_days), тож іде звичайним циклом задач (не тут).
 # publish — теж по НЕ-задачах: ітерує PublishConfig-профілі, а не AnalysisTask.
 TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish", "test_bot", "warm_up",
-                   "proxy_healthcheck"}
+                   "proxy_healthcheck", "spam_status_check"}
 
 
 class Command(BaseCommand):

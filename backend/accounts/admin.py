@@ -100,11 +100,11 @@ class TestBotJobAdmin(admin.ModelAdmin):
 @admin.register(TelegramAccount)
 class TelegramAccountAdmin(admin.ModelAdmin):
     list_display = ("name", "phone_number", "proxy", "is_authenticated", "is_active",
-                    "last_used_at")
-    list_filter = ("is_authenticated", "is_active")
+                    "spam_status", "spam_status_checked_at", "last_used_at")
+    list_filter = ("is_authenticated", "is_active", "spam_status")
     search_fields = ("name", "phone_number")
     readonly_fields = ("authorize_button", "channels_button")
-    actions = ["check_alive", "test_bot_flow", "warm_up_channels"]
+    actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels"]
 
     @admin.action(description="🔎 Перевірити живість (get_me через проксі, без надсилання)")
     def check_alive(self, request, queryset):
@@ -135,6 +135,29 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             _time.sleep(2)
         self.message_user(request, f"Готово: живих {alive}, проблемних {dead} із {alive+dead}.",
                           level=messages.INFO if not dead else messages.WARNING)
+
+    @admin.action(description="🚫 Перевірити статус (SpamBot) — обмеження на резолв/надсилання")
+    def check_spam_status(self, request, queryset):
+        """/start до @SpamBot по кожному виділеному акаунту, послідовно з паузою.
+
+        Саме таке обмеження (а не мертва проксі) валить резолв юзернеймів у
+        «голих»/непрогрітих акаунтів — див. warm_up_channels.
+        """
+        import time as _time
+        from django.utils import timezone as _tz
+
+        for acc in queryset.order_by("id"):
+            res = TelegramUserClient.check_spam_status_sync(acc)
+            acc.spam_status = res.get("status", "unknown")
+            acc.spam_status_detail = (res.get("detail") or "")[:300]
+            acc.spam_status_checked_at = _tz.now()
+            acc.save(update_fields=["spam_status", "spam_status_detail",
+                                    "spam_status_checked_at"])
+            level = messages.SUCCESS if res.get("status") == "free" else messages.WARNING
+            self.message_user(request,
+                              f"#{acc.id} {acc.phone_number}: {acc.get_spam_status_display()} "
+                              f"— {acc.spam_status_detail[:120]}", level=level)
+            _time.sleep(2)
 
     @admin.action(description="🤖 Тестовий прогін бота (опитування через акаунт(и))")
     def test_bot_flow(self, request, queryset):

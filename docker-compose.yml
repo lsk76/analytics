@@ -101,5 +101,8 @@ services:
   # --- proxy healthcheck worker (accounts.Proxy: автоперевірка + авторемонт sticky-сесій) --
   worker-proxy-health:   { <<: *worker, command: python manage.py run_worker --stage proxy_healthcheck --interval 600 }
 
+  # --- spam-status worker (accounts.TelegramAccount: обмеження через @SpamBot) --
+  worker-spam-status:    { <<: *worker, command: python manage.py run_worker --stage spam_status_check --interval 900 }
+
 volumes:
   pgdata:

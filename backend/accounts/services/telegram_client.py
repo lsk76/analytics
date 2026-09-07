@@ -116,6 +116,59 @@ class TelegramUserClient:
         except Exception:
             return {"state": "таймаут (75с, найімовірніше мертва проксі)", "ok": False}
 
+    # ---- статус акаунта через @SpamBot (обмеження на резолв юзернеймів/повідомлення) ----
+    @classmethod
+    def check_spam_status_sync(cls, account) -> dict:
+        """/start до @SpamBot — офіційний спосіб дізнатись, чи акаунт обмежений.
+
+        Саме таке обмеження (а не мертва проксі) валило резолв юзернеймів у
+        тестовому прогоні бота для «голих»/непрогрітих акаунтів. Читання +
+        одне службове повідомлення в @SpamBot (це і є призначення бота)."""
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"status": "unknown", "detail": "акаунт не авторизований", "ok": False}
+                bot = await client.get_entity("SpamBot")
+                await client.send_message(bot, "/start")
+                deadline = asyncio.get_event_loop().time() + 15
+                reply = None
+                while asyncio.get_event_loop().time() < deadline:
+                    await asyncio.sleep(1)
+                    msgs = [m for m in await client.get_messages(bot, limit=3) if not m.out]
+                    if msgs and (msgs[0].text or "").strip():
+                        reply = msgs[0].text.strip()
+                        break
+                if not reply:
+                    return {"status": "unknown", "detail": "немає відповіді за 15с", "ok": False}
+                low = reply.lower()
+                if "good news" in low or "no limits" in low or "free of any limitations" in low:
+                    status = "free"
+                elif "frozen" in low:
+                    status = "frozen"
+                elif "limited" in low or "restrict" in low:
+                    status = "limited"
+                else:
+                    status = "unknown"
+                return {"status": status, "detail": reply[:300], "ok": True}
+            except Exception as e:  # noqa: BLE001
+                return {"status": "unknown", "detail": f"{type(e).__name__}: {str(e)[:120]}",
+                        "ok": False}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "status": "unknown", "detail": "порожній результат", "ok": False}
+        except Exception as e:  # noqa: BLE001
+            return {"status": "unknown", "detail": f"{type(e).__name__}: {str(e)[:120]}",
+                    "ok": False}
+
     # ---- auth (code flow) ----
     @classmethod
     def send_code_sync(cls, account) -> dict:
