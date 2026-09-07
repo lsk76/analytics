@@ -91,13 +91,66 @@ class ProxyAdmin(admin.ModelAdmin):
 
 @admin.register(TelegramBot)
 class TelegramBotAdmin(admin.ModelAdmin):
-    list_display = ("username", "name", "account", "token", "updated_at")
+    list_display = ("username", "name", "account", "token", "updated_at", "edit_link")
     search_fields = ("username", "name", "account__name")
     list_filter = ("account",)
-    readonly_fields = ("username", "name", "token", "account", "created_at", "updated_at")
+    readonly_fields = ("username", "name", "token", "account", "created_at", "updated_at",
+                      "edit_link")
 
     def has_add_permission(self, request):
         return False
+
+    @admin.display(description="")
+    def edit_link(self, obj):
+        if not obj or not obj.pk:
+            return "—"
+        url = reverse("admin:accounts_telegrambot_edit", args=[obj.pk])
+        return format_html('<a class="button" href="{}">✏️ Редагувати</a>', url)
+
+    def get_urls(self):
+        custom = [
+            path("<int:bot_id>/edit/",
+                 self.admin_site.admin_view(self.edit_bot_view),
+                 name="accounts_telegrambot_edit"),
+        ]
+        return custom + super().get_urls()
+
+    def edit_bot_view(self, request, bot_id):
+        bot = get_object_or_404(TelegramBot, pk=bot_id)
+        if request.method == "POST":
+            new_name = request.POST.get("name", "").strip()
+            photo = request.FILES.get("photo")
+
+            if new_name and new_name != bot.name:
+                res = TelegramUserClient.set_bot_name_sync(bot.account, bot.username, new_name)
+                if res.get("ok"):
+                    bot.name = new_name
+                    bot.save(update_fields=["name"])
+                    messages.success(request, f"✓ Назву змінено на «{new_name}».")
+                else:
+                    messages.error(request, f"Не вдалось змінити назву: "
+                                   f"{res.get('error')} {res.get('detail', '')[:200]}")
+
+            if photo:
+                res = TelegramUserClient.set_bot_photo_sync(bot.account, bot.username,
+                                                            photo.read())
+                if res.get("ok"):
+                    messages.success(request, "✓ Аватарку оновлено.")
+                else:
+                    messages.error(request, f"Не вдалось змінити аватарку: {res.get('error')}")
+
+            if not new_name and not photo:
+                messages.error(request, "Вкажи нову назву і/або завантаж зображення.")
+
+            return redirect(request.path)
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "bot": bot,
+            "title": f"Редагувати бота: @{bot.username}",
+        }
+        return render(request, "admin/accounts/telegrambot/edit_bot.html", ctx)
 
 
 @admin.register(WarmUpJob)

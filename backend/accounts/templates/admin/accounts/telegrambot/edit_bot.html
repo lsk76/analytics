@@ -1,0 +1,30 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegrambot_changelist' %}">Боти</a> ›
+  Редагувати @{{ bot.username }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:520px">
+  <p><b>Бот:</b> @{{ bot.username }} &nbsp; <b>Акаунт-власник:</b> {{ bot.account.name }}</p>
+  <p class="help">
+    Назва змінюється через /setname, аватарка — через /setuserpic у @BotFather,
+    від імені акаунта-власника. Заповнюй лише те, що хочеш змінити.
+  </p>
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <form method="post" enctype="multipart/form-data">{% csrf_token %}
+      <p><label>Нова назва:<br>
+           <input type="text" name="name" value="{{ bot.name }}" style="width:100%"></label></p>
+      <p><label>Нова аватарка (необов'язково):<br>
+           <input type="file" name="photo" accept="image/*"></label></p>
+      <button type="submit" class="button default">💾 Зберегти</button>
+    </form>
+  </div>
+
+  <p><a href="{% url 'admin:accounts_telegrambot_changelist' %}">← назад до списку ботів</a></p>
+</div>
+{% endblock %}

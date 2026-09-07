@@ -581,6 +581,93 @@ class TelegramUserClient:
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "bots": []}
 
+    # ---- редагування вже заведеного бота: назва (/setname), аватарка (/setuserpic) ----
+    @classmethod
+    def set_bot_name_sync(cls, account, username: str, new_name: str) -> dict:
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                bot = await client.get_entity("BotFather")
+                await client.send_message(bot, "/setname")
+                msg = await _wait_reply(client, bot, 0, "")
+                if msg is None or not msg.buttons:
+                    return {"ok": False, "error": "BotFather не показав список ботів"}
+                clicked = False
+                for row in msg.buttons:
+                    for b in row:
+                        if username.lower() in (b.text or "").lower():
+                            await msg.click(text=b.text)
+                            clicked = True
+                            break
+                    if clicked:
+                        break
+                if not clicked:
+                    return {"ok": False, "error": f"бот @{username} не знайдений у списку BotFather"}
+                msg2 = await _wait_reply(client, bot, msg.id, msg.text or "")
+                if msg2 is None:
+                    return {"ok": False, "error": "BotFather не відповів після вибору бота"}
+                await client.send_message(bot, new_name)
+                msg3 = await _wait_reply(client, bot, msg2.id, msg2.text or "")
+                if msg3 is None:
+                    return {"ok": False, "error": "BotFather не підтвердив нову назву"}
+                text = msg3.text or ""
+                return {"ok": "success" in text.lower(), "detail": text[:300]}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "ok": False, "error": "порожній результат"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    @classmethod
+    def set_bot_photo_sync(cls, account, username: str, photo_bytes: bytes) -> dict:
+        from types import SimpleNamespace
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                bot = await client.get_entity("BotFather")
+                ok = await cls._set_bot_photo(client, bot, SimpleNamespace(id=0, text=""),
+                                              username, photo_bytes)
+                return {"ok": ok} if ok else {"ok": False, "error": "не вдалось встановити аватарку"}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "ok": False, "error": "порожній результат"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
     @classmethod
     async def _set_bot_photo(cls, client, bot, last_msg, username: str, photo_bytes: bytes) -> bool:
         import io
