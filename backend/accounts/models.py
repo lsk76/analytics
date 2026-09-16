@@ -81,24 +81,21 @@ class AccountTag(models.Model):
 
 class TelegramAccountQuerySet(models.QuerySet):
     def visible_to(self, user):
-        """Суперюзер бачить усі акаунти; решта — свої (owner) і спільні (без власника)."""
+        """Суперюзер бачить усі акаунти; решта — свої (user) і спільні (без власника)."""
         if user.is_superuser:
             return self
-        return self.filter(models.Q(owner=user) | models.Q(owner__isnull=True))
+        return self.filter(models.Q(user=user) | models.Q(user__isnull=True))
 
 
 class TelegramAccount(models.Model):
     """Акаунт Telegram User API (Telethon StringSession) для скрейпінгу/збагачення."""
 
+    # Власник — видимість в адмінці (TelegramAccountQuerySet.visible_to); боти/завдання
+    # успадковують її від акаунта. SET_NULL: видалення користувача робить акаунт
+    # спільним, а не знищує сесію.
     user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="telegram_accounts",
-        verbose_name="Користувач",
-    )
-    # Не плутати з `user` (хто завів запис). owner — видимість в адмінці:
-    # див. TelegramAccountQuerySet.visible_to; боти/завдання успадковують її від акаунта.
-    owner = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="owned_telegram_accounts", verbose_name="Власник",
+        related_name="telegram_accounts", verbose_name="Власник",
         help_text="Порожньо — спільний акаунт (бачать усі). Власник бачить лише свої "
                   "акаунти й спільні; суперюзер — усі.",
     )
@@ -107,7 +104,7 @@ class TelegramAccount(models.Model):
         help_text="Зручна назва для цього акаунту",
     )
     phone_number = models.CharField(
-        max_length=20, verbose_name="Номер телефону",
+        max_length=20, unique=True, verbose_name="Номер телефону",
         help_text="Номер телефону з кодом країни (напр., +380501234567)",
     )
     api_id = models.CharField(
@@ -191,7 +188,6 @@ class TelegramAccount(models.Model):
     class Meta:
         verbose_name = "Telegram акаунт"
         verbose_name_plural = "Telegram акаунти"
-        unique_together = ["user", "phone_number"]
         ordering = ["-created_at"]
 
     def __str__(self):

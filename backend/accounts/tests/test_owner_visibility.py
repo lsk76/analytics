@@ -1,4 +1,4 @@
-"""Видимість Telegram-акаунтів/ботів за власником (TelegramAccount.owner):
+"""Видимість Telegram-акаунтів/ботів за власником (TelegramAccount.user):
 суперюзер — усі; решта — свої + без власника; чужі — 404 навіть за прямим URL."""
 import pytest
 from django.contrib.auth.models import Group
@@ -35,7 +35,7 @@ def test_group_grants_only_accounts_section(client, users):
 def accounts(users):
     admin, alice, bob = users
     mk = lambda name, phone, owner: TelegramAccount.objects.create(  # noqa: E731
-        user=admin, owner=owner, name=name, phone_number=phone)
+        user=owner, name=name, phone_number=phone)
     return {
         "shared": mk("acc-shared", "+100", None),
         "alice": mk("acc-alice", "+200", alice),
@@ -100,9 +100,9 @@ def test_new_account_by_owner_is_owned(client, users):
     _, alice, _ = users
     client.force_login(alice)
     resp = client.post(reverse("admin:accounts_telegramaccount_add"), {
-        "user": alice.pk, "name": "new", "phone_number": "+400",
+        "name": "new", "phone_number": "+400",
         "api_id": "1", "api_hash": "h", "is_active": "on",
-        "spam_status": "unknown", "owner": "",   # спроба лишити спільним — ігнорується
+        "spam_status": "unknown", "user": "",   # спроба лишити спільним — ігнорується
     })
     assert resp.status_code == 302, resp.content.decode()[:2000]
-    assert TelegramAccount.objects.get(phone_number="+400").owner == alice
+    assert TelegramAccount.objects.get(phone_number="+400").user == alice

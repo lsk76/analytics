@@ -20,7 +20,7 @@ class TelegramAccountViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        serializer.save(user=user, owner=None if user.is_superuser else user)
+        serializer.save(user=None if user.is_superuser else user)
 
     @action(detail=True, methods=["post"])
     def send_code(self, request, pk=None):

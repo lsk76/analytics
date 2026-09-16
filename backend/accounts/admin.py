@@ -60,7 +60,7 @@ class AccountTagFilter(MultiSelectFilter):
             "display": "Всі",
             "value": "__all__",
         }
-        # лічильники — лише по акаунтах, видимих цьому користувачу (owner)
+        # лічильники — лише по акаунтах, видимих цьому користувачу (власник)
         counts = dict(TelegramAccount.objects.visible_to(self.request.user)
                       .filter(tags__isnull=False).order_by()
                       .values("tags").annotate(n=Count("id", distinct=True))
@@ -125,13 +125,13 @@ class TelegramBotAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
     def get_list_display(self, request):
         ld = list(super().get_list_display(request))
         if request.user.is_superuser:
-            ld.insert(ld.index("account") + 1, "account__owner")
+            ld.insert(ld.index("account") + 1, "account__user")
         return ld
 
     def get_list_filter(self, request):
         lf = list(super().get_list_filter(request))
         if request.user.is_superuser:
-            lf.append("account__owner")
+            lf.append("account__user")
         return lf
 
     @admin.display(description="")
@@ -282,7 +282,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
               "add_tag_action", "create_bot_action", "sync_bots_action"]
 
-    # ---- власник (owner): видимість і хто його призначає ----
+    # ---- власник (поле user): видимість і хто його призначає ----
     # get_queryset звужує і changelist/форму/дії, і всі кастомні сторінки нижче
     # (вони беруть акаунт через _get_account / self.get_queryset), і autocomplete
     # tg_account в адмінці analysis.
@@ -295,23 +295,23 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     def get_list_display(self, request):
         ld = list(super().get_list_display(request))
         if request.user.is_superuser:
-            ld.insert(ld.index("phone_number") + 1, "owner")
+            ld.insert(ld.index("phone_number") + 1, "user")
         return ld
 
     def get_list_filter(self, request):
         lf = list(super().get_list_filter(request))
         if request.user.is_superuser:
-            lf.insert(0, "owner")
+            lf.insert(0, "user")
         return lf
 
     def get_readonly_fields(self, request, obj=None):
         ro = tuple(super().get_readonly_fields(request, obj))
-        return ro if request.user.is_superuser else ro + ("owner",)
+        return ro if request.user.is_superuser else ro + ("user",)
 
     def save_model(self, request, obj, form, change):
         # не-суперюзер не може створити спільний акаунт — новий одразу його
         if not change and not request.user.is_superuser:
-            obj.owner = request.user
+            obj.user = request.user
         super().save_model(request, obj, form, change)
 
     @admin.display(description="Теги")
@@ -514,8 +514,8 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             else:
                 try:
                     account = import_tdata_account_from_uploads(
-                        json_file, session_file, request.user, tag_names,
-                        owner=None if request.user.is_superuser else request.user,
+                        json_file, session_file,
+                        None if request.user.is_superuser else request.user, tag_names,
                     )
                     messages.success(request,
                                      f"✓ Акаунт «{account.name}» ({account.phone_number}) "
