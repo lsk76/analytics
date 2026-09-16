@@ -108,15 +108,31 @@ def test_new_account_by_owner_is_owned(client, users):
     assert TelegramAccount.objects.get(phone_number="+400").user == alice
 
 
+def test_owner_editable_in_form(client, users, accounts):
+    _, alice, bob = users
+    client.force_login(alice)
+    acc = accounts["shared"]
+    html = client.get(reverse("admin:accounts_telegramaccount_change",
+                              args=[acc.pk])).content.decode()
+    assert 'name="user"' in html                    # поле власника редагується
+
+
 def test_bulk_set_owner(client, users, accounts):
     admin, alice, bob = users
     url = reverse("admin:accounts_telegramaccount_set_owner")
     ids = f'{accounts["shared"].pk},{accounts["bob"].pk}'
 
-    client.force_login(alice)                       # не-суперюзер: ні дії, ні сторінки
+    client.force_login(alice)                       # не-суперюзер: лише видимі йому акаунти
     resp = client.get(reverse("admin:accounts_telegramaccount_changelist"))
-    assert "set_owner_action" not in resp.content.decode()
-    assert client.post(url, {"ids": ids, "user_id": alice.pk}).status_code == 403
+    assert "set_owner_action" in resp.content.decode()
+    assert client.post(url, {"ids": ids, "user_id": alice.pk}).status_code == 302
+    owner = lambda key: TelegramAccount.objects.get(pk=accounts[key].pk).user  # noqa: E731
+    assert owner("shared") == alice                 # взяла спільний собі
+    assert owner("bob") == bob                      # чужий (невидимий) — не чіпає
+    client.post(url, {"ids": str(accounts["alice"].pk), "user_id": bob.pk})  # віддала свій
+    assert owner("alice") == bob
+    TelegramAccount.objects.filter(pk=accounts["shared"].pk).update(user=None)
+    TelegramAccount.objects.filter(pk=accounts["alice"].pk).update(user=alice)
 
     client.force_login(admin)
     assert client.get(url, {"ids": ids}).status_code == 200

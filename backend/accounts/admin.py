@@ -19,6 +19,11 @@ from .services.telegram_client import TelegramUserClient
 from .services.translit import normalize_bot_username, slugify_bot_username
 
 
+def _owner_candidates():
+    """Кому можна призначити акаунт: активні користувачі з доступом в адмінку."""
+    return User.objects.filter(is_active=True, is_staff=True).order_by("username")
+
+
 class AccountTagFilter(MultiSelectFilter):
     """Теги акаунтів з включенням/виключенням (той самий патерн, що й теги подій —
     TagCategoryMultiSelectFilter у analysis/admin.py, лише без категорій/фасетних лічильників
@@ -297,33 +302,29 @@ class TelegramAccountAdmin(admin.ModelAdmin):
 
     def get_list_display(self, request):
         ld = list(super().get_list_display(request))
-        if request.user.is_superuser:
-            ld.insert(ld.index("phone_number") + 1, "user")
+        ld.insert(ld.index("phone_number") + 1, "user")
         return ld
 
     def get_list_filter(self, request):
-        lf = list(super().get_list_filter(request))
-        if request.user.is_superuser:
-            lf.insert(0, "user")
-        return lf
+        return ["user", *super().get_list_filter(request)]
 
-    def get_readonly_fields(self, request, obj=None):
-        ro = tuple(super().get_readonly_fields(request, obj))
-        return ro if request.user.is_superuser else ro + ("user",)
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "user":
+            kwargs["queryset"] = _owner_candidates()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
         # не-суперюзер не може створити спільний акаунт — новий одразу його
+        # (зробити спільним потім може через зміну власника)
         if not change and not request.user.is_superuser:
             obj.user = request.user
         super().save_model(request, obj, form, change)
 
-    def get_actions(self, request):
-        actions = super().get_actions(request)
-        if not request.user.is_superuser:       # власника призначає лише суперюзер
-            actions.pop("set_owner_action", None)
-        return actions
-
-    @admin.action(description="👤 Змінити власника (обираєш у наступному діалозі)")
+    # Власника змінює будь-хто з правом change — але лише серед видимих йому акаунтів
+    # (свої + спільні, get_queryset): може взяти спільний собі, віддати свій іншому
+    # чи зробити спільним; чужий акаунт після передачі він уже не бачить.
+    @admin.action(description="👤 Змінити власника (обираєш у наступному діалозі)",
+                  permissions=["change"])
     def set_owner_action(self, request, queryset):
         ids = ",".join(str(pk) for pk in queryset.values_list("id", flat=True))
         return redirect(reverse("admin:accounts_telegramaccount_set_owner") + f"?ids={ids}")
@@ -552,7 +553,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return render(request, "admin/accounts/telegramaccount/import_tdata.html", ctx)
 
     def set_owner_view(self, request):
-        if not request.user.is_superuser:
+        if not self.has_change_permission(request):
             raise PermissionDenied
         ids_raw = request.GET.get("ids") or request.POST.get("ids", "")
         ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
@@ -560,7 +561,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         if not accounts:
             messages.error(request, "Не вибрано жодного акаунта.")
             return redirect("admin:accounts_telegramaccount_changelist")
-        users = User.objects.filter(is_active=True, is_staff=True).order_by("username")
+        users = _owner_candidates()
 
         if request.method == "POST":
             raw = request.POST.get("user_id", "")
