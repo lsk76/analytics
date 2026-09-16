@@ -1,7 +1,7 @@
 """Видимість Telegram-акаунтів/ботів за власником (TelegramAccount.owner):
 суперюзер — усі; решта — свої + без власника; чужі — 404 навіть за прямим URL."""
 import pytest
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group
 from django.urls import reverse
 
 from accounts.models import TelegramAccount, TelegramBot, WarmUpJob
@@ -11,18 +11,24 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def users(django_user_model):
+    """alice/bob — члени групи «Telegram-акаунти» (міграція 0012)."""
     admin = django_user_model.objects.create_superuser("root", password="x")
     alice = django_user_model.objects.create_user("alice", password="x", is_staff=True)
     bob = django_user_model.objects.create_user("bob", password="x", is_staff=True)
-    perms = Permission.objects.filter(content_type__app_label="accounts",
-                                      codename__in=["view_telegramaccount",
-                                                    "change_telegramaccount",
-                                                    "add_telegramaccount",
-                                                    "view_telegrambot",
-                                                    "view_warmupjob"])
+    group = Group.objects.get(name="Telegram-акаунти")
     for u in (alice, bob):
-        u.user_permissions.set(perms)
+        u.groups.add(group)
     return admin, alice, bob
+
+
+def test_group_grants_only_accounts_section(client, users):
+    _, alice, _ = users
+    assert not alice.has_perm("accounts.delete_telegramaccount")
+    assert not alice.has_perm("accounts.view_proxy")
+    client.force_login(alice)
+    apps = client.get(reverse("admin:index")).context["app_list"]
+    assert [a["app_label"] for a in apps] == ["accounts"]
+    assert "Proxy" not in {m["object_name"] for m in apps[0]["models"]}
 
 
 @pytest.fixture
