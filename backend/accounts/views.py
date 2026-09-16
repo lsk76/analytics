@@ -16,10 +16,11 @@ class TelegramAccountViewSet(viewsets.ModelViewSet):
     serializer_class = TelegramAccountSerializer
 
     def get_queryset(self):
-        return TelegramAccount.objects.filter(user=self.request.user)
+        return TelegramAccount.objects.visible_to(self.request.user)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        user = self.request.user
+        serializer.save(user=user, owner=None if user.is_superuser else user)
 
     @action(detail=True, methods=["post"])
     def send_code(self, request, pk=None):

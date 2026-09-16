@@ -33,9 +33,11 @@ def convert_sqlite_to_string_session(session_file_path: str) -> str:
     return string_sess.save()
 
 
-def import_tdata_account(meta: dict, session_file_path: str, owner,
-                         tag_names: list | None = None) -> TelegramAccount:
-    """meta — розпарсений <phone>.json. Кидає ValueError/IntegrityError на невалідні дані."""
+def import_tdata_account(meta: dict, session_file_path: str, user,
+                         tag_names: list | None = None, owner=None) -> TelegramAccount:
+    """meta — розпарсений <phone>.json. Кидає ValueError/IntegrityError на невалідні дані.
+
+    user — хто завів запис; owner — власник для видимості (None = спільний)."""
     session_string = convert_sqlite_to_string_session(session_file_path)
 
     phone = str(meta.get("phone") or "").strip()
@@ -49,7 +51,8 @@ def import_tdata_account(meta: dict, session_file_path: str, owner,
     system_lang_pack = (meta.get("system_lang_pack") or "").strip()
 
     account = TelegramAccount.objects.create(
-        user=owner,
+        user=user,
+        owner=owner,
         name=name or phone,
         phone_number=phone,
         api_id=str(meta.get("app_id") or "") or None,
@@ -72,8 +75,9 @@ def import_tdata_account(meta: dict, session_file_path: str, owner,
     return account
 
 
-def import_tdata_account_from_uploads(json_file, session_file, owner,
-                                      tag_names: list | None = None) -> TelegramAccount:
+def import_tdata_account_from_uploads(json_file, session_file, user,
+                                      tag_names: list | None = None,
+                                      owner=None) -> TelegramAccount:
     """json_file/session_file — Django UploadedFile (з request.FILES)."""
     meta = json.loads(json_file.read())
     with tempfile.NamedTemporaryFile(suffix=".session", delete=False) as tmp:
@@ -81,7 +85,7 @@ def import_tdata_account_from_uploads(json_file, session_file, owner,
             tmp.write(chunk)
         tmp_path = tmp.name
     try:
-        return import_tdata_account(meta, tmp_path, owner, tag_names)
+        return import_tdata_account(meta, tmp_path, user, tag_names, owner=owner)
     finally:
         try:
             os.remove(tmp_path)

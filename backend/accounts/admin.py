@@ -60,8 +60,11 @@ class AccountTagFilter(MultiSelectFilter):
             "display": "Всі",
             "value": "__all__",
         }
-        counts = dict(AccountTag.objects.annotate(n=Count("accounts", distinct=True))
-                      .values_list("id", "n"))
+        # лічильники — лише по акаунтах, видимих цьому користувачу (owner)
+        counts = dict(TelegramAccount.objects.visible_to(self.request.user)
+                      .filter(tags__isnull=False).order_by()
+                      .values("tags").annotate(n=Count("id", distinct=True))
+                      .values_list("tags", "n"))
         for tag in AccountTag.objects.order_by("name"):
             tid = str(tag.id)
             yield {
@@ -70,6 +73,24 @@ class AccountTagFilter(MultiSelectFilter):
                 "display": f"{tag.name} ({counts.get(tag.id, 0)})",
                 "value": tid,
             }
+
+
+class AccountVisibilityAdminMixin:
+    """Боти/завдання видно лише тим, кому видно їхній акаунт
+    (TelegramAccountQuerySet.visible_to: суперюзер — усі, решта — свої + без власника)."""
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        return qs.filter(account__in=TelegramAccount.objects.visible_to(request.user))
+
+
+class VisibleAccountListFilter(admin.RelatedFieldListFilter):
+    """Фасет «Акаунт», звужений до видимих користувачу акаунтів."""
+
+    def field_choices(self, field, request, model_admin):
+        return [(a.pk, str(a)) for a in TelegramAccount.objects.visible_to(request.user)]
 
 
 @admin.register(AccountTag)
@@ -91,15 +112,27 @@ class ProxyAdmin(admin.ModelAdmin):
 
 
 @admin.register(TelegramBot)
-class TelegramBotAdmin(admin.ModelAdmin):
+class TelegramBotAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
     list_display = ("username", "name", "account", "token", "updated_at", "edit_link")
     search_fields = ("username", "name", "account__name")
-    list_filter = ("account",)
+    list_filter = (("account", VisibleAccountListFilter),)
     readonly_fields = ("username", "name", "token", "account", "created_at", "updated_at",
                       "edit_link")
 
     def has_add_permission(self, request):
         return False
+
+    def get_list_display(self, request):
+        ld = list(super().get_list_display(request))
+        if request.user.is_superuser:
+            ld.insert(ld.index("account") + 1, "account__owner")
+        return ld
+
+    def get_list_filter(self, request):
+        lf = list(super().get_list_filter(request))
+        if request.user.is_superuser:
+            lf.append("account__owner")
+        return lf
 
     @admin.display(description="")
     def edit_link(self, obj):
@@ -117,7 +150,7 @@ class TelegramBotAdmin(admin.ModelAdmin):
         return custom + super().get_urls()
 
     def edit_bot_view(self, request, bot_id):
-        bot = get_object_or_404(TelegramBot, pk=bot_id)
+        bot = get_object_or_404(self.get_queryset(request), pk=bot_id)
         if request.method == "POST":
             new_name = request.POST.get("name", "").strip()
             photo = request.FILES.get("photo")
@@ -159,7 +192,7 @@ class TelegramBotAdmin(admin.ModelAdmin):
 
 
 @admin.register(WarmUpJob)
-class WarmUpJobAdmin(admin.ModelAdmin):
+class WarmUpJobAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
     list_display = ("account", "status", "handles_count", "attempts", "created_at", "finished_at")
     list_filter = ("status",)
     search_fields = ("account__name", "account__phone_number")
@@ -189,7 +222,7 @@ class WarmUpJobAdmin(admin.ModelAdmin):
 
 
 @admin.register(TestBotJob)
-class TestBotJobAdmin(admin.ModelAdmin):
+class TestBotJobAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
     list_display = ("batch_id", "order", "account", "bot_username", "status", "attempts",
                     "pause_min", "pause_max", "created_at", "finished_at", "status_link")
     list_filter = ("status", "bot_username")
@@ -248,6 +281,38 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     filter_horizontal = ("tags",)
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
               "add_tag_action", "create_bot_action", "sync_bots_action"]
+
+    # ---- власник (owner): видимість і хто його призначає ----
+    # get_queryset звужує і changelist/форму/дії, і всі кастомні сторінки нижче
+    # (вони беруть акаунт через _get_account / self.get_queryset), і autocomplete
+    # tg_account в адмінці analysis.
+    def get_queryset(self, request):
+        return super().get_queryset(request).visible_to(request.user)
+
+    def _get_account(self, request, account_id):
+        return get_object_or_404(self.get_queryset(request), pk=account_id)
+
+    def get_list_display(self, request):
+        ld = list(super().get_list_display(request))
+        if request.user.is_superuser:
+            ld.insert(ld.index("phone_number") + 1, "owner")
+        return ld
+
+    def get_list_filter(self, request):
+        lf = list(super().get_list_filter(request))
+        if request.user.is_superuser:
+            lf.insert(0, "owner")
+        return lf
+
+    def get_readonly_fields(self, request, obj=None):
+        ro = tuple(super().get_readonly_fields(request, obj))
+        return ro if request.user.is_superuser else ro + ("owner",)
+
+    def save_model(self, request, obj, form, change):
+        # не-суперюзер не може створити спільний акаунт — новий одразу його
+        if not change and not request.user.is_superuser:
+            obj.owner = request.user
+        super().save_model(request, obj, form, change)
 
     @admin.display(description="Теги")
     def tag_list(self, obj):
@@ -450,6 +515,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                 try:
                     account = import_tdata_account_from_uploads(
                         json_file, session_file, request.user, tag_names,
+                        owner=None if request.user.is_superuser else request.user,
                     )
                     messages.success(request,
                                      f"✓ Акаунт «{account.name}» ({account.phone_number}) "
@@ -471,7 +537,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     def add_tag_view(self, request):
         ids_raw = request.GET.get("ids") or request.POST.get("ids", "")
         ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
-        accounts = list(TelegramAccount.objects.filter(pk__in=ids))
+        accounts = list(self.get_queryset(request).filter(pk__in=ids))
         if not accounts:
             messages.error(request, "Не вибрано жодного акаунта.")
             return redirect("admin:accounts_telegramaccount_changelist")
@@ -515,7 +581,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         """Поставити в чергу TestBotJob по одному на акаунт. Виконує воркер `run_worker --stage test_bot`."""
         ids_raw = request.GET.get("ids", "")
         ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
-        accounts = list(TelegramAccount.objects.filter(pk__in=ids).order_by("id"))
+        accounts = list(self.get_queryset(request).filter(pk__in=ids).order_by("id"))
         if not accounts:
             messages.error(request, "Не вибрано жодного акаунта.")
             return redirect("admin:accounts_telegramaccount_changelist")
@@ -562,14 +628,15 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return render(request, "admin/accounts/telegramaccount/test_bot.html", ctx)
 
     def test_bot_status_view(self, request, batch_id):
+        batch_jobs = TestBotJob.objects.filter(batch_id=batch_id,
+                                               account__in=self.get_queryset(request))
         if request.method == "POST" and request.POST.get("action") == "cancel":
-            n = (TestBotJob.objects.filter(batch_id=batch_id, status__in=["queued", "pending"])
-                 .update(status="cancelled"))
+            n = batch_jobs.filter(status__in=["queued", "pending"]).update(status="cancelled")
             messages.success(request, f"Скасовано {n} завдання(нь), що ще не почались.")
             return redirect(request.path)
 
         if request.method == "POST" and request.POST.get("action") == "restart":
-            old_jobs = list(TestBotJob.objects.filter(batch_id=batch_id).order_by("order"))
+            old_jobs = list(batch_jobs.order_by("order"))
             if not old_jobs:
                 messages.error(request, "Такого запуску не знайдено.")
                 return redirect("admin:accounts_telegramaccount_changelist")
@@ -584,8 +651,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             messages.success(request, f"Новий прогін запущено: {len(old_jobs)} акаунт(и).")
             return redirect("admin:accounts_telegramaccount_test_bot_status", new_batch_id)
 
-        jobs = list(TestBotJob.objects.filter(batch_id=batch_id).select_related("account")
-                    .order_by("order"))
+        jobs = list(batch_jobs.select_related("account").order_by("order"))
         if not jobs:
             messages.error(request, "Такого запуску не знайдено.")
             return redirect("admin:accounts_telegramaccount_changelist")
@@ -603,7 +669,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return render(request, "admin/accounts/telegramaccount/test_bot_status.html", ctx)
 
     def channels_view(self, request, account_id):
-        account = get_object_or_404(TelegramAccount, pk=account_id)
+        account = self._get_account(request, account_id)
         res = TelegramUserClient.list_dialogs_sync(account)
         ctx = {
             **self.admin_site.each_context(request),
@@ -621,7 +687,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     ]
 
     def messages_view(self, request, account_id):
-        account = get_object_or_404(TelegramAccount, pk=account_id)
+        account = self._get_account(request, account_id)
         peer_raw = request.GET.get("peer", "777000")
         try:
             peer = int(peer_raw)
@@ -641,7 +707,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
 
     def messages_poll_view(self, request, account_id):
         """Опитується JS-таймером зі сторінки повідомлень — лише нові (id > after_id)."""
-        account = get_object_or_404(TelegramAccount, pk=account_id)
+        account = self._get_account(request, account_id)
         peer_raw = request.GET.get("peer", "777000")
         try:
             peer = int(peer_raw)
@@ -659,7 +725,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return JsonResponse({"ok": True, "messages": new})
 
     def create_bot_view(self, request, account_id):
-        account = get_object_or_404(TelegramAccount, pk=account_id)
+        account = self._get_account(request, account_id)
         result = None
         if request.method == "POST":
             name = request.POST.get("name", "").strip()
@@ -696,7 +762,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return render(request, "admin/accounts/telegramaccount/create_bot.html", ctx)
 
     def authorize_view(self, request, account_id):
-        account = get_object_or_404(TelegramAccount, pk=account_id)
+        account = self._get_account(request, account_id)
         if request.method == "POST":
             act = request.POST.get("action")
             if act == "send_code":

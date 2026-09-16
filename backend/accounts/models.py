@@ -79,12 +79,28 @@ class AccountTag(models.Model):
         return self.name
 
 
+class TelegramAccountQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        """Суперюзер бачить усі акаунти; решта — свої (owner) і спільні (без власника)."""
+        if user.is_superuser:
+            return self
+        return self.filter(models.Q(owner=user) | models.Q(owner__isnull=True))
+
+
 class TelegramAccount(models.Model):
     """Акаунт Telegram User API (Telethon StringSession) для скрейпінгу/збагачення."""
 
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="telegram_accounts",
         verbose_name="Користувач",
+    )
+    # Не плутати з `user` (хто завів запис). owner — видимість в адмінці:
+    # див. TelegramAccountQuerySet.visible_to; боти/завдання успадковують її від акаунта.
+    owner = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="owned_telegram_accounts", verbose_name="Власник",
+        help_text="Порожньо — спільний акаунт (бачать усі). Власник бачить лише свої "
+                  "акаунти й спільні; суперюзер — усі.",
     )
     name = models.CharField(
         max_length=100, verbose_name="Назва",
@@ -160,6 +176,8 @@ class TelegramAccount(models.Model):
                                           verbose_name="Відповідь SpamBot")
     spam_status_checked_at = models.DateTimeField(null=True, blank=True,
                                                    verbose_name="Перевірено (SpamBot)")
+
+    objects = TelegramAccountQuerySet.as_manager()
 
     def client_kwargs(self) -> dict:
         """Непорожні device-параметри для TelegramClient (порожні — дефолти Telethon)."""
