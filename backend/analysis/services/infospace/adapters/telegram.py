@@ -23,6 +23,9 @@ def _fetch_history(account, handle, min_id, limit, reverse):
         from telethon.errors import FloodWaitError
     except Exception:  # noqa: BLE001 — telethon має бути, але не валимо імпорт пакета
         FloodWaitError = ()
+    # account.proxy (FK) треба прогріти ТУТ, у sync-коді: _client читає його вже
+    # всередині корутини, і лінивий SELECT валить SynchronousOnlyOperation
+    TelegramUserClient._prime_proxy(account)
     try:
         return run_async(TelegramUserClient.fetch_history(
             account, handle, min_id=min_id, limit=limit, reverse=reverse))

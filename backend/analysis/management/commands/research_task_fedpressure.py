@@ -325,6 +325,7 @@ class Command(BaseCommand):
         if not acct:
             raise CommandError("немає авторизованого TelegramAccount для резолву")
         self.stdout.write(f"резолв акаунтом: {acct}")
+        TelegramUserClient._prime_proxy(acct)  # FK proxy — до event loop'а
 
         out = []
         for i, (h, _, row) in enumerate(missing, 1):

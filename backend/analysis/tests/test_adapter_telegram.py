@@ -18,6 +18,7 @@ class _Src:
 
 class _Acct:
     is_authenticated = True
+    proxy = None
 
 
 def _msgs(ids):
@@ -155,3 +156,37 @@ def test_account_selection_prefers_source_then_pool():
     TelegramAccount.objects.update(is_authenticated=False)
     s.tg_account = None
     assert ad._account(s) is None
+
+
+@pytest.mark.django_db
+def test_fetch_history_with_proxy_account_no_sync_only_error(monkeypatch):
+    """Регресія 2026-09-05: акаунт із проксі (FK) → _client читав account.proxy
+    усередині корутини → SynchronousOnlyOperation, увесь TG-полінг лежав."""
+    from django.contrib.auth import get_user_model
+    from accounts.models import Proxy, TelegramAccount
+    from accounts.services import telegram_client as tc
+
+    u = get_user_model().objects.create(username="tg-proxy-owner")
+    px = Proxy.objects.create(proxy_string="127.0.0.1:1080:u:p")
+    TelegramAccount.objects.create(user=u, phone_number="+7", api_id="1", api_hash="h",
+                                   is_authenticated=True, proxy=px)
+    acct = TelegramAccount.objects.get(phone_number="+7")   # свіжий, FK не в кеші
+    seen = {}
+
+    class _FakeClient:
+        def __init__(self, session, api_id, api_hash, proxy=None, **kw):
+            seen["proxy"] = proxy
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+        async def iter_messages(self, entity, **kw):
+            yield type("M", (), {"id": 7, "message": "текст", "date": None})()
+
+    monkeypatch.setattr(tc, "TelegramClient", _FakeClient)
+    out = telegram._fetch_history(acct, "ulan_smi", 0, 5, False)
+    assert out == [{"id": 7, "text": "текст", "date": None}]
+    assert seen["proxy"][1:3] == ("127.0.0.1", 1080)
