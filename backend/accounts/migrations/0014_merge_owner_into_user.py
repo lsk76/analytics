@@ -1,18 +1,12 @@
 from django.db import migrations
+from django.db.models import F
 
 
 def merge_owner_into_user(apps, schema_editor):
-    """owner → user. Де owner не задано: акаунти, заведені суперюзером, стають спільними
-    (як і було з owner=NULL); заведені звичайним користувачем — лишаються його."""
+    """user := owner дослівно (разом із NULL): видимість лишається рівно такою, як була
+    з owner. Колишній «хто завів» у user власником не вважаємо."""
     TelegramAccount = apps.get_model("accounts", "TelegramAccount")
-    for acc in TelegramAccount.objects.select_related("user"):
-        if acc.owner_id:
-            acc.user_id = acc.owner_id
-        elif acc.user_id and acc.user.is_superuser:
-            acc.user_id = None
-        else:
-            continue
-        acc.save(update_fields=["user"])
+    TelegramAccount.objects.update(user=F("owner"))
 
 
 class Migration(migrations.Migration):
