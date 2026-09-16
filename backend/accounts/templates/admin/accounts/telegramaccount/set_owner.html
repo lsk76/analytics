@@ -1,0 +1,39 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Головна</a> ›
+  <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
+  Змінити власника
+</div>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:520px">
+  <p><b>Акаунти ({{ accounts|length }}):</b></p>
+  <ul>
+    {% for account in accounts %}
+      <li>{{ account.name }} ({{ account.phone_number }}) — зараз:
+        {% if account.user %}{{ account.user.username }}{% else %}<i>спільний</i>{% endif %}</li>
+    {% endfor %}
+  </ul>
+
+  <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="ids" value="{{ ids }}">
+      <p><label>Новий власник:<br>
+        <select name="user_id" style="width:100%" autofocus>
+          <option value="">— без власника (спільний, бачать усі) —</option>
+          {% for u in users %}
+            <option value="{{ u.pk }}">{{ u.username }}{% if u.is_superuser %} (суперюзер){% endif %}</option>
+          {% endfor %}
+        </select></label></p>
+      <button type="submit" class="button default">👤 Призначити</button>
+    </form>
+  </div>
+
+  <p class="help">Власник бачить лише свої акаунти й спільні; суперюзер — усі.
+    У списку — лише активні користувачі з доступом в адмінку.</p>
+
+  <p><a href="{% url 'admin:accounts_telegramaccount_changelist' %}">← назад до списку акаунтів</a></p>
+</div>
+{% endblock %}

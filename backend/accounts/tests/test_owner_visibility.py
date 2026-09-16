@@ -106,3 +106,23 @@ def test_new_account_by_owner_is_owned(client, users):
     })
     assert resp.status_code == 302, resp.content.decode()[:2000]
     assert TelegramAccount.objects.get(phone_number="+400").user == alice
+
+
+def test_bulk_set_owner(client, users, accounts):
+    admin, alice, bob = users
+    url = reverse("admin:accounts_telegramaccount_set_owner")
+    ids = f'{accounts["shared"].pk},{accounts["bob"].pk}'
+
+    client.force_login(alice)                       # не-суперюзер: ні дії, ні сторінки
+    resp = client.get(reverse("admin:accounts_telegramaccount_changelist"))
+    assert "set_owner_action" not in resp.content.decode()
+    assert client.post(url, {"ids": ids, "user_id": alice.pk}).status_code == 403
+
+    client.force_login(admin)
+    assert client.get(url, {"ids": ids}).status_code == 200
+    assert client.post(url, {"ids": ids, "user_id": alice.pk}).status_code == 302
+    assert set(TelegramAccount.objects.filter(user=alice)) == {
+        accounts["shared"], accounts["alice"], accounts["bob"]}
+    client.post(url, {"ids": ids, "user_id": ""})   # назад у спільні
+    assert set(TelegramAccount.objects.filter(user__isnull=True)) == {
+        accounts["shared"], accounts["bob"]}

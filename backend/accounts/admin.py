@@ -1,11 +1,14 @@
 import uuid
 
 from django.contrib import admin, messages
+from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError
 from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from analysis.multiselect_filter import MultiSelectFilter
@@ -280,7 +283,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     readonly_fields = ("authorize_button", "channels_button", "messages_button")
     filter_horizontal = ("tags",)
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
-              "add_tag_action", "create_bot_action", "sync_bots_action"]
+              "add_tag_action", "set_owner_action", "create_bot_action", "sync_bots_action"]
 
     # ---- власник (поле user): видимість і хто його призначає ----
     # get_queryset звужує і changelist/форму/дії, і всі кастомні сторінки нижче
@@ -313,6 +316,17 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         if not change and not request.user.is_superuser:
             obj.user = request.user
         super().save_model(request, obj, form, change)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:       # власника призначає лише суперюзер
+            actions.pop("set_owner_action", None)
+        return actions
+
+    @admin.action(description="👤 Змінити власника (обираєш у наступному діалозі)")
+    def set_owner_action(self, request, queryset):
+        ids = ",".join(str(pk) for pk in queryset.values_list("id", flat=True))
+        return redirect(reverse("admin:accounts_telegramaccount_set_owner") + f"?ids={ids}")
 
     @admin.display(description="Теги")
     def tag_list(self, obj):
@@ -495,6 +509,9 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             path("test-bot/<str:batch_id>/status/",
                  self.admin_site.admin_view(self.test_bot_status_view),
                  name="accounts_telegramaccount_test_bot_status"),
+            path("set-owner/",
+                 self.admin_site.admin_view(self.set_owner_view),
+                 name="accounts_telegramaccount_set_owner"),
             path("add-tag/",
                  self.admin_site.admin_view(self.add_tag_view),
                  name="accounts_telegramaccount_add_tag"),
@@ -533,6 +550,38 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             "title": "Додати акаунт через файли (tdata JSON + .session)",
         }
         return render(request, "admin/accounts/telegramaccount/import_tdata.html", ctx)
+
+    def set_owner_view(self, request):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+        ids_raw = request.GET.get("ids") or request.POST.get("ids", "")
+        ids = [int(x) for x in ids_raw.split(",") if x.strip().isdigit()]
+        accounts = self.get_queryset(request).filter(pk__in=ids).select_related("user")
+        if not accounts:
+            messages.error(request, "Не вибрано жодного акаунта.")
+            return redirect("admin:accounts_telegramaccount_changelist")
+        users = User.objects.filter(is_active=True, is_staff=True).order_by("username")
+
+        if request.method == "POST":
+            raw = request.POST.get("user_id", "")
+            owner = users.filter(pk=raw).first() if raw.isdigit() else None
+            if raw and owner is None:
+                messages.error(request, "Такого користувача немає серед доступних.")
+            else:
+                n = accounts.update(user=owner, updated_at=timezone.now())
+                who = f"«{owner.username}»" if owner else "без власника (спільні)"
+                messages.success(request, f"Власника змінено для {n} акаунт(ів): {who}.")
+                return redirect("admin:accounts_telegramaccount_changelist")
+
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "accounts": accounts,
+            "ids": ids_raw,
+            "users": users,
+            "title": "Змінити власника",
+        }
+        return render(request, "admin/accounts/telegramaccount/set_owner.html", ctx)
 
     def add_tag_view(self, request):
         ids_raw = request.GET.get("ids") or request.POST.get("ids", "")
