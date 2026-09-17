@@ -226,6 +226,12 @@ def _media_meta(m, mc):
             "mid": int(m.id), "group": getattr(m, "grouped_id", None)}
 
 
+def _is_resolve_error(err: str) -> bool:
+    low = (err or "").lower()
+    return ("no user has" in low or "usernameinvalid" in low
+            or "cannot find any entity" in low or "usernamenotoccupied" in low)
+
+
 def _patterns(task):
     """Скомпільовані патерни задачі. Порожньо = стрім вимкнено (свідомо: інакше
     пустий список матчив би все і вилив би весь потік чатів у LLM)."""
@@ -387,13 +393,22 @@ def tgs_stream_once(task) -> bool:
     out: list = []
     asyncio.run(_stream_all(pool, by_acc, patterns, task.stream_media_chat_id, out))
 
-    n_new = n_media = 0
+    n_new = n_media = n_rebind = 0
     for mc, msgs, max_id, media, err in out:
         n_media += media
         fields = ["last_streamed_at"]
         if err:
             mc.notes = f"[tgs_stream] {err}"[:500]
             fields.append("notes")
+            # «No user has X as username» — це НЕ мертвий чат, а провал резолву
+            # ЦИМ акаунтом: обмежені (SpamBot) акаунти не резолвлять нові
+            # юзернейми. Тому відв'язуємо акаунт і даємо чату інший шанс —
+            # інакше живий чат назавжди лишається «мертвим» (ловили на проді:
+            # @reduktorny «не існував», хоч уже давав пости).
+            if _is_resolve_error(err):
+                mc.tg_account = None
+                fields.append("tg_account")
+                n_rebind += 1
         elif msgs:
             n_new += _store(task, mc, msgs)
         if max_id > mc.stream_last_msg_id:
@@ -401,8 +416,8 @@ def tgs_stream_once(task) -> bool:
             fields.append("stream_last_msg_id")
         mc.last_streamed_at = dj_tz.now()
         mc.save(update_fields=fields)
-    logger.info("tgs_stream: чатів %d, збігів %d, медіа переслано %d",
-                len(out), n_new, n_media)
+    logger.info("tgs_stream: чатів %d, збігів %d, медіа %d, перепризначено %d",
+                len(out), n_new, n_media, n_rebind)
     return True
 
 
