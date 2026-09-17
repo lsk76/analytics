@@ -18,6 +18,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone as dj_tz
@@ -256,7 +257,13 @@ async def _stream_account(acc, chats, patterns, media_chat_id, out):
     try:
         await client.connect()
         if not await client.is_user_authorized():
-            logger.warning("tgs_stream: акаунт #%s не авторизований", acc.id)
+            # Сесія протухла. Якщо просто вийти, чати цього акаунта лишаться
+            # прив'язаними до нього і НІКОЛИ не прочитаються (тиха німота).
+            # Тому відв'язуємо — наступний прохід роздасть їх живим акаунтам.
+            logger.warning("tgs_stream: акаунт #%s не авторизований — відв'язую %d чатів",
+                           acc.id, len(chats))
+            await sync_to_async(MonitorChat.objects.filter(
+                id__in=[mc.id for mc in chats]).update)(tg_account=None)
             return
         media_peer = None
         if media_chat_id and any(mc.forward_media for mc in chats):
