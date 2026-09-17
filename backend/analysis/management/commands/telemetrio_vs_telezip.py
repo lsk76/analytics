@@ -78,10 +78,15 @@ class Command(BaseCommand):
     help = "Порівняти пошук Telemetr.io і TeleZip на одному терміні та вікні."
 
     def add_arguments(self, parser):
-        parser.add_argument("--term", action="append", required=True,
+        parser.add_argument("--term", action="append", default=[],
                             help="Пошуковий термін (як є, без +/-). Можна кілька разів — "
                                  "але кожен НОВИЙ термін незворотно з'їдає слот місячної "
                                  "квоти search_terms (фактичний ліміт друкує --dry-run).")
+        parser.add_argument("--terms-file", default="",
+                            help="Файл із фразами: по одній на рядок, або JSON-список. "
+                                 "Для довгих текстів (цілий пост як точна фраза) це "
+                                 "єдиний зручний спосіб — у --term вони не вміщаються. "
+                                 "Порожні рядки і рядки з # ігноруються.")
         parser.add_argument("--days", type=int, default=7,
                             help="Глибина вікна в днях (free-план Telemetr.io бачить 7).")
         parser.add_argument("--country", default="",
@@ -102,6 +107,8 @@ class Command(BaseCommand):
     def handle(self, *a, **o):
         if not settings.TELEMETRIO_API_KEY:
             raise CommandError("TELEMETRIO_API_KEY порожній — додай у .env.")
+        if not (o["term"] or o["terms_file"]):
+            raise CommandError("Потрібен --term (можна кілька) або --terms-file.")
         if o["days"] > 7:
             self.stderr.write(self.style.WARNING(
                 f"--days={o['days']}: free-ключ Telemetr.io бачить лише 7 днів — "
@@ -111,6 +118,26 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     async def _run(self, o: dict):
         terms = [t.strip() for t in o["term"] if t.strip()]
+        if o["terms_file"]:
+            raw = Path(o["terms_file"]).read_text("utf-8")
+            try:
+                loaded = json.loads(raw)
+                if not isinstance(loaded, list):
+                    raise ValueError
+                terms += [str(x).strip() for x in loaded if str(x).strip()]
+            except (json.JSONDecodeError, ValueError):
+                terms += [ln.strip() for ln in raw.splitlines()
+                          if ln.strip() and not ln.lstrip().startswith("#")]
+        # той самий текст двічі — це один термін, а не два: дедуп ДО перевірки
+        # бюджету, інакше список із повторами виглядав би дорожчим, ніж він є
+        seen, uniq = set(), []
+        for t in terms:
+            if t not in seen:
+                seen.add(t)
+                uniq.append(t)
+        terms = uniq
+        if not terms:
+            raise CommandError("Список фраз порожній.")
         ledger = TermLedger(default_ledger_path())
         new_terms = [t for t in terms if not ledger.is_spent(t)]
 
@@ -119,8 +146,12 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.MIGRATE_HEADING("План"))
         self.stdout.write(f"  вікно      : {date_from:%Y-%m-%d %H:%M} .. {date_to:%Y-%m-%d %H:%M} UTC")
-        self.stdout.write(f"  терміни    : {terms}")
-        self.stdout.write(f"  з них НОВІ : {new_terms or '—'}  (кожен незворотно з'їдає слот квоти)")
+        def short(t):
+            return t if len(t) <= 60 else t[:57] + "..."
+        self.stdout.write(f"  терміни    : {len(terms)}")
+        for t in terms:
+            mark = "НОВИЙ" if t in new_terms else "оплачений"
+            self.stdout.write(f"     [{mark:9}] {short(t)!r}")
         self.stdout.write(f"  ціна       : до {len(terms) * o['max_pages']} запитів Telemetr.io "
                           f"+ {len(new_terms)} унікальних термінів")
 
@@ -161,7 +192,8 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------
     async def _one_term(self, tm, ledger, term, date_from, date_to, o) -> dict:
-        self.stdout.write(self.style.MIGRATE_HEADING(f"\n=== {term!r} ==="))
+        label = term if len(term) <= 70 else term[:67] + "..."
+        self.stdout.write(self.style.MIGRATE_HEADING(f"\n=== {label!r} ==="))
 
         # --- Telemetr.io -------------------------------------------------
         t0 = time.monotonic()
@@ -179,13 +211,23 @@ class Command(BaseCommand):
         tm_parsed = [TelemetrioClient.parse_message(m, tm_chats) for m in tm_msgs]
 
         # --- TeleZip ------------------------------------------------------
-        tz_parsed, tz_secs = [], 0.0
+        tz_parsed, tz_secs, tz_failed = [], 0.0, False
         if not o["skip_telezip"]:
             langs = [x.strip() for x in (o["languages"] or "").split(",") if x.strip()]
             t0 = time.monotonic()
-            async with TelezipClient(settings.TELEZIP_API_KEY, settings.TELEZIP_BASE_URL) as tz:
-                tz_parsed = await tz.find_posts_range(
-                    term, date_from, date_to, languages=langs or None, unique=True)
+            try:
+                async with TelezipClient(settings.TELEZIP_API_KEY, settings.TELEZIP_BASE_URL) as tz:
+                    tz_parsed = await tz.find_posts_range(
+                        term, date_from, date_to, languages=langs or None, unique=True)
+            except Exception as e:  # noqa: BLE001
+                # TeleZip падає від DNS/VPN частіше, ніж хотілося б. Якщо звалити
+                # тут увесь прогін, згорить уже виконана (і оплачена) робота на
+                # боці Telemetr.io — тому пишемо в звіт «нема даних» і йдемо далі.
+                self.stderr.write(self.style.ERROR(
+                    f"  TeleZip не відповів ({e}); порівняння без нього.\n"
+                    f"  Якщо це DNS — у контейнері: "
+                    f'echo "77.88.192.66 api.telezip.net" >> /etc/hosts'))
+                tz_failed = True
             tz_secs = time.monotonic() - t0
 
         # --- join on normalised text -------------------------------------
@@ -216,7 +258,7 @@ class Command(BaseCommand):
             f"  Telemetr.io : {len(tm_parsed)} завантажено з {tm_total} заявлених, "
             f"{len(tm_channels)} каналів ({verified} verified), {tm_secs:.1f}s")
         self.stdout.write(
-            f"  TeleZip     : {len(tz_parsed)} знайдено, "
+            f"  TeleZip     : {'НЕ ВІДПОВІВ' if tz_failed else str(len(tz_parsed)) + ' знайдено'}, "
             f"{len(tz_channels)} каналів, {tz_secs:.1f}s")
         self.stdout.write(
             f"  перетин     : {len(both)}   лише Telemetr.io: {len(only_tm)}   "
@@ -244,7 +286,7 @@ class Command(BaseCommand):
                            "channels": len(tm_channels), "verified_channels": verified,
                            "seconds": round(tm_secs, 2), "unjoinable": tm_nokey,
                            "messages": tm_parsed},
-            "telezip": {"fetched": len(tz_parsed), "channels": len(tz_channels),
+            "telezip": {"failed": tz_failed, "fetched": len(tz_parsed), "channels": len(tz_channels),
                         "seconds": round(tz_secs, 2), "unjoinable": tz_nokey,
                         "messages": tz_parsed},
             "overlap": {"both": len(both), "only_telemetrio": len(only_tm),

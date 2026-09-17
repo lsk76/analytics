@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-import os
 import re
 import time
 from datetime import timedelta
@@ -130,20 +129,16 @@ def _hashtag(value: str) -> str:
 
 
 def _media_of(event):
-    """(kind, path) медіа першоджерела, якщо файл на місці. Інакше None.
+    """Позначка про медіа першоджерела: {kind, chat, mid} або None.
 
-    Файл качає стрім-стадія на спільний том ./backend; якщо його вже прибрав
-    ретеншн (10 діб) — публікуємо текстом, а не падаємо.
+    Сам файл ми не тримаємо — публікація пересилає оригінал акаунтом.
     """
     post = (event.posts.order_by("posted_at", "id")
             .only("classification").first())
     media = ((post.classification or {}).get("_tgs") or {}).get("media") if post else None
-    if not isinstance(media, dict):
+    if not isinstance(media, dict) or not media.get("chat") or not media.get("mid"):
         return None
-    path, kind = media.get("path"), media.get("kind")
-    if not path or not kind or not os.path.exists(path):
-        return None
-    return kind, path
+    return media
 
 
 def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> str:
@@ -175,6 +170,25 @@ def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> 
     ] if x)
 
 
+def _forward_media(config, media):
+    """Переслати оригінал із медіа в канал акаунтом — одразу після тексту.
+
+    Помилка тут НЕ валить публікацію: текст уже в каналі, а причин відмови
+    вистачає (чат із noforwards, акаунт не в каналі, FloodWait). Пишемо в лог
+    і живемо далі — краще пост без фото, ніж дірка в стрічці.
+    """
+    acc = config.forward_account
+    if acc is None:
+        return
+    from accounts.services.telegram_client import TelegramUserClient
+    res = TelegramUserClient.forward_message_sync(
+        acc, media["chat"], media["mid"], config.chat_id)
+    if not res.get("ok"):
+        logger.warning("publish[%s]: медіа з @%s/%s не переслалось: %s",
+                       config.name, media.get("chat"), media.get("mid"),
+                       res.get("error"))
+
+
 def _bump_or_fail(pub, err):
     pub.attempts += 1
     pub.error = err[:2000]
@@ -203,7 +217,7 @@ def _process(config, pub) -> bool:
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")
             return False
         pub.ai_verdict = True
-        pub.ai_reason = "raw_mode" + (f" + {media[0]}" if media else "")
+        pub.ai_reason = "raw_mode" + (f" + {media['kind']}" if media else "")
         pub.post_text = post_text
         return _send(config, pub, event, post_text, media)
 
@@ -262,11 +276,7 @@ def _send(config, pub, event, post_text, media=None) -> bool:
     зшивати очима.
     """
     try:
-        if media:
-            mid = telegram.send_media(config.resolved_token(), config.chat_id,
-                                      media[1], media[0], post_text)
-        else:
-            mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
+        mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
     except telegram.TelegramError as e:
         if e.retry_after:
             # rate-limit каналу — відкласти БЕЗ інкременту спроб
@@ -279,6 +289,8 @@ def _send(config, pub, event, post_text, media=None) -> bool:
         logger.warning("publish[%s]: send failed event#%d: %s", config.name, event.id, e)
         return False
 
+    if media:
+        _forward_media(config, media)
     pub.tg_message_id = mid
     pub.published_at = djtz.now()
     pub.status = PublishedEvent.STATUS_PUBLISHED

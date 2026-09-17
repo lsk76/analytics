@@ -268,6 +268,38 @@ class TelegramUserClient:
             return out
         return await cls._with_client(account, fn)
 
+    @classmethod
+    def forward_message_sync(cls, account, from_chat, msg_id: int, to_chat) -> dict:
+        """Переслати повідомлення з публічного чату в наш канал АКАУНТОМ.
+
+        Копія робиться на боці Telegram: файл не йде через нас, альбом лишається
+        альбомом, зберігається «Переслано з …». Ціна — акаунт мусить бути
+        учасником каналу-приймача, а чат-джерело не має забороняти пересилання
+        (noforwards), інакше Telegram відмовить.
+        """
+        cls._prime_proxy(account)
+
+        async def _run():
+            client = cls._client(account)
+            await client.connect()
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                dst = int(to_chat) if str(to_chat).lstrip("-").isdigit() else to_chat
+                src = int(from_chat) if str(from_chat).lstrip("-").isdigit() else from_chat
+                res = await client.forward_messages(dst, int(msg_id), src)
+                mid = res[0].id if isinstance(res, list) and res else getattr(res, "id", None)
+                return {"ok": True, "message_id": mid}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        return run_async(_run())
+
     # ---- тестовий прогін довільного бота (опитувальники тощо) ----
     @classmethod
     def test_bot_flow_sync(cls, account, bot_username: str, feedback_text: str = "",

@@ -133,7 +133,11 @@ class TermLedger:
         self._terms[term] = datetime.now(timezone.utc).isoformat()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._terms, ensure_ascii=False, indent=1), "utf-8")
-        logger.info("TermLedger: NEW term spent %r (total %d)", term, len(self._terms))
+        # терміни бувають довжиною з цілий пост (перевірено: 4 КБ) — у лог іде
+        # лише голова, інакше один рядок топить увесь вивід
+        head = term if len(term) <= 80 else term[:77] + "..."
+        logger.info("TermLedger: NEW term spent %r (%d симв., усього %d)",
+                    head, len(term), len(self._terms))
 
 
 class TelemetrioClient:

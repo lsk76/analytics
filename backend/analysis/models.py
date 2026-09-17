@@ -1455,6 +1455,14 @@ class PublishConfig(models.Model):
                   "статус), а LLM не викликається зовсім — нуль витрат і нуль "
                   "спотворень. Поля AI-модель/AI-промпт у цьому режимі ігноруються.",
     )
+    forward_account = models.ForeignKey(
+        "accounts.TelegramAccount", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="publish_configs", verbose_name="Акаунт для медіа",
+        help_text="Яким акаунтом пересилати фото/відео першоджерела в канал (одразу "
+                  "після тексту). Акаунт МУСИТЬ бути учасником каналу. Порожньо = "
+                  "медіа не пересилаємо. Бот тут не годиться: file_id акаунта йому "
+                  "не передається, а качати файл через проксі ненадійно.",
+    )
     raw_header = models.CharField(
         max_length=120, blank=True, verbose_name="Без ШІ: рубрика",
         help_text="Хештег рубрики першим рядком, напр. «#Вибори». До нього "
