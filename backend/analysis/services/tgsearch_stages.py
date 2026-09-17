@@ -538,6 +538,13 @@ def tgs_tag_once(task) -> bool:
             from analysis.services import tags as tag_service
             attach = tag_service.collapse_scales(attach)
             p.tags.add(*attach)
+        # Регіон чату — дефолт, але текст сильніший: повідомлення про Абакан у
+        # тувинському чаті не має ставати «Тивою» (ловили на проді 18.09).
+        if v.get("region"):
+            from analysis.services.normalize import resolve_region
+            reg, sett = resolve_region(str(v["region"]))
+            if reg and reg.id != p.region_subject_id:
+                p.region_subject = reg
         cl = dict(p.classification or {})
         cl["border"] = {**v, "_model": model}
         p.classification = cl
@@ -550,7 +557,7 @@ def tgs_tag_once(task) -> bool:
         done.append(p)
     Post.objects.bulk_update(
         done, ["classification", "is_classified", "is_relevant", "stage",
-               "stage_locked_at"], batch_size=200)
+               "stage_locked_at", "region_subject"], batch_size=200)
     for p in done:
         sync_comment_event(p)          # 1 повідомлення = 1 подія, БЕЗ дедупу
     _release_for_retry(missing, "tgs_tag")
