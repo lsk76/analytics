@@ -174,7 +174,11 @@ async def _search_all(pool, by_acc, terms, since, limit, out):
 # чат на кожен полінг, тому вирішує не частота, а скільки чатів на одному
 # акаунті: тримай 1 чат = 1 акаунт.
 # ===========================================================================
-STREAM_CONCURRENCY = 20     # скільки акаунтів читають одночасно
+STREAM_CONCURRENCY = 40     # скільки акаунтів читають одночасно
+# Стеля на акаунт за прохід. Без неї один акаунт із мертвим проксі тримав увесь
+# прохід: connect висів на ретраях, а стрім із інтервалом 3 хв не встигав
+# зробити жодного повного кола за 12 хвилин (ловили на проді).
+STREAM_ACCOUNT_TIMEOUT = 75
 STREAM_LIMIT = 300          # стеля повідомлень за один полінг чату
 STREAM_BACKFILL = 100       # перший полінг: скільки останніх забрати
 MEDIA_PER_TICK = 30         # стеля пересилань медіа з одного чату за прохід
@@ -250,10 +254,13 @@ async def _stream_chat(client, mc, patterns, media_peer):
 
 
 async def _stream_account(acc, chats, patterns, media_chat_id, out):
+    # Ретраї тут навмисно скупіші за пошукові: стрім ходить кожні 3 хвилини, тож
+    # мертвий акаунт вигідніше пропустити зараз і віддати його чати живому, ніж
+    # чекати на ньому весь бюджет проходу.
     client = TelegramClient(
         StringSession(acc.session_string), int(acc.api_id), acc.api_hash,
         proxy=acc.proxy.to_telethon_proxy() if acc.proxy else None,
-        connection_retries=2, retry_delay=2, timeout=20, **acc.client_kwargs())
+        connection_retries=1, retry_delay=1, timeout=10, **acc.client_kwargs())
     try:
         await client.connect()
         if not await client.is_user_authorized():
@@ -282,7 +289,13 @@ async def _stream_account(acc, chats, patterns, media_chat_id, out):
                 return
             out.append((mc, msgs, max_id, n_media, err))
     except Exception as e:  # noqa: BLE001
-        logger.warning("tgs_stream: акаунт #%s впав: %r", acc.id, e)
+        # Мертва сесія / битий проксі: чати відв'язуємо, інакше вони назавжди
+        # лишаться за цим акаунтом і не читатимуться (та сама німота, що й при
+        # протухлій авторизації).
+        logger.warning("tgs_stream: акаунт #%s впав: %r — відв'язую %d чатів",
+                       acc.id, e, len(chats))
+        await sync_to_async(MonitorChat.objects.filter(
+            id__in=[mc.id for mc in chats]).update)(tg_account=None)
     finally:
         try:
             await client.disconnect()
@@ -295,7 +308,15 @@ async def _stream_all(pool, by_acc, patterns, media_chat_id, out):
 
     async def guarded(aid, chats):
         async with sem:
-            await _stream_account(pool[aid], chats, patterns, media_chat_id, out)
+            try:
+                await asyncio.wait_for(
+                    _stream_account(pool[aid], chats, patterns, media_chat_id, out),
+                    timeout=STREAM_ACCOUNT_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning("tgs_stream: акаунт #%s не вклався в %ss — відв'язую "
+                               "%d чатів", aid, STREAM_ACCOUNT_TIMEOUT, len(chats))
+                await sync_to_async(MonitorChat.objects.filter(
+                    id__in=[mc.id for mc in chats]).update)(tg_account=None)
 
     await asyncio.gather(*(guarded(a, ch) for a, ch in by_acc.items()))
 
