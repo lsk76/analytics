@@ -119,3 +119,17 @@ def parse_date(value, name):
         return datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
     except ValueError:
         raise ToolError(f"{name}: очікується дата YYYY-MM-DD, отримано «{value}»")
+
+
+def pollable_source_ids():
+    """Підзапит «джерела, які стадія info_collect реально бере в роботу».
+
+    Дзеркало фільтра `infospace/stages.py::_claim_source`: ≥1 активна підписка
+    активної infospace-задачі. Без нього «прострочений полінг» рахує й ті
+    джерела, які ніхто не передплатив, — їхній next_poll_at лежить у минулому
+    вічно, бо воркер їх просто не бере (і діагностика кричала б вовк).
+    """
+    from analysis.models import SourceSubscription
+    return SourceSubscription.objects.filter(
+        is_active=True, task__is_active=True,
+        task__pipeline="infospace").values("source_id")

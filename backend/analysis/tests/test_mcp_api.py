@@ -188,6 +188,23 @@ def test_source_update_poll_now_and_reset_cursor():
     assert src.poll_interval_sec == 60  # нижня межа, щоб не задовбати джерело
 
 
+def test_problem_sources_ignore_unsubscribed_ones():
+    """Джерело без активної підписки info_collect не бере — його прострочений
+    next_poll_at не проблема, а норма (інакше діагностика кричить вовк)."""
+    stale = timezone.now() - timezone.timedelta(days=2)
+    SourceFactory(name="Нічиє джерело", next_poll_at=stale)
+    sub = SubscriptionFactory(task__pipeline=AnalysisTask.PIPELINE_INFOSPACE)
+    Source.objects.filter(pk=sub.source_id).update(next_poll_at=stale)
+
+    out = mcp_api.call("sources_list", {"problems_only": True})
+    assert sub.source.name in out
+    assert "Нічиє джерело" not in out
+
+    health = mcp_api.call("service_health")
+    assert "без підписок 1" in health
+    assert "прострочений полінг (>30хв) : 1" in health
+
+
 def test_sources_list_filters_by_task():
     sub = SubscriptionFactory()
     other = SourceFactory(name="Чуже джерело")

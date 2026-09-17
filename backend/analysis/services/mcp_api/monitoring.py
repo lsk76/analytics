@@ -327,7 +327,8 @@ def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
     if kind:
         qs = qs.filter(kind=kind)
     if problems_only:
-        qs = qs.filter(is_active=True).filter(
+        # лише серед тих, кого info_collect реально бере (див. pollable_source_ids)
+        qs = qs.filter(is_active=True, id__in=common.pollable_source_ids()).filter(
             Q(quality_ok=False) | Q(consecutive_failures__gte=1)
             | Q(next_poll_at__lt=timezone.now() - timedelta(minutes=30)))
     rows = []
@@ -341,7 +342,7 @@ def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
                      (f"через {int(due // 60)}хв" if due is not None else "—"),
                      fmt.ago(s.last_ok_at), s.consecutive_failures or "",
                      "" if s.quality_ok else f"🟡 {fmt.trunc(s.quality_note, 28)}",
-                     s.n_subs])
+                     s.n_subs or "нічиє"])
     if not rows:
         return "джерел за цим фільтром немає"
     parts = [fmt.table(["id", "тип", "акт", "назва", "url", "регіон", "інтервал",

@@ -121,12 +121,17 @@ def service_health():
     ])))
 
     # --- джерела інформпростору --------------------------------------------
+    # «Прострочений полінг» рахуємо ЛИШЕ по тих, кого воркер реально бере: у
+    # джерела без активної підписки next_poll_at лежить у минулому вічно.
     src = Source.objects.filter(is_active=True)
-    overdue = src.filter(next_poll_at__lt=now - timedelta(minutes=30)).count()
-    bad_q = src.filter(quality_ok=False).count()
-    failing = src.filter(consecutive_failures__gte=3).count()
+    polled = src.filter(id__in=common.pollable_source_ids())
+    overdue = polled.filter(next_poll_at__lt=now - timedelta(minutes=30)).count()
+    bad_q = polled.filter(quality_ok=False).count()
+    failing = polled.filter(consecutive_failures__gte=3).count()
+    n_polled = polled.count()
     parts.append(fmt.section("Джерела (інформпростір)", fmt.kv([
-        ("активних", src.count()),
+        ("активних", f"{src.count()} (опитуються {n_polled}, "
+                     f"без підписок {src.count() - n_polled})"),
         ("прострочений полінг (>30хв)", overdue or "—"),
         ("🟡 підозра на якість", bad_q or "—"),
         ("збоїть (3+ поспіль)", failing or "—"),
