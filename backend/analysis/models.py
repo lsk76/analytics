@@ -250,6 +250,29 @@ class AnalysisTask(models.Model):
         help_text="У дуже жвавому чаті число влучень буде впертим у стелю — "
                   "це «≥ стелі», а не точна кількість.",
     )
+    # --- конвеєр tgsearch, режим СТРІМУ: полінг чату + регулярка -----------
+    # Пошук і стрім доповнюють одне одного: стрім бачить ВСЕ й одразу, але лише
+    # вперед; пошук лізе в індекс Telegram заднім числом, коли слово додали пізно.
+    stream_regex = models.TextField(
+        blank=True, verbose_name="Стрім: патерни (по одному в рядок)",
+        help_text="Регулярні вирази (регістр не важливий). Повідомлення чату, що "
+                  "не збіглось із жодним, у БД не потрапляє і LLM не бачить — тому "
+                  "патернів може бути хоч сотня, вони безкоштовні. Порожньо = стрім "
+                  "вимкнено (щоб випадково не вилити весь потік чатів у скрін).",
+    )
+    stream_interval_min = models.PositiveSmallIntegerField(
+        default=3, verbose_name="Стрім: інтервал полінгу, хв",
+        help_text="Один полінг чату = один запит, навіть якщо нових повідомлень нема. "
+                  "Тому вартість лінійна від частоти, а ризик FloodWait — від того, "
+                  "СКІЛЬКИ чатів висить на одному акаунті (тримай 1 чат = 1 акаунт).",
+    )
+    stream_media_chat_id = models.CharField(
+        max_length=64, blank=True, verbose_name="Стрім: чат для медіа",
+        help_text="Chat ID, куди пересилати фото/відео з чатів, позначених «Пересилати "
+                  "медіа». Порожньо = не пересилати. Акаунти збору мають бути учасниками "
+                  "цього чату (пересилання йде акаунтом, не ботом: це один виклик "
+                  "замість «завантажити й перезалити»).",
+    )
     prescreen_model = models.CharField(
         max_length=100, blank=True, verbose_name="Прескрін: модель (OpenRouter)",
         help_text="Дешева модель для «так/ні» відсіву. Порожньо — дефолт із settings.",
@@ -1045,6 +1068,25 @@ class MonitorChat(models.Model):
         help_text="Конвеєр tgsearch: коли цей чат востаннє обшукували. "
                   "Порожньо = ще жодного разу.",
     )
+    # --- режим СТРІМУ (полінг історії + регулярка) -------------------------
+    stream_enabled = models.BooleanField(
+        default=False, db_index=True, verbose_name="Стрім (полінг + регулярка)",
+        help_text="Читати цей чат суцільно кожні N хвилин і фільтрувати регулярками "
+                  "задачі, замість пошуку за словами. Дає повноту й затримку в хвилини.",
+    )
+    stream_last_msg_id = models.BigIntegerField(
+        default=0, verbose_name="Стрім: watermark (msg_id)",
+        help_text="Останнє прочитане повідомлення. Догін іде ВІД нього (reverse), тож "
+                  "сплеск більший за ліміт не лишає діри. 0 = ще не читали.",
+    )
+    last_streamed_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, verbose_name="Останній стрім",
+    )
+    forward_media = models.BooleanField(
+        default=False, db_index=True, verbose_name="Пересилати медіа",
+        help_text="Пересилати ВСІ фото/відео цього чату в чат медіа задачі. Вмикай лише "
+                  "для головних чатів: у барахолці це тисячі файлів на добу.",
+    )
     added_by = models.CharField(
         max_length=80, blank=True, verbose_name="Хто додав",
         help_text="Хто/коли додав чат у whitelist (ручний рядок).",
@@ -1378,6 +1420,12 @@ class PublishConfig(models.Model):
     tags = models.ManyToManyField(
         Tag, blank=True, related_name="publish_configs", verbose_name="Теги",
         help_text="Порожньо = будь-які теги; інакше подія має мати ХОЧА Б ОДИН із цих тегів.")
+    exclude_tags = models.ManyToManyField(
+        Tag, blank=True, related_name="excluded_from_publish_configs",
+        verbose_name="Теги-виключення",
+        help_text="Подія з БУДЬ-ЯКИМ із цих тегів не публікується. Фільтр «Теги» вище — "
+                  "це АБО, тож поріг на кшталт «важливість 3+» задається саме тут: "
+                  "виключити важливість_1 і важливість_2.")
     regions = models.ManyToManyField(
         Region, blank=True, related_name="publish_configs", verbose_name="Суб'єкти РФ",
         help_text="Порожньо = усі регіони; інакше подія має бути з ОДНОГО з обраних.")
@@ -1398,6 +1446,20 @@ class PublishConfig(models.Model):
     bot_token = models.CharField(
         max_length=128, blank=True, verbose_name="Bot token",
         help_text="Порожньо = береться з env TELEGRAM_BOT_TOKEN.")
+
+    # --- режим «сирий»: без ШІ, оригінальний текст + теги ---
+    raw_mode = models.BooleanField(
+        default=False, verbose_name="Без ШІ: оригінал + теги",
+        help_text="Публікувати ОРИГІНАЛЬНИЙ текст повідомлення/поста замість переказу "
+                  "від ШІ. Відбір при цьому робить сам фільтр профілю (теги/регіони/"
+                  "статус), а LLM не викликається зовсім — нуль витрат і нуль "
+                  "спотворень. Поля AI-модель/AI-промпт у цьому режимі ігноруються.",
+    )
+    raw_header = models.CharField(
+        max_length=120, blank=True, verbose_name="Без ШІ: рубрика",
+        help_text="Хештег рубрики першим рядком, напр. «#Вибори». До нього "
+                  "дописується регіон події і ❗ при важливості 4-5.",
+    )
 
     # --- AI (фільтр + рерайт одним викликом) ---
     ai_model = models.CharField(

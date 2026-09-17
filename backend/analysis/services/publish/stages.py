@@ -10,7 +10,9 @@ Claim = наявність рядка PublishedEvent(config, event) (unique). С
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
+import re
 import time
 from datetime import timedelta
 
@@ -47,6 +49,9 @@ def _candidate_events(config):
     tag_ids = list(config.tags.values_list("id", flat=True))
     if tag_ids:
         qs = qs.filter(tags__in=tag_ids)
+    excl_ids = list(config.exclude_tags.values_list("id", flat=True))
+    if excl_ids:
+        qs = qs.exclude(tags__in=excl_ids)
     taken = PublishedEvent.objects.filter(config=config).values("event_id")
     return qs.exclude(id__in=taken).distinct().order_by("event_date", "id")
 
@@ -115,6 +120,42 @@ def _event_payload(event, source_url: str) -> str:
     return "\n".join(parts)
 
 
+def _hashtag(value: str) -> str:
+    """«Саха (Якутія)» → #Саха. Telegram ріже хештег на першому не-словному
+    символі, тож дужки й пробіли треба зняти самим, інакше в пості лишиться
+    сміття після тега."""
+    word = re.split(r"[^\w']", (value or "").strip(), maxsplit=1)[0]
+    return f"#{word}" if word else ""
+
+
+def _render_raw(event, source_url: str, header: str = "") -> str:
+    """Пост без ШІ: рубрика + ОРИГІНАЛЬНИЙ текст джерела + теги + посилання.
+
+    Оригінал беремо з найранішого поста події — для tgsearch це сама репліка
+    людини, для infospace — текст новини. Переказу немає свідомо: замовник
+    читає першоджерело, а не переповідання.
+    """
+    post = (event.posts.order_by("posted_at", "id")
+            .only("text", "url").first())
+    body = html.escape(((post.text if post else "") or event.summary or "").strip())
+    if len(body) > 3000:
+        body = body[:3000].rsplit(" ", 1)[0] + "…"
+    tags = list(event.tags.all())
+    names = [t.name for t in tags]
+    hot = any(n in ("важливість_4", "важливість_5") for n in names)
+    region = event.region_subject.name if event.region_subject else (event.region or "")
+    head = " ".join(x for x in [(header or "").strip(), _hashtag(region)] if x)
+    return "\n".join(x for x in [
+        ("❗ " if hot else "") + head,
+        f"#{event.id}",
+        "",
+        body,
+        "",
+        " ".join(_hashtag(n) for n in names),
+        f'<a href="{source_url}">Джерело</a>' if source_url else "",
+    ] if x)
+
+
 def _bump_or_fail(pub, err):
     pub.attempts += 1
     pub.error = err[:2000]
@@ -129,6 +170,20 @@ def _process(config, pub) -> bool:
     (щоб викликач витримав PACE_SECONDS)."""
     event = pub.event
     source_url = _source_url(event)
+
+    if config.raw_mode:
+        # Без ШІ: відбір уже зробив фільтр профілю (теги/регіони/статус), тож
+        # питати LLM «чи публікувати» нема сенсу — це був би другий фільтр
+        # поверх першого, за гроші і з ризиком мовчазних відмов.
+        post_text = _render_raw(event, source_url, config.raw_header)
+        if not post_text.strip():
+            _bump_or_fail(pub, "raw_mode: порожній текст джерела")
+            return False
+        pub.ai_verdict = True
+        pub.ai_reason = "raw_mode"
+        pub.post_text = post_text
+        return _send(config, pub, event, post_text)
+
     system = (config.ai_prompt or "").strip() or PUBLISH_PROMPT
     model = (config.ai_model or "").strip() or None
     raw = asyncio.run(llm.query(
@@ -173,6 +228,11 @@ def _process(config, pub) -> bool:
         _bump_or_fail(pub, "AI: publish=true, але порожній post_text")
         return False
 
+    return _send(config, pub, event, post_text)
+
+
+def _send(config, pub, event, post_text) -> bool:
+    """Спільний фінал для обох режимів: відправка + облік стану публікації."""
     try:
         mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
     except telegram.TelegramError as e:

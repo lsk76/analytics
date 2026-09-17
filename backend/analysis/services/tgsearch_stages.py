@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from django.db import transaction
@@ -160,6 +161,171 @@ async def _search_all(pool, by_acc, terms, since, limit, out):
             await _run_account(pool[aid], chats, terms, since, limit, out)
 
     await asyncio.gather(*(guarded(a, ch) for a, ch in by_acc.items()))
+
+
+# ===========================================================================
+# СТРІМ: полінг чату + регулярка (альтернатива пошуку за словами)
+#
+# Пошук питає індекс Telegram «де слово X» — дешево по запитах, але бачить лише
+# те, що індекс уміє, і має стелю влучень на слово в жвавому чаті. Стрім читає
+# чат суцільно і фільтрує регулярками НА НАШОМУ БОЦІ: повнота повна, затримка —
+# хвилини, патерни безкоштовні (їх може бути хоч сотня). Ціна — один запит на
+# чат на кожен полінг, тому вирішує не частота, а скільки чатів на одному
+# акаунті: тримай 1 чат = 1 акаунт.
+# ===========================================================================
+STREAM_CONCURRENCY = 20     # скільки акаунтів читають одночасно
+STREAM_LIMIT = 300          # стеля повідомлень за один полінг чату
+STREAM_BACKFILL = 100       # перший полінг: скільки останніх забрати
+MEDIA_PER_TICK = 30         # стеля пересилань медіа з одного чату за прохід
+MEDIA_PAUSE = 0.5
+
+
+def _patterns(task):
+    """Скомпільовані патерни задачі. Порожньо = стрім вимкнено (свідомо: інакше
+    пустий список матчив би все і вилив би весь потік чатів у LLM)."""
+    out = []
+    for line in (task.stream_regex or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(re.compile(line, re.IGNORECASE))
+        except re.error as e:
+            logger.error("tgs_stream: битий патерн %r (%s) — пропущено", line, e)
+    return out
+
+
+def _due_stream_chats(task, limit):
+    cutoff = dj_tz.now() - timedelta(minutes=task.stream_interval_min or 3)
+    return list(MonitorChat.objects
+                .filter(task=task, is_active=True, stream_enabled=True)
+                .filter(Q(last_streamed_at__isnull=True) | Q(last_streamed_at__lt=cutoff))
+                .select_related("channel", "tg_account", "tg_account__proxy")
+                .order_by("priority", "id")[:limit])
+
+
+async def _stream_chat(client, mc, patterns, media_peer):
+    """-> (список збігів, новий watermark, скільки медіа переслано, помилка)."""
+    entity = _entity(mc.channel)
+    if entity is None:
+        return None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash"
+    first = not mc.stream_last_msg_id
+    # перший полінг — найновіші N; далі — від watermark уперед (reverse), щоб
+    # сплеск, більший за ліміт, не лишив діри в середині
+    kwargs = dict(limit=STREAM_BACKFILL) if first else dict(
+        min_id=mc.stream_last_msg_id, limit=STREAM_LIMIT, reverse=True)
+    found, max_id, n_media = [], mc.stream_last_msg_id, 0
+    try:
+        async for m in client.iter_messages(entity, **kwargs):
+            max_id = max(max_id, int(m.id))
+            if media_peer is not None and n_media < MEDIA_PER_TICK and (
+                    getattr(m, "photo", None) or getattr(m, "video", None)):
+                try:
+                    await client.forward_messages(media_peer, m.id, entity)
+                    n_media += 1
+                    await asyncio.sleep(MEDIA_PAUSE)
+                except FloodWaitError:
+                    raise
+                except Exception as e:  # noqa: BLE001 — медіа не має валити збір тексту
+                    logger.warning("tgs_stream: медіа з @%s не переслалось: %r",
+                                   mc.channel.username, e)
+            text = (getattr(m, "message", None) or "").strip()
+            if not text:
+                continue
+            hit = next((p.pattern for p in patterns if p.search(text)), None)
+            if not hit:
+                continue
+            found.append({
+                "mid": int(m.id), "text": text,
+                "date": m.date.astimezone(timezone.utc) if m.date else None,
+                "author_id": getattr(getattr(m, "from_id", None), "user_id", None),
+                "term": hit[:60],
+            })
+    except FloodWaitError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        return None, max_id, n_media, f"{type(e).__name__}: {str(e)[:90]}"
+    return found, max_id, n_media, None
+
+
+async def _stream_account(acc, chats, patterns, media_chat_id, out):
+    client = TelegramClient(
+        StringSession(acc.session_string), int(acc.api_id), acc.api_hash,
+        proxy=acc.proxy.to_telethon_proxy() if acc.proxy else None,
+        connection_retries=2, retry_delay=2, timeout=20, **acc.client_kwargs())
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            logger.warning("tgs_stream: акаунт #%s не авторизований", acc.id)
+            return
+        media_peer = None
+        if media_chat_id and any(mc.forward_media for mc in chats):
+            try:
+                media_peer = await client.get_entity(int(media_chat_id))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("tgs_stream: акаунт #%s не бачить чат медіа %s (%r) — "
+                               "він має бути учасником", acc.id, media_chat_id, e)
+        for mc in chats:
+            try:
+                msgs, max_id, n_media, err = await _stream_chat(
+                    client, mc, patterns, media_peer if mc.forward_media else None)
+            except FloodWaitError as e:
+                logger.warning("tgs_stream: акаунт #%s FloodWait %ss — стоп",
+                               acc.id, e.seconds)
+                return
+            out.append((mc, msgs, max_id, n_media, err))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("tgs_stream: акаунт #%s впав: %r", acc.id, e)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def _stream_all(pool, by_acc, patterns, media_chat_id, out):
+    sem = asyncio.Semaphore(STREAM_CONCURRENCY)
+
+    async def guarded(aid, chats):
+        async with sem:
+            await _stream_account(pool[aid], chats, patterns, media_chat_id, out)
+
+    await asyncio.gather(*(guarded(a, ch) for a, ch in by_acc.items()))
+
+
+def tgs_stream_once(task) -> bool:
+    """Полінг чатів задачі + регулярка. -> True якщо була робота."""
+    patterns = _patterns(task)
+    if not patterns:
+        return False
+    chats = _due_stream_chats(task, 500)
+    if not chats:
+        return False
+    pool, by_acc = _assign_accounts(chats)
+    if not pool:
+        logger.warning("tgs_stream: немає авторизованих акаунтів")
+        return False
+
+    out: list = []
+    asyncio.run(_stream_all(pool, by_acc, patterns, task.stream_media_chat_id, out))
+
+    n_new = n_media = 0
+    for mc, msgs, max_id, media, err in out:
+        n_media += media
+        fields = ["last_streamed_at"]
+        if err:
+            mc.notes = f"[tgs_stream] {err}"[:500]
+            fields.append("notes")
+        elif msgs:
+            n_new += _store(task, mc, msgs)
+        if max_id > mc.stream_last_msg_id:
+            mc.stream_last_msg_id = max_id
+            fields.append("stream_last_msg_id")
+        mc.last_streamed_at = dj_tz.now()
+        mc.save(update_fields=fields)
+    logger.info("tgs_stream: чатів %d, збігів %d, медіа переслано %d",
+                len(out), n_new, n_media)
+    return True
 
 
 def _contract_ok(prompt, marker, stage, what) -> bool:
@@ -392,6 +558,7 @@ def _reuse(task, my_stage, borrowed_stage, runner, borrowed_out, my_out) -> bool
 
 STAGE_RUNNERS = {
     "tgs_search": tgs_search_once,
+    "tgs_stream": tgs_stream_once,
     "tgs_screen": tgs_screen_once,
     "tgs_tag": tgs_tag_once,
 }

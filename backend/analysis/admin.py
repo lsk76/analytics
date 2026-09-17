@@ -649,12 +649,20 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
     list_filter = ("is_active", "task", "review_status", "regions")
     search_fields = ("name", "chat_id")
     autocomplete_fields = ("task", "tags")
-    filter_horizontal = ("tags", "regions")
+    filter_horizontal = ("tags", "exclude_tags", "regions")
     _BASE_FIELDSETS = (
         (None, {"fields": ("name", "is_active")}),
         ("Відбір подій (дзеркало фасетів списку подій)", {
-            "fields": ("task", "tags", "regions", "review_status", "publish_from")}),
+            "description": "«Теги» — це АБО (досить одного збігу). Поріг на кшталт "
+                           "«важливість 3+» задається через «Теги-виключення».",
+            "fields": ("task", "tags", "exclude_tags", "regions", "review_status",
+                       "publish_from")}),
         ("Telegram-канал", {"fields": ("chat_id", "bot_token")}),
+        ("Публікація без ШІ (оригінал + теги)", {
+            "description": "Увімкнено — LLM не викликається зовсім: у канал іде "
+                           "оригінальний текст джерела, теги події й посилання. "
+                           "Поля AI нижче при цьому ігноруються.",
+            "fields": ("raw_mode", "raw_header")}),
         ("AI (фільтр + рерайт)", {"fields": ("ai_model", "ai_prompt")}),
         ("Throttle", {"fields": ("max_per_pass",)}),
     )
@@ -720,7 +728,7 @@ class MonitorChatInline(admin.TabularInline):
     model = MonitorChat
     extra = 0
     autocomplete_fields = ("channel",)
-    fields = ("channel", "is_active")
+    fields = ("channel", "is_active", "stream_enabled", "forward_media")
     ordering = ("channel__username",)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
@@ -964,7 +972,19 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     )
 
     _FS_TGSEARCH = (
-        ("🔎 Етап 1 — Пошук у чатах через Telegram", {
+        ("🔎 Етап 1а — Стрім чатів (полінг + регулярка)", {
+            "classes": ("tgs-search-fs",),
+            "description": "Читає позначені чати суцільно кожні N хвилин і лишає "
+                           "лише те, що збіглось із патернами — решта в БД не "
+                           "потрапляє і LLM не бачить. Повнота повна (на відміну від "
+                           "пошуку зі стелею на слово), затримка — хвилини. "
+                           "ПОРОЖНІ ПАТЕРНИ = стрім вимкнено. Ризик FloodWait росте "
+                           "не від частоти, а від числа чатів на одному акаунті: "
+                           "тримай 1 чат = 1 акаунт (галочки «Стрім» і «Пересилати "
+                           "медіа» — у списку чатів нижче).",
+            "fields": ("stream_regex", "stream_interval_min", "stream_media_chat_id"),
+        }),
+        ("🔎 Етап 1б — Пошук у чатах через Telegram", {
             "classes": ("tgs-search-fs",),
             "description": "Список чатів — у блоці «Чати моніторингу» нижче. "
                            "Telegram НЕ вміє OR: кожне слово це окремий запит до "

@@ -86,6 +86,14 @@ services:
   worker-info-retention:   { <<: *worker, command: python manage.py run_worker --stage info_retention --interval 3600 }
   worker-info-healthcheck: { <<: *worker, command: python manage.py run_worker --stage info_healthcheck --interval 3600 }
 
+  # --- tgsearch stage workers (pipeline="tgsearch": чати через Telegram) -----
+  # tgs-stream — ОДНА репліка: стадія сама розкидає чати по акаунтах (1 чат =
+  # 1 акаунт), друга репліка лише подвоїла б запити тими самими сесіями.
+  worker-tgs-stream:  { <<: *worker, command: python manage.py run_worker --stage tgs_stream --interval 60 }
+  worker-tgs-search:  { <<: *worker, command: python manage.py run_worker --stage tgs_search --interval 600 }
+  worker-tgs-screen:  { <<: *worker, command: python manage.py run_worker --stage tgs_screen --interval 60 }
+  worker-tgs-tag:     { <<: *worker, command: python manage.py run_worker --stage tgs_tag --interval 60 }
+
   # --- publish worker (approved-Event → AI-фільтр+рерайт → Telegram Bot API) --
   # TASKLESS: ітерує активні PublishConfig-профілі. ОДНА репліка (пейсинг
   # відправок у канал; кілька реплік дублювали б throttle). Потребує
