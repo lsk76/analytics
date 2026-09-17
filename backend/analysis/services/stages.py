@@ -693,7 +693,8 @@ def _create_event(task, posts_in):
             if v and (o := tag_service.resolve(c.key, str(v))):
                 tag_objs.append(o)
     if tag_objs:
-        ev.tags.set(tag_objs)
+        # шкальні категорії — рівно одне значення (див. tags.collapse_scales)
+        ev.tags.set(tag_service.collapse_scales(tag_objs))
     # Гео як тег (спільна категорія events+monitor): місто → settlement-тег.
     # Дзеркалить Event.settlement (поле лишається legacy до Фази 3).
     if settlement and (st := tag_service.resolve("settlement", settlement)):

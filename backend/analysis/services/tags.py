@@ -73,3 +73,37 @@ def add_alias(category: str, variant: str, canonical_tag: Tag) -> bool:
         return True
     TagAlias.objects.create(raw=key, tag=canonical_tag)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Шкальні категорії: значення ВЗАЄМОВИКЛЮЧНІ (важливість_1 … важливість_5).
+# LLM регулярно віддає два значення одразу, і це не косметика: фільтр публікації
+# виключає «важливість_1/2», а виключення перемагає збіг — тож подія з парою
+# (важливість_1, важливість_4) мовчки НЕ виходить у канал. Ловили на проді
+# 17.09.2026: канал затих, хоча події були.
+# ---------------------------------------------------------------------------
+SCALE_CATEGORIES = {"importance", "fed_importance"}
+
+
+def _scale_rank(name: str) -> int:
+    """«важливість_4» → 4. Без числа в хвості — найнижчий ранг."""
+    tail = (name or "").rsplit("_", 1)[-1]
+    return int(tail) if tail.isdigit() else 0
+
+
+def collapse_scales(tag_objs):
+    """З кількох значень однієї шкальної категорії лишає НАЙВИЩЕ.
+
+    Порядок решти тегів зберігається — виклик безпечний для будь-якого списку.
+    """
+    best = {}
+    for t in tag_objs:
+        if t.category in SCALE_CATEGORIES:
+            cur = best.get(t.category)
+            if cur is None or _scale_rank(t.name) > _scale_rank(cur.name):
+                best[t.category] = t
+    if not best:
+        return list(tag_objs)
+    out = [t for t in tag_objs if t.category not in SCALE_CATEGORIES]
+    out.extend(best.values())
+    return out

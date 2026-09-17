@@ -534,6 +534,8 @@ def tgs_tag_once(task) -> bool:
                 if tg:
                     attach.append(tg)
         if attach:
+            from analysis.services import tags as tag_service
+            attach = tag_service.collapse_scales(attach)
             p.tags.add(*attach)
         cl = dict(p.classification or {})
         cl["border"] = {**v, "_model": model}
