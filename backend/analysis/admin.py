@@ -656,7 +656,7 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
             "description": "«Теги» — це АБО (досить одного збігу). Поріг на кшталт "
                            "«важливість 3+» задається через «Теги-виключення».",
             "fields": ("task", "tags", "exclude_tags", "regions", "review_status",
-                       "publish_from")}),
+                       "publish_from", "max_age_days")}),
         ("Telegram-канал", {"fields": ("chat_id", "bot_token")}),
         ("Публікація без ШІ (оригінал + теги)", {
             "description": "Увімкнено — LLM не викликається зовсім: у канал іде "

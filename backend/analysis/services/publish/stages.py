@@ -46,6 +46,10 @@ def _candidate_events(config):
         qs = qs.filter(region_subject_id__in=region_ids)
     if config.publish_from:
         qs = qs.filter(event_date__gte=config.publish_from)
+    if config.max_age_days:
+        # ковзне вікно: старе лишається в базі, але в канал не йде
+        qs = qs.filter(event_date__gte=(djtz.localdate()
+                                        - timedelta(days=config.max_age_days)))
     tag_ids = list(config.tags.values_list("id", flat=True))
     if tag_ids:
         qs = qs.filter(tags__in=tag_ids)

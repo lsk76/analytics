@@ -1437,6 +1437,13 @@ class PublishConfig(models.Model):
     review_status = models.CharField(
         max_length=12, choices=Event.REVIEW_CHOICES, default=Event.REVIEW_APPROVED,
         verbose_name="Статус аудиту", help_text="Публікуємо лише події цього статусу.")
+    max_age_days = models.PositiveSmallIntegerField(
+        default=0, verbose_name="Не публікувати старше, діб",
+        help_text="Ковзне вікно по event_date (даті НОВИНИ): 0 = без обмеження. "
+                  "Для живого моніторингу став 1-2: інакше джерело, яке щойно "
+                  "підключилось, виливає в канал свою історію як свіжину "
+                  "(ловили 18.09: новина від 15.09 пішла в канал).",
+    )
     publish_from = models.DateField(
         null=True, blank=True, verbose_name="Публікувати події від (дата)",
         help_text="Беруться лише події з event_date >= цієї дати. Порожньо = без нижньої "
