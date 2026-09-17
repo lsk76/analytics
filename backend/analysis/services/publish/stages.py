@@ -140,8 +140,9 @@ def _render_raw(event, source_url: str, header: str = "") -> str:
     body = html.escape(((post.text if post else "") or event.summary or "").strip())
     if len(body) > 3000:
         body = body[:3000].rsplit(" ", 1)[0] + "…"
-    tags = list(event.tags.all())
-    names = [t.name for t in tags]
+    # dict.fromkeys — дедуп зі збереженням порядку: однойменний тег може прийти
+    # з двох категорій, і в пості виходило «#фальсифікації #фальсифікації»
+    names = list(dict.fromkeys(t.name for t in event.tags.all()))
     hot = any(n in ("важливість_4", "важливість_5") for n in names)
     region = event.region_subject.name if event.region_subject else (event.region or "")
     head = " ".join(x for x in [(header or "").strip(), _hashtag(region)] if x)
