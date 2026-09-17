@@ -64,18 +64,23 @@ def _due_chats(task, limit):
                 .order_by("priority", "id")[:limit])
 
 
-def _assign_accounts(chats):
+def _assign_accounts(chats, skip_ids=()):
     """Чат читає ТОЙ акаунт, що вже його читав: резолв кешується в сесії, і читати
-    іншим акаунтом означає платити резолв удруге (а він має добовий ліміт)."""
+    іншим акаунтом означає платити резолв удруге (а він має добовий ліміт).
+
+    skip_ids — акаунти в паузі після FloodWait: їм не даємо НОВИХ чатів, а вже
+    прив'язані читаємо (їхня черга все одно відсунеться самим FloodWait-ом).
+    """
     pool = list(TelegramAccount.objects.filter(is_authenticated=True, is_active=True)
                 .exclude(session_string="").select_related("proxy").order_by("id"))
     if not pool:
         return None, None
+    free = [a for a in pool if a.id not in skip_ids] or pool
     by_acc: dict[int, list] = {}
     for i, mc in enumerate(chats):
         acc = mc.tg_account
         if acc is None or not acc.is_authenticated:
-            acc = pool[i % len(pool)]
+            acc = free[i % len(free)]
             mc.tg_account = acc
             mc.save(update_fields=["tg_account"])
         by_acc.setdefault(acc.id, []).append(mc)
@@ -185,6 +190,25 @@ STREAM_LIMIT = 300          # стеля повідомлень за один п
 STREAM_BACKFILL = 100       # перший полінг: скільки останніх забрати
 MEDIA_PER_TICK = 30         # стеля пересилань медіа з одного чату за прохід
 MEDIA_PAUSE = 0.5
+
+# Акаунти в паузі після FloodWait: {id: коли звільниться}. Живе в пам'яті
+# воркера — стрім-воркер один, а після рестарту пауза все одно відновиться з
+# першого ж FloodWait (вони приходять миттєво, не після роботи).
+_FLOOD_UNTIL: dict[int, float] = {}
+
+
+def _flooded_ids() -> set:
+    now = time.time()
+    return {aid for aid, until in _FLOOD_UNTIL.items() if until > now}
+
+
+async def _mark_flood(acc_id, seconds, chats):
+    """Акаунт у паузу, його чати — іншим (інакше чат мовчить весь FloodWait)."""
+    _FLOOD_UNTIL[acc_id] = time.time() + max(int(seconds or 60), 60)
+    logger.warning("tgs_stream: акаунт #%s FloodWait %ss — пауза, %d чатів "
+                   "віддаю іншим", acc_id, seconds, len(chats))
+    await sync_to_async(MonitorChat.objects.filter(
+        id__in=[mc.id for mc in chats]).update)(tg_account=None)
 
 
 # Медіа лежить на спільному томі ./backend (він змонтований у ВСІ контейнери),
@@ -333,10 +357,15 @@ async def _stream_account(acc, chats, patterns, media_chat_id, out):
                 msgs, max_id, n_media, err = await _stream_chat(
                     client, mc, patterns, media_peer if mc.forward_media else None)
             except FloodWaitError as e:
-                logger.warning("tgs_stream: акаунт #%s FloodWait %ss — стоп",
-                               acc.id, e.seconds)
+                # FloodWait буває на ГОДИНИ. Без паузи стадія поверталась до
+                # цього ж акаунта кожні кілька секунд: його чати не оновлювали
+                # last_streamed_at, тож лишались «пора читати» — і довбали
+                # флуднутий акаунт замість того, щоб піти до вільного.
+                await _mark_flood(acc.id, e.seconds, chats)
                 return
             out.append((mc, msgs, max_id, n_media, err))
+    except FloodWaitError as e:
+        await _mark_flood(acc.id, getattr(e, "seconds", 60), chats)
     except Exception as e:  # noqa: BLE001
         # Мертва сесія / битий проксі: чати відв'язуємо, інакше вони назавжди
         # лишаться за цим акаунтом і не читатимуться (та сама німота, що й при
@@ -378,7 +407,7 @@ def tgs_stream_once(task) -> bool:
     chats = _due_stream_chats(task, 500)
     if not chats:
         return False
-    pool, by_acc = _assign_accounts(chats)
+    pool, by_acc = _assign_accounts(chats, skip_ids=_flooded_ids())
     if not pool:
         logger.warning("tgs_stream: немає авторизованих акаунтів")
         return False
