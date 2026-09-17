@@ -6,6 +6,7 @@ Enrichment used by the pipeline:
   * get_channel_meta(handle)— title/description/subscribers for region fallback & cache
 """
 import asyncio
+import logging
 import re
 from typing import Optional, Tuple
 
@@ -14,6 +15,8 @@ from telethon.errors import (AuthKeyUnregisteredError, PhoneNumberBannedError,
                              SessionRevokedError, UserDeactivatedBanError,
                              UserDeactivatedError)
 from telethon.sessions import StringSession
+
+logger = logging.getLogger(__name__)
 
 
 def run_async(coro):
@@ -330,7 +333,13 @@ class TelegramUserClient:
                            else src_chat)
                     try:
                         orig = await client.get_messages(src, ids=int(src_msg_id))
-                        media = getattr(orig, "media", None) if orig else None
+                        # ЛИШЕ справжні вкладення: у поста з посиланням media —
+                        # це MessageMediaWebPage (прев'ю), і send_file на ньому
+                        # падає «Cannot use MessageMediaWebPage as file»
+                        if orig is not None and (getattr(orig, "photo", None)
+                                                 or getattr(orig, "video", None)
+                                                 or getattr(orig, "document", None)):
+                            media = orig.media
                     except Exception as e:  # noqa: BLE001 — без медіа пост усе одно вийде
                         logger.warning("send_post: медіа %s/%s не дістали: %r",
                                        src_chat, src_msg_id, e)
