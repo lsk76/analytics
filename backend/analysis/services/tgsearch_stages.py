@@ -596,6 +596,10 @@ def tgs_tag_once(task) -> bool:
                 tg = _resolve_tag(cache, cat, name)
                 if tg:
                     attach.append(tg)
+        # Перетегування — звична операція при тюнінгу промпта, тож спершу
+        # знімаємо попередні теги: `add` їх не чистив, і на пості лишався слід
+        # старого вердикту (він же псував статистику тегів).
+        p.tags.clear()
         if attach:
             from analysis.services import tags as tag_service
             attach = tag_service.collapse_scales(attach)
