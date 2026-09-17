@@ -170,25 +170,6 @@ def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> 
     ] if x)
 
 
-def _forward_media(config, media):
-    """Переслати оригінал із медіа в канал акаунтом — одразу після тексту.
-
-    Помилка тут НЕ валить публікацію: текст уже в каналі, а причин відмови
-    вистачає (чат із noforwards, акаунт не в каналі, FloodWait). Пишемо в лог
-    і живемо далі — краще пост без фото, ніж дірка в стрічці.
-    """
-    acc = config.forward_account
-    if acc is None:
-        return
-    from accounts.services.telegram_client import TelegramUserClient
-    res = TelegramUserClient.forward_message_sync(
-        acc, media["chat"], media["mid"], config.chat_id)
-    if not res.get("ok"):
-        logger.warning("publish[%s]: медіа з @%s/%s не переслалось: %s",
-                       config.name, media.get("chat"), media.get("mid"),
-                       res.get("error"))
-
-
 def _bump_or_fail(pub, err):
     pub.attempts += 1
     pub.error = err[:2000]
@@ -268,6 +249,17 @@ def _process(config, pub) -> bool:
     return _send(config, pub, event, post_text)
 
 
+def _send_via_account(config, media, post_text):
+    """Пост від імені акаунта: медіа першоджерела в тому ж повідомленні."""
+    from accounts.services.telegram_client import TelegramUserClient
+    res = TelegramUserClient.send_post_sync(
+        config.forward_account, config.chat_id, post_text,
+        src_chat=(media or {}).get("chat"), src_msg_id=(media or {}).get("mid") or 0)
+    if not res.get("ok"):
+        raise telegram.TelegramError(f"акаунт #{config.forward_account_id}: {res.get('error')}")
+    return res.get("message_id")
+
+
 def _send(config, pub, event, post_text, media=None) -> bool:
     """Спільний фінал для обох режимів: відправка + облік стану публікації.
 
@@ -276,7 +268,10 @@ def _send(config, pub, event, post_text, media=None) -> bool:
     зшивати очима.
     """
     try:
-        mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
+        if config.post_as_account and config.forward_account_id:
+            mid = _send_via_account(config, media, post_text)
+        else:
+            mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
     except telegram.TelegramError as e:
         if e.retry_after:
             # rate-limit каналу — відкласти БЕЗ інкременту спроб
@@ -289,8 +284,6 @@ def _send(config, pub, event, post_text, media=None) -> bool:
         logger.warning("publish[%s]: send failed event#%d: %s", config.name, event.id, e)
         return False
 
-    if media:
-        _forward_media(config, media)
     pub.tg_message_id = mid
     pub.published_at = djtz.now()
     pub.status = PublishedEvent.STATUS_PUBLISHED

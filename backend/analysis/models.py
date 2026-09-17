@@ -1457,11 +1457,17 @@ class PublishConfig(models.Model):
     )
     forward_account = models.ForeignKey(
         "accounts.TelegramAccount", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="publish_configs", verbose_name="Акаунт для медіа",
-        help_text="Яким акаунтом пересилати фото/відео першоджерела в канал (одразу "
-                  "після тексту). Акаунт МУСИТЬ бути учасником каналу. Порожньо = "
-                  "медіа не пересилаємо. Бот тут не годиться: file_id акаунта йому "
-                  "не передається, а качати файл через проксі ненадійно.",
+        related_name="publish_configs", verbose_name="Акаунт публікації",
+        help_text="Акаунт, яким виходить пост (і медіа першоджерела в тому ж "
+                  "повідомленні). МУСИТЬ бути учасником каналу. Порожньо = пише бот, "
+                  "але тоді медіа не буде: file_id акаунта боту не передається.",
+    )
+    post_as_account = models.BooleanField(
+        default=False, verbose_name="Постити акаунтом (з медіа)",
+        help_text="Увімкнено — пост іде ВІД АКАУНТА одним повідомленням разом із фото/"
+                  "відео оригіналу. Вимкнено — пише бот, медіа лишається за кадром. "
+                  "УВАГА: підпис до медіа обрізається до 1024 символів (ліміт Telegram), "
+                  "повний текст доступний за посиланням у пості.",
     )
     raw_header = models.CharField(
         max_length=120, blank=True, verbose_name="Без ШІ: рубрика",

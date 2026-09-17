@@ -300,6 +300,54 @@ class TelegramUserClient:
 
         return run_async(_run())
 
+    @classmethod
+    def send_post_sync(cls, account, to_chat, text: str,
+                       src_chat=None, src_msg_id: int = 0) -> dict:
+        """Опублікувати пост ВІД ІМЕНІ АКАУНТА, з медіа першоджерела в ТОМУ Ж
+        повідомленні.
+
+        Медіа беремо посиланням на оригінал (`msg.media`), а не файлом: Telegram
+        перевикористовує свою ж копію, тож нічого не качається й не заливається,
+        і обмеження на розмір не діє. Ціна — підпис до медіа має ліміт 1024
+        символи проти 4096 у звичайного поста, тому текст ріжеться викликачем.
+        """
+        cls._prime_proxy(account)
+
+        async def _run():
+            client = cls._client(account)
+            await client.connect()
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                dst = int(to_chat) if str(to_chat).lstrip("-").isdigit() else to_chat
+                media = None
+                if src_chat and src_msg_id:
+                    src = (int(src_chat) if str(src_chat).lstrip("-").isdigit()
+                           else src_chat)
+                    try:
+                        orig = await client.get_messages(src, ids=int(src_msg_id))
+                        media = getattr(orig, "media", None) if orig else None
+                    except Exception as e:  # noqa: BLE001 — без медіа пост усе одно вийде
+                        logger.warning("send_post: медіа %s/%s не дістали: %r",
+                                       src_chat, src_msg_id, e)
+                if media is not None:
+                    res = await client.send_file(dst, media, caption=text,
+                                                 parse_mode="html")
+                else:
+                    res = await client.send_message(dst, text, parse_mode="html",
+                                                    link_preview=False)
+                return {"ok": True, "message_id": getattr(res, "id", None),
+                        "with_media": media is not None}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        return run_async(_run())
+
     # ---- тестовий прогін довільного бота (опитувальники тощо) ----
     @classmethod
     def test_bot_flow_sync(cls, account, bot_username: str, feedback_text: str = "",

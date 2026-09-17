@@ -662,7 +662,7 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
             "description": "Увімкнено — LLM не викликається зовсім: у канал іде "
                            "оригінальний текст джерела, теги події й посилання. "
                            "Поля AI нижче при цьому ігноруються.",
-            "fields": ("raw_mode", "raw_header", "forward_account")}),
+            "fields": ("raw_mode", "raw_header", "post_as_account", "forward_account")}),
         ("AI (фільтр + рерайт)", {"fields": ("ai_model", "ai_prompt")}),
         ("Throttle", {"fields": ("max_per_pass",)}),
     )
