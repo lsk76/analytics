@@ -79,11 +79,23 @@ def _assign_accounts(chats, skip_ids=()):
     # неіснуючим. На проді 18.09 так «зникали» живі чати.
     free = [a for a in pool if a.id not in skip_ids] or pool
     free.sort(key=lambda a: (a.spam_status != "free", a.id))
+    # Той самий чат може читатись в ІНШІЙ задачі вже призначеним акаунтом — у
+    # його сесії резолв юзернейма закешований. Беремо саме його, інакше платимо
+    # резолв удруге (а обмеженому акаунту він просто не дається).
+    ids = [mc.channel_id for mc in chats]
+    donor = {}
+    for other in (MonitorChat.objects.filter(channel_id__in=ids)
+                  .exclude(tg_account=None).exclude(id__in=[mc.id for mc in chats])
+                  .select_related("tg_account", "tg_account__proxy")
+                  .order_by("channel_id", "id")):
+        if other.tg_account.is_authenticated and other.tg_account.is_active:
+            donor.setdefault(other.channel_id, other.tg_account)
+
     by_acc: dict[int, list] = {}
     for i, mc in enumerate(chats):
         acc = mc.tg_account
         if acc is None or not acc.is_authenticated:
-            acc = free[i % len(free)]
+            acc = donor.get(mc.channel_id) or free[i % len(free)]
             mc.tg_account = acc
             mc.save(update_fields=["tg_account"])
         by_acc.setdefault(acc.id, []).append(mc)
