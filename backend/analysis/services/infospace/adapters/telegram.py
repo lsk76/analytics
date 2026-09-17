@@ -72,10 +72,13 @@ class TelegramAdapter(BaseSourceAdapter):
         for m in msgs:
             mid = int(m["id"])
             max_id = max(max_id, mid)
+            meta = {}
+            if m.get("media_kind"):
+                meta["media"] = {"kind": m["media_kind"], "chat": handle, "mid": mid}
             items.append(RawItem(
                 external_id=str(mid),
                 url=canonical_url(f"https://t.me/{handle}/{mid}"),
-                title="", text=m["text"], posted_at=m.get("date"), meta={}))
+                title="", text=m["text"], posted_at=m.get("date"), meta=meta))
         poll_cursor["last_msg_id"] = max_id
         source.poll_cursor = poll_cursor
         return items

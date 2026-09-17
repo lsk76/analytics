@@ -134,8 +134,10 @@ def _media_of(event):
     Сам файл ми не тримаємо — публікація пересилає оригінал акаунтом.
     """
     post = (event.posts.order_by("posted_at", "id")
-            .only("classification").first())
-    media = ((post.classification or {}).get("_tgs") or {}).get("media") if post else None
+            .only("classification", "media").first())
+    if post is None:
+        return None
+    media = post.media or ((post.classification or {}).get("_tgs") or {}).get("media")
     if not isinstance(media, dict) or not media.get("chat") or not media.get("mid"):
         return None
     return media

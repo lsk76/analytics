@@ -932,6 +932,11 @@ class Post(models.Model):
     is_classified = models.BooleanField(default=False, verbose_name="Класифіковано")
     is_relevant = models.BooleanField(null=True, blank=True, verbose_name="Релевантний")
     classification = models.JSONField(default=dict, blank=True, verbose_name="Результат класифікації")
+    media = models.JSONField(
+        null=True, blank=True, verbose_name="Медіа першоджерела",
+        help_text="{kind, chat, mid} — на що послатись, щоб опублікувати фото/відео "
+                  "разом із постом. Окреме поле, а НЕ classification: перескрін "
+                  "(rescreen_task_now) чистить classification, і медіа зникало б.")
     date_enriched = models.BooleanField(default=False, verbose_name="Дату збагачено")
 
     event = models.ForeignKey(

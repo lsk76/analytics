@@ -470,7 +470,8 @@ def _store(task, mc, msgs) -> int:
             posted_at=m["date"],
             region_subject_id=ch.region_subject_id,
             author_tg_id=m.get("author_id"),
-            classification={"_tgs": {"term": m["term"], "media": m.get("media")}},
+            classification={"_tgs": {"term": m["term"]}},
+            media=m.get("media"),
         ))
     created = Post.objects.bulk_create(rows, ignore_conflicts=True, batch_size=500)
     return len(created)

@@ -141,6 +141,7 @@ def _fanout(source, items):
                     region_subject=source.region_subject,
                     posted_at=posted, text=it.text,
                     content_hash=_content_hash(it.text),
+                    media=(it.meta or {}).get("media"),
                 ),
             )
             if created:

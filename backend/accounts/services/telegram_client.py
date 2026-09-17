@@ -264,6 +264,10 @@ class TelegramUserClient:
                 out.append({
                     "id": msg.id, "text": text,
                     "date": msg.date.astimezone(_tz.utc) if msg.date else None,
+                    # який тип медіа висить на пості — щоб публікація могла
+                    # послатись на оригінал і винести фото/відео в канал
+                    "media_kind": ("photo" if getattr(msg, "photo", None)
+                                   else "video" if getattr(msg, "video", None) else None),
                 })
             return out
         return await cls._with_client(account, fn)

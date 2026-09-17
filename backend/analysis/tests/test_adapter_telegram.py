@@ -188,5 +188,7 @@ def test_fetch_history_with_proxy_account_no_sync_only_error(monkeypatch):
 
     monkeypatch.setattr(tc, "TelegramClient", _FakeClient)
     out = telegram._fetch_history(acct, "ulan_smi", 0, 5, False)
-    assert out == [{"id": 7, "text": "текст", "date": None}]
+    # media_kind — позначка для публікації: на що послатись, щоб винести фото/
+    # відео поста в канал. None = медіа на повідомленні немає.
+    assert out == [{"id": 7, "text": "текст", "date": None, "media_kind": None}]
     assert seen["proxy"][1:3] == ("127.0.0.1", 1080)
