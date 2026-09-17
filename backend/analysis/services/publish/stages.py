@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import os
 import re
 import time
 from datetime import timedelta
@@ -128,7 +129,24 @@ def _hashtag(value: str) -> str:
     return f"#{word}" if word else ""
 
 
-def _render_raw(event, source_url: str, header: str = "") -> str:
+def _media_of(event):
+    """(kind, path) медіа першоджерела, якщо файл на місці. Інакше None.
+
+    Файл качає стрім-стадія на спільний том ./backend; якщо його вже прибрав
+    ретеншн (10 діб) — публікуємо текстом, а не падаємо.
+    """
+    post = (event.posts.order_by("posted_at", "id")
+            .only("classification").first())
+    media = ((post.classification or {}).get("_tgs") or {}).get("media") if post else None
+    if not isinstance(media, dict):
+        return None
+    path, kind = media.get("path"), media.get("kind")
+    if not path or not kind or not os.path.exists(path):
+        return None
+    return kind, path
+
+
+def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> str:
     """Пост без ШІ: рубрика + ОРИГІНАЛЬНИЙ текст джерела + теги + посилання.
 
     Оригінал беремо з найранішого поста події — для tgsearch це сама репліка
@@ -138,8 +156,8 @@ def _render_raw(event, source_url: str, header: str = "") -> str:
     post = (event.posts.order_by("posted_at", "id")
             .only("text", "url").first())
     body = html.escape(((post.text if post else "") or event.summary or "").strip())
-    if len(body) > 3000:
-        body = body[:3000].rsplit(" ", 1)[0] + "…"
+    if len(body) > limit:
+        body = body[:limit].rsplit(" ", 1)[0] + "…"
     # dict.fromkeys — дедуп зі збереженням порядку: однойменний тег може прийти
     # з двох категорій, і в пості виходило «#фальсифікації #фальсифікації»
     names = list(dict.fromkeys(t.name for t in event.tags.all()))
@@ -176,14 +194,18 @@ def _process(config, pub) -> bool:
         # Без ШІ: відбір уже зробив фільтр профілю (теги/регіони/статус), тож
         # питати LLM «чи публікувати» нема сенсу — це був би другий фільтр
         # поверх першого, за гроші і з ризиком мовчазних відмов.
-        post_text = _render_raw(event, source_url, config.raw_header)
+        media = _media_of(event)
+        # Підпис до медіа вчетверо коротший за пост (ліміт Bot API 1024), тому
+        # тіло ріжемо сильніше — повний текст лишається за посиланням.
+        post_text = _render_raw(event, source_url, config.raw_header,
+                                limit=600 if media else 3000)
         if not post_text.strip():
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")
             return False
         pub.ai_verdict = True
-        pub.ai_reason = "raw_mode"
+        pub.ai_reason = "raw_mode" + (f" + {media[0]}" if media else "")
         pub.post_text = post_text
-        return _send(config, pub, event, post_text)
+        return _send(config, pub, event, post_text, media)
 
     system = (config.ai_prompt or "").strip() or PUBLISH_PROMPT
     model = (config.ai_model or "").strip() or None
@@ -232,10 +254,19 @@ def _process(config, pub) -> bool:
     return _send(config, pub, event, post_text)
 
 
-def _send(config, pub, event, post_text) -> bool:
-    """Спільний фінал для обох режимів: відправка + облік стану публікації."""
+def _send(config, pub, event, post_text, media=None) -> bool:
+    """Спільний фінал для обох режимів: відправка + облік стану публікації.
+
+    media=(kind, path) — фото/відео першоджерела йде ОДНИМ повідомленням із
+    підписом: доказ і текст мають бути разом, інакше в каналі їх доводиться
+    зшивати очима.
+    """
     try:
-        mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
+        if media:
+            mid = telegram.send_media(config.resolved_token(), config.chat_id,
+                                      media[1], media[0], post_text)
+        else:
+            mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
     except telegram.TelegramError as e:
         if e.retry_after:
             # rate-limit каналу — відкласти БЕЗ інкременту спроб

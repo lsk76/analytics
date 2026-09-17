@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
@@ -185,6 +187,49 @@ MEDIA_PER_TICK = 30         # стеля пересилань медіа з од
 MEDIA_PAUSE = 0.5
 
 
+# Медіа лежить на спільному томі ./backend (він змонтований у ВСІ контейнери),
+# тому файл, завантажений стрім-воркером, бачить і воркер публікації.
+MEDIA_DIR = Path(settings.BASE_DIR) / "_dir" / "media"
+MEDIA_MAX_MB = 45           # Bot API: 50 МБ на відео через multipart, беремо з запасом
+MEDIA_KEEP_DAYS = 10        # стільки ж, скільки ретеншн сирих постів задачі
+
+
+async def _save_media(client, m):
+    """Фото/відео повідомлення → файл на спільному томі. -> dict | None.
+
+    Качаємо на етапі ЗБОРУ, а не публікації: бот не має доступу до чужого чату,
+    а відкривати сесію акаунта вдруге заради одного файлу дорожче за сам файл.
+    """
+    kind = ("photo" if getattr(m, "photo", None)
+            else "video" if getattr(m, "video", None) else None)
+    if not kind:
+        return None
+    size = getattr(getattr(m, "file", None), "size", 0) or 0
+    if size > MEDIA_MAX_MB * 1024 * 1024:
+        return {"kind": kind, "skipped": f"{size // 1024 // 1024} МБ"}
+    try:
+        MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+        path = await client.download_media(
+            m, file=str(MEDIA_DIR / f"{abs(m.chat_id or 0)}_{m.id}"))
+    except Exception as e:  # noqa: BLE001 — медіа не має валити збір тексту
+        logger.warning("tgs_stream: медіа не завантажилось: %r", e)
+        return None
+    return {"kind": kind, "path": str(path)} if path else None
+
+
+def _purge_old_media():
+    """Прибирання файлів старших за MEDIA_KEEP_DAYS — інакше том росте вічно."""
+    if not MEDIA_DIR.exists():
+        return
+    cutoff = time.time() - MEDIA_KEEP_DAYS * 86400
+    for f in MEDIA_DIR.iterdir():
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
 def _patterns(task):
     """Скомпільовані патерни задачі. Порожньо = стрім вимкнено (свідомо: інакше
     пустий список матчив би все і вилив би весь потік чатів у LLM)."""
@@ -240,11 +285,15 @@ async def _stream_chat(client, mc, patterns, media_peer):
             hit = next((p.pattern for p in patterns if p.search(text)), None)
             if not hit:
                 continue
+            # Медіа качаємо ТУТ, поки клієнт відкритий і повідомлення в руках:
+            # на етапі публікації бот до чужого чату доступу не має, а
+            # перевідкривати сесію заради одного файлу дорожче за сам файл.
+            media = await _save_media(client, m)
             found.append({
                 "mid": int(m.id), "text": text,
                 "date": m.date.astimezone(timezone.utc) if m.date else None,
                 "author_id": getattr(getattr(m, "from_id", None), "user_id", None),
-                "term": hit[:60],
+                "term": hit[:60], "media": media,
             })
     except FloodWaitError:
         raise
@@ -337,6 +386,7 @@ def tgs_stream_once(task) -> bool:
     out: list = []
     asyncio.run(_stream_all(pool, by_acc, patterns, task.stream_media_chat_id, out))
 
+    _purge_old_media()
     n_new = n_media = 0
     for mc, msgs, max_id, media, err in out:
         n_media += media
@@ -420,7 +470,7 @@ def _store(task, mc, msgs) -> int:
             posted_at=m["date"],
             region_subject_id=ch.region_subject_id,
             author_tg_id=m.get("author_id"),
-            classification={"_tgs": {"term": m["term"]}},
+            classification={"_tgs": {"term": m["term"], "media": m.get("media")}},
         ))
     created = Post.objects.bulk_create(rows, ignore_conflicts=True, batch_size=500)
     return len(created)
