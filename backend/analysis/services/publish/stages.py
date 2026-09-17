@@ -129,18 +129,27 @@ def _hashtag(value: str) -> str:
 
 
 def _media_of(event):
-    """Позначка про медіа першоджерела: {kind, chat, mid} або None.
+    """Адреса оригіналу {kind, chat, mid} — звідки публікація візьме фото/відео.
 
-    Сам файл ми не тримаємо — публікація пересилає оригінал акаунтом.
+    Позначка з етапу збору (Post.media) — лише підказка про тип. Головне джерело
+    істини — САМ URL поста: `t.me/<чат>/<id>` завжди веде на оригінал, тож медіа
+    дістається навіть для постів, зібраних до появи позначок. Якщо на оригіналі
+    медіа немає, акаунт просто відправить текст.
     """
     post = (event.posts.order_by("posted_at", "id")
-            .only("classification", "media").first())
+            .only("classification", "media", "url").first())
     if post is None:
         return None
     media = post.media or ((post.classification or {}).get("_tgs") or {}).get("media")
-    if not isinstance(media, dict) or not media.get("chat") or not media.get("mid"):
-        return None
-    return media
+    if isinstance(media, dict) and media.get("chat") and media.get("mid"):
+        return media
+    m = re.match(r"https?://t\.me/(?:c/)?([A-Za-z0-9_]+)/(\d+)", (post.url or "").strip())
+    if not m:
+        return None            # RSS/сайт — медіа немає звідки взяти
+    chat = m.group(1)
+    if chat.isdigit():         # t.me/c/<internal>/<id> — приватний чат
+        chat = f"-100{chat}"
+    return {"kind": None, "chat": chat, "mid": int(m.group(2))}
 
 
 def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> str:
