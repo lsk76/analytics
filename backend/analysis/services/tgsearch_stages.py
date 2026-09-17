@@ -256,9 +256,40 @@ def _due_stream_chats(task, limit):
                 .order_by("priority", "id")[:limit])
 
 
+async def _resolve_linked(client, channel):
+    """`linked:<батьківський канал>` -> сутність групи обговорення.
+
+    Такі групи не мають ні юзернейма, ні access_hash, тож за голим tg_id
+    Telethon їх не бере. Але батьківський канал названий у самому полі, і через
+    нього Telegram сам віддає linked_chat — access_hash кешуємо в raw_meta,
+    щоб наступні проходи не платили резолв удруге.
+    """
+    from telethon.tl.functions.channels import GetFullChannelRequest
+    parent = (channel.username or "").split(":", 1)[1].strip()
+    if not parent:
+        return None
+    full = await client(GetFullChannelRequest(parent))
+    linked_id = getattr(full.full_chat, "linked_chat_id", None)
+    chat = next((c for c in full.chats if c.id == linked_id), None)
+    if chat is None:
+        return None
+    meta = dict(channel.raw_meta or {})
+    meta["access_hash"] = chat.access_hash
+    await sync_to_async(type(channel).objects.filter(id=channel.id).update)(
+        tg_id=chat.id, raw_meta=meta)
+    return chat
+
+
 async def _stream_chat(client, mc, patterns, media_peer):
     """-> (список збігів, новий watermark, скільки медіа переслано, помилка)."""
     entity = _entity(mc.channel)
+    if entity is None and (mc.channel.username or "").startswith("linked:"):
+        try:
+            entity = await _resolve_linked(client, mc.channel)
+        except FloodWaitError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            return None, mc.stream_last_msg_id, 0, f"linked: {type(e).__name__}: {str(e)[:70]}"
     if entity is None:
         return None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash"
     first = not mc.stream_last_msg_id
