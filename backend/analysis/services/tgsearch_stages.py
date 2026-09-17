@@ -74,7 +74,11 @@ def _assign_accounts(chats, skip_ids=()):
                 .exclude(session_string="").select_related("proxy").order_by("id"))
     if not pool:
         return None, None
+    # Спершу акаунти, які @SpamBot підтвердив як ВІЛЬНІ: резолв нового юзернейма
+    # обмеженому акаунту не дається («No user has X as username»), і чат виглядає
+    # неіснуючим. На проді 18.09 так «зникали» живі чати.
     free = [a for a in pool if a.id not in skip_ids] or pool
+    free.sort(key=lambda a: (a.spam_status != "free", a.id))
     by_acc: dict[int, list] = {}
     for i, mc in enumerate(chats):
         acc = mc.tg_account
