@@ -173,6 +173,8 @@ backend/analysis/
   services/telezip.py       # TeleZip-клієнт + TelezipSlot (глобальний семафор)
   services/normalize.py     # канонізація тегів/регіонів через аліаси
   pilot/prompts.py          # промпти monitor-конвеєра (single source of truth)
+  services/mcp_api/         # MCP-шар керування сервісом (акаунти/моніторинги/черги)
+  management/commands/mcp_rpc.py  # транспорт MCP у контейнер
   multiselect_filter.py     # бази кастомних фільтрів (+filter_is_active)
 backend/templates/admin/analysis/event/
   _charts_body.html         # ВЕСЬ JS графіків (Chart.js), matrix.html — матриця
@@ -224,6 +226,8 @@ docker compose exec -T web python manage.py shell -c \
 - `docs/econ-events-pipeline.md` — економічні події E1-E4: keyword-регекси, усі промпти.
 - `docs/infospace-monitoring-pipeline.md` — **ДИЗАЙН (не реалізовано)**: конвеєр
   «моніторинг інформпростору» (RSS/сайти/TG-акаунти → Post → AI-скрін → живі Event).
+- `docs/mcp-server.md` — **MCP-сервер керування сервісом** (акаунти ТГ, моніторинги,
+  збори, черги, контейнери) — чим користуватись замість разових `manage.py shell`.
 - `docs/telemetrio-vs-telezip.md` — Telemetr.io API: клієнт, квоти, чим він НЕ є
   заміною TeleZip, і план порівняльного тесту.
 - Пам'ять Claude (`~/.claude/projects/...-sm-analytics/memory/`) — операційні уроки.

@@ -1,0 +1,190 @@
+# MCP-сервер керування сервісом
+
+> Локальний MCP-сервер, через який ШІ-асистент (Claude Code / Desktop) керує
+> живим сервісом: Telegram-акаунти й проксі, моніторинги, збори, черги
+> конвеєрів, публікація. Стан на 2026-09-18.
+
+## 1. Навіщо
+
+Щоденна експлуатація — це не код, а питання «що стоїть і чому»: чи живий акаунт,
+чи не обмежив його SpamBot, чому джерело мовчить третій тиждень, скільки постів
+висить на стадії й хто їх має розгрібати. Раніше на кожне таке питання йшов
+ручний `docker compose exec … manage.py shell -c "…"` — довго й щоразу заново.
+
+Тепер це інструменти MCP: асистент викликає `service_health`, `accounts_list`,
+`run_create` тощо, а не вигадує разові скрипти проти живої БД.
+
+## 2. Архітектура (де що живе)
+
+```
+Claude Code ──stdio──> mcp_server/server.py ──docker compose exec -T──>
+    manage.py mcp_rpc <tool> <──JSON у stdin──  analysis/services/mcp_api/*
+```
+
+- **`backend/analysis/services/mcp_api/`** — УСЯ предметна логіка: реєстр
+  інструментів, резолви посилань, форматери. Хендлер повертає ГОТОВИЙ ТЕКСТ
+  (таблицю), бо це кінцева відповідь моделі, а не проміжна структура.
+- **`backend/analysis/management/commands/mcp_rpc.py`** — транспорт у контейнер:
+  читає JSON зі stdin, друкує результат між маркерами `<<<MCP-RESULT-*>>>`
+  (щоб випадковий `print` стороннього коду не зламав розбір).
+- **`mcp_server/server.py`** — host-процес: НЕ дублює логіку, а **генерує
+  інструменти з маніфесту** (`mcp_rpc --list`), тож новий інструмент у Django
+  з'являється в MCP сам. Свої тільки ті, яким потрібен docker, а не БД:
+  `service_ps`, `service_logs`, `service_restart`, `worker_once`.
+- **`mcp_server/tools.json`** — знімок маніфесту: якщо стек лежить, сервер усе
+  одно стартує зі списком інструментів (і чесно скаже про помилку при виклику).
+
+**Чому все виконується в контейнері, а не з хоста.** Воркери, Telethon-сесії,
+проксі й ключі живуть там. Перевірка «акаунт живий / проксі жива», зроблена з
+ноутбука, відповідала б на інше питання, ніж те, яке ставить оператор.
+
+## 3. Встановлення
+
+```bash
+uv venv mcp_server/.venv --python 3.11
+VIRTUAL_ENV=mcp_server/.venv uv pip install -r mcp_server/requirements.txt
+```
+
+Реєстрація для Claude Code вже в репо — `.mcp.json` (project scope). Якщо
+проєкт лежить в іншому каталозі, задай `TGA_HOME`.
+
+Перевірка без ШІ:
+
+```bash
+docker compose exec -T web python manage.py mcp_rpc --list        # усі інструменти
+docker compose exec -T web python manage.py mcp_rpc service_health --raw
+echo '{"ref":"3"}' | docker compose exec -T web python manage.py mcp_rpc account_show --raw
+```
+
+## 4. Цілі керування (локально / прод)
+
+Ціль задається змінними середовища процесу MCP:
+
+| змінна | дефолт | що робить |
+|--------|--------|-----------|
+| `TGA_DIR` | корінь репо (або `/opt/tg-event-analytics` для ssh) | каталог з compose-файлами |
+| `TGA_COMPOSE_FILES` | `docker-compose.yml` | набір файлів через `:` |
+| `TGA_SSH` | — | хост із `~/.ssh/config`; усе піде через ssh |
+| `TGA_WEB_SERVICE` | `web` | сервіс, у якому виконується `manage.py` |
+| `TGA_READONLY` | — | `1` — інструменти, що пишуть, відмовляють (і на хості, і в контейнері) |
+| `TGA_TIMEOUT` | `240` | таймаут одного виклику, секунд |
+
+Прод аналітики (`analytics.matter-d.pro`) — стек `DC_LIVE` (базовий +
+monitor-компоуз, див. [[analytics-prod-server]] у пам'яті). Додати другим
+сервером у `.mcp.json`:
+
+```json
+"tg-analytics-prod": {
+  "command": "/шлях/до/репо/mcp_server/.venv/bin/python",
+  "args": ["/шлях/до/репо/mcp_server/server.py"],
+  "env": {
+    "TGA_SSH": "tg-analytics",
+    "TGA_DIR": "/opt/tg-event-analytics",
+    "TGA_COMPOSE_FILES": "docker-compose.yml:docker-compose.monitor.yml",
+    "TGA_READONLY": "1"
+  }
+}
+```
+
+⚠ На проді інструменти з'являться лише після деплою коду (`git pull` +
+`make live-restart-web`): `mcp_rpc` — команда Django, вона має бути в образі.
+
+## 5. Каталог інструментів
+
+Позначка **[пише]** = інструмент змінює стан (БД, Telegram, контейнери).
+Актуальний список завжди у `mcp_rpc --list` / `tools_manifest`.
+
+### Сервіс (docker, host-шар)
+
+| інструмент | що робить | параметри |
+|------------|-----------|-----------|
+| `service_ps` | контейнери: статус, аптайм, рестарт-лупи | — |
+| `service_logs` | логи сервісу з фільтром | service, lines=80, grep='', since='' |
+| `service_restart` **[пише]** | рестарт; `recreate=true` — пересоздання (обов'язкове після зміни `.env`) | services, recreate=False |
+| `worker_once` **[пише]** | один прохід стадії (`run_worker --stage X --once`) | stage, task='', timeout=600 |
+
+### Сервіс (дані)
+
+| інструмент | що робить | параметри |
+|------------|-----------|-----------|
+| `service_health` | стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація | — |
+| `service_queues` | черги детально: стадії×задачі, застряглі claim'и, свіжі помилки | task='', stage='', errors=3 |
+| `settings_list` | key-value налаштування (`Setting`) | prefix='' |
+| `setting_set` **[пише]** | записати налаштування | key, value, description='' |
+| `publish_status` | профілі публікації + останні публікації | limit=10 |
+| `tools_manifest` | список інструментів шару | — |
+
+### Telegram-акаунти
+
+| інструмент | що робить | параметри |
+|------------|-----------|-----------|
+| `accounts_list` | акаунти: авторизація, SpamBot, проксі, навантаження | query='', problems_only=False, limit=100 |
+| `account_show` | картка акаунта: конфіг, що обслуговує, завдання, боти | ref |
+| `account_check` | жива перевірка (connect+get_me через проксі) | ref, pause=2.0 |
+| `account_spam_check` **[пише]** | статус через @SpamBot | ref, pause=2.0 |
+| `account_update` **[пише]** | активність / проксі / теги | ref, is_active, proxy, add_tags, remove_tags |
+| `account_warm_up` **[пише]** | у чергу прогріву (підписка на канали) | ref, channels=0 |
+| `account_dialogs` | на що акаунт підписаний (наживо) | ref, limit=40, kind='' |
+| `account_jobs` | черги `warm_up` / `test_bot` | kind='all', status='', limit=20 |
+| `proxies_list` | пул проксі | problems_only=False, limit=60 |
+| `proxy_check` **[пише]** | перевірка + авторемонт sticky-сесії | ref, repair=True |
+
+`ref` розуміє `7`, `#7`, номер телефону, частину назви, а для групових —
+`all` / `active` / `problem` (для проксі — `all` / `broken`).
+
+### Моніторинги
+
+| інструмент | що робить | параметри |
+|------------|-----------|-----------|
+| `tasks_list` | задачі: конвеєр, обсяги, що підключено | pipeline='', active_only=False |
+| `task_show` | картка моніторингу (конфіг стадій, черги, події, збори) | ref |
+| `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
+| `run_show` | збір детально (аналог «Збори → Статус») | run_id |
+| `run_create` **[пише]** | запустити збір за період (планує чанки) | task, date_from, date_to, chunk_days=0, title='' |
+| `run_cancel` **[пише]** | скасувати збір + прибрати чанки в черзі | run_id, drop_pending_chunks=True |
+| `chats_list` | whitelist чатів: акаунт, режим, свіжість | task='', active, stream_only, problems_only, limit=60 |
+| `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет | chat, is_active, stream_enabled, account, priority, forward_media |
+| `sources_list` | джерела інформпростору: розклад, health, якість | task='', kind='', problems_only=False, limit=60 |
+| `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account |
+| `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
+| `channels_find` | знайти канал/чат у довіднику | query, limit=20 |
+
+## 6. Типові сценарії
+
+```
+«що з сервісом?»            service_health → service_queues(task=…) → service_logs(worker-…)
+«чому монітор мовчить?»     task_show → chats_list(problems_only) → account_check(ref=…)
+«акаунт не резолвить»       account_spam_check → (limited?) account_warm_up → account_jobs
+«джерело не оновлюється»    sources_list(problems_only) → source_update(poll_now) → worker_once(info_collect)
+«зібрати період»            run_create → run_show → (ready) events_stats
+«поміняти промпт»           settings_list → setting_set → service_restart(worker-…)
+```
+
+## 7. Граблі
+
+- **`service_restart` НЕ перечитує `.env`.** Після зміни ключів —
+  `service_restart(services=…, recreate=true)`, інакше воркер житиме зі старим
+  оточенням (ловили 401 добу).
+- **Мережеві інструменти повільні за визначенням** (5-20с на акаунт), тому в
+  них є стелі на розмір вибірки; `TGA_TIMEOUT` за замовчуванням 240с.
+- **Агрегати рахуються одним згрупованим запитом, а не «останній рядок задачі»
+  в циклі:** на мільйонах постів зворотний скан pk-індексу під фільтром задачі
+  коштував ~3с НА ЗАДАЧУ (45с на екран `service_health`). Якщо додаєш зріз —
+  перевір план, а перед `.values().annotate()` не забувай `.order_by()`
+  (інваріант §1.5 AI-GUIDE).
+- **Нові інструменти пиши в Django-шарі**, не в `server.py`: host бере їх із
+  маніфесту автоматично. Докстрінг першим абзацом — це опис, який бачить
+  модель; параметри анотуй типами (`str`/`int`/`float`/`bool`) — з них
+  будується JSON-схема.
+- **Знімок `tools.json` оновлюється сам** при кожному успішному старті сервера;
+  комітити його варто разом з новими інструментами.
+
+## 8. Тести
+
+`backend/analysis/tests/test_mcp_api.py` (20 тестів): реєстр і манифест,
+резолви посилань, ідемпотентність `run_create`, скасування збору, правки
+чатів/джерел/налаштувань, рендер без мережі. Запуск:
+
+```bash
+docker compose exec -T web pytest analysis/tests/test_mcp_api.py
+```

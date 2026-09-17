@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tg-analytics": {
+      "command": "${TGA_HOME:-/Users/r2d2/Documents/dev/tg-event-analytics}/mcp_server/.venv/bin/python",
+      "args": ["${TGA_HOME:-/Users/r2d2/Documents/dev/tg-event-analytics}/mcp_server/server.py"],
+      "env": {
+        "TGA_DIR": "${TGA_HOME:-/Users/r2d2/Documents/dev/tg-event-analytics}",
+        "TGA_COMPOSE_FILES": "docker-compose.yml"
+      }
+    }
+  }
+}

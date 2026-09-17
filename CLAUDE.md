@@ -17,6 +17,11 @@
   key-value таблиця `Setting`**: додати рядок (`/admin/analysis/setting/`) і читати з коду
   `Setting.get("ключ", ДЕФОЛТ)` (порожнє значення = дефолт із коду). Не хардкодити такий
   конфіг. Приклад: `digest_report_prompt` (промпт дайджест-звіту, `services/infospace/report.py`).
+- **Керування сервісом із чату — MCP-сервер** (`mcp_server/`, док `docs/mcp-server.md`):
+  `service_health` (що стоїть і хто розгрібає), `accounts_list`/`account_check`,
+  `chats_list`, `sources_list`, `run_create`, `service_restart`… Нові інструменти
+  додавай У DJANGO-ШАР `backend/analysis/services/mcp_api/` — host-сервер бере їх
+  із маніфесту сам, дублювати в `mcp_server/server.py` не треба.
 - **Конвеєри НЕ вигадувати** — вони задокументовані: `docs/comments-analysis-pipeline.md`
   (критика), `docs/ethnic-events-pipeline.md` / `docs/econ-events-pipeline.md` (ad-hoc події),
   `docs/ARCHITECTURE.md` (events-воркери). Промпти monitor — `analysis/pilot/prompts.py`.

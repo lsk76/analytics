@@ -1,0 +1,680 @@
+[
+ {
+  "name": "account_check",
+  "group": "accounts",
+  "mutates": false,
+  "doc": "Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "pause",
+    "type": "float",
+    "default": 2.0,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "account_dialogs",
+  "group": "accounts",
+  "mutates": false,
+  "doc": "Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 40,
+    "required": false
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "account_jobs",
+  "group": "accounts",
+  "mutates": false,
+  "doc": "Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота).",
+  "params": [
+   {
+    "name": "kind",
+    "type": "str",
+    "default": "all",
+    "required": false
+   },
+   {
+    "name": "status",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 20,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "account_show",
+  "group": "accounts",
+  "mutates": false,
+  "doc": "Картка акаунта: конфіг, проксі, що він обслуговує, останні завдання й боти.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "account_spam_check",
+  "group": "accounts",
+  "mutates": true,
+  "doc": "Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "pause",
+    "type": "float",
+    "default": 2.0,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "account_update",
+  "group": "accounts",
+  "mutates": true,
+  "doc": "Змінити акаунт: активність, проксі, теги (теги — через кому).",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "proxy",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "add_tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "remove_tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "account_warm_up",
+  "group": "accounts",
+  "mutates": true,
+  "doc": "Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "channels",
+    "type": "int",
+    "default": 0,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "accounts_list",
+  "group": "accounts",
+  "mutates": false,
+  "doc": "Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "problems_only",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 100,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "proxies_list",
+  "group": "accounts",
+  "mutates": false,
+  "doc": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
+  "params": [
+   {
+    "name": "problems_only",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 60,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "proxy_check",
+  "group": "accounts",
+  "mutates": true,
+  "doc": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "repair",
+    "type": "bool",
+    "default": true,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "channels_find",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Знайти канал/чат у довіднику (`Channel`) за username/назвою — id для інших дій.",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 20,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "chat_update",
+  "group": "monitoring",
+  "mutates": true,
+  "doc": "Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "stream_enabled",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "priority",
+    "type": "int",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "forward_media",
+    "type": "bool",
+    "default": null,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "chats_list",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "active",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "stream_only",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "problems_only",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 60,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "events_stats",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "default": 14,
+    "required": false
+   },
+   {
+    "name": "group_by",
+    "type": "str",
+    "default": "day",
+    "required": false
+   },
+   {
+    "name": "region",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 20,
+    "required": false
+   },
+   {
+    "name": "review_status",
+    "type": "str",
+    "default": "approved",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "run_cancel",
+  "group": "monitoring",
+  "mutates": true,
+  "doc": "Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки.",
+  "params": [
+   {
+    "name": "run_id",
+    "type": "int",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "drop_pending_chunks",
+    "type": "bool",
+    "default": true,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "run_create",
+  "group": "monitoring",
+  "mutates": true,
+  "doc": "Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "chunk_days",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "run_show",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»).",
+  "params": [
+   {
+    "name": "run_id",
+    "type": "int",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "runs_list",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Збори (ResearchRun): статус, період, прогрес чанків.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "status",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 15,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "source_update",
+  "group": "monitoring",
+  "mutates": true,
+  "doc": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "poll_interval_sec",
+    "type": "int",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "poll_now",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "reset_cursor",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "sources_list",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "problems_only",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 60,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "task_show",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "tasks_list",
+  "group": "monitoring",
+  "mutates": false,
+  "doc": "Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено.",
+  "params": [
+   {
+    "name": "pipeline",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "active_only",
+    "type": "bool",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "publish_status",
+  "group": "service",
+  "mutates": false,
+  "doc": "Профілі публікації + останні публікації подій у Telegram.",
+  "params": [
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 10,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "service_health",
+  "group": "service",
+  "mutates": false,
+  "doc": "Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.",
+  "params": []
+ },
+ {
+  "name": "service_queues",
+  "group": "service",
+  "mutates": false,
+  "doc": "Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stage",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "errors",
+    "type": "int",
+    "default": 3,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "setting_set",
+  "group": "service",
+  "mutates": true,
+  "doc": "Записати налаштування (`Setting`). Порожнє значення = дефолт із коду.",
+  "params": [
+   {
+    "name": "key",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "value",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "description",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "settings_list",
+  "group": "service",
+  "mutates": false,
+  "doc": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
+  "params": [
+   {
+    "name": "prefix",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tools_manifest",
+  "group": "service",
+  "mutates": false,
+  "doc": "Список інструментів MCP-шару (назва, група, чи змінює стан, параметри).",
+  "params": []
+ }
+]
