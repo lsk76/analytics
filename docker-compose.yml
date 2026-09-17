@@ -7,6 +7,8 @@ x-worker: &worker
   environment:
     POSTGRES_HOST: db
     POSTGRES_PORT: 5432
+    # нативний краш (segfault у C-розширенні) → стеки всіх потоків у docker logs
+    PYTHONFAULTHANDLER: "1"
   volumes:
     - ./backend:/app/backend
   depends_on:

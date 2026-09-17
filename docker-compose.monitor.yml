@@ -21,6 +21,8 @@ x-worker: &worker
     POSTGRES_HOST: db
     POSTGRES_PORT: 5432
     DJANGO_DEBUG: "false"
+    # нативний краш (segfault у C-розширенні) → стеки всіх потоків у docker logs
+    PYTHONFAULTHANDLER: "1"
   depends_on:
     db:
       condition: service_healthy
