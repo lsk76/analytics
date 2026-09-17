@@ -333,12 +333,15 @@ class TelegramUserClient:
                            else src_chat)
                     try:
                         orig = await client.get_messages(src, ids=int(src_msg_id))
-                        # ЛИШЕ справжні вкладення: у поста з посиланням media —
-                        # це MessageMediaWebPage (прев'ю), і send_file на ньому
-                        # падає «Cannot use MessageMediaWebPage as file»
-                        if orig is not None and (getattr(orig, "photo", None)
-                                                 or getattr(orig, "video", None)
-                                                 or getattr(orig, "document", None)):
+                        # ЛИШЕ справжні вкладення. Перевіряти msg.photo не
+                        # годиться: Telethon віддає в ньому і картинку ПРЕВ'Ю
+                        # посилання, тож webpage проскакував і send_file падав
+                        # («Cannot use MessageMediaWebPage as file»). Дивимось
+                        # на сам тип медіа.
+                        from telethon.tl.types import (MessageMediaDocument,
+                                                       MessageMediaPhoto)
+                        if isinstance(getattr(orig, "media", None),
+                                      (MessageMediaPhoto, MessageMediaDocument)):
                             media = orig.media
                     except Exception as e:  # noqa: BLE001 — без медіа пост усе одно вийде
                         logger.warning("send_post: медіа %s/%s не дістали: %r",

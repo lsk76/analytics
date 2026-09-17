@@ -62,6 +62,13 @@ def call(name: str, payload: dict | None = None) -> str:
     return t(payload or {})
 
 
+def _type_name(ann) -> str:
+    """Ім'я типу з анотації — host-шар будує з нього JSON-схему інструмента."""
+    if ann is inspect.Parameter.empty:
+        return "str"
+    return getattr(ann, "__name__", str(ann))
+
+
 def manifest() -> list[dict]:
     """Опис інструментів для host-шару (звірка сигнатур у тестах/доках)."""
     return [{
@@ -69,6 +76,7 @@ def manifest() -> list[dict]:
         "doc": t.doc.split("\n\n")[0],
         "params": [
             {"name": p.name,
+             "type": _type_name(p.annotation),
              "default": None if p.default is inspect.Parameter.empty else p.default,
              "required": p.default is inspect.Parameter.empty}
             for p in t.sig.parameters.values()

@@ -231,7 +231,7 @@ def publish_status(limit: int = 10):
     last = (PublishedEvent.objects.select_related("config", "event")
             .order_by("-created_at")[:limit])
     rows = [[f"#{p.id}", p.config.name[:18], p.status,
-             fmt.trunc(p.event.title if p.event else "", 46),
+             fmt.trunc(p.event.summary if p.event_id else "", 46),
              fmt.trunc(p.ai_reason or p.error, 40), fmt.ago(p.created_at)]
             for p in last]
     parts.append(fmt.section("Останні публікації", fmt.table(
