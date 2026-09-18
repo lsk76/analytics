@@ -185,6 +185,39 @@ def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> 
     ] if x)
 
 
+def _shingles(text: str) -> set:
+    words = re.findall(r"\w+", (text or "").lower())
+    return set(zip(words, words[1:])) if len(words) > 1 else set(words)
+
+
+def _is_recent_duplicate(config, post_text: str) -> bool:
+    """Чи це той самий факт, що вже пішов у канал за останню добу.
+
+    Дедуп між задачами відсутній за побудовою: infospace зводить дублі лише в
+    межах своєї задачі, tgsearch не зводить нічого (репліка людини = окрема
+    одиниця). Але в канал обидві задачі ллють РАЗОМ, і той самий сюжет приходив
+    двічі — як пост каналу і як репліка в чаті того самого видання. Тут
+    порівнюємо за спільними біграмами: 0.6 ловить перекази того самого тексту,
+    але не зшиває різні епізоди з тими ж словами.
+    """
+    new = _shingles(post_text)
+    if len(new) < 8:
+        return False                      # надто коротке — не судимо
+    since = djtz.now() - timedelta(hours=24)
+    recent = (PublishedEvent.objects
+              .filter(config=config, status=PublishedEvent.STATUS_PUBLISHED,
+                      published_at__gte=since)
+              .order_by("-id").values_list("post_text", flat=True)[:120])
+    for old in recent:
+        prev = _shingles(old or "")
+        if not prev:
+            continue
+        inter = len(new & prev)
+        if inter / min(len(new), len(prev)) >= 0.6:
+            return True
+    return False
+
+
 def _bump_or_fail(pub, err):
     pub.attempts += 1
     pub.error = err[:2000]
@@ -211,6 +244,17 @@ def _process(config, pub) -> bool:
                                 limit=600 if media else 3000)
         if not post_text.strip():
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")
+            return False
+        if _is_recent_duplicate(config, post_text):
+            pub.status = PublishedEvent.STATUS_SKIPPED
+            pub.ai_verdict = False
+            pub.ai_reason = "дубль: той самий факт уже в каналі за останню добу"
+            pub.post_text = post_text
+            pub.locked_at = None
+            pub.save(update_fields=["status", "ai_verdict", "ai_reason",
+                                    "post_text", "locked_at"])
+            logger.info("publish[%s]: дубль event#%d — пропущено",
+                        config.name, event.id)
             return False
         pub.ai_verdict = True
         pub.ai_reason = "raw_mode" + (f" + {media['kind']}" if media else "")
