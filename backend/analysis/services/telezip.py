@@ -166,8 +166,16 @@ class TelezipClient:
         if self._session:
             await self._session.close()
 
+    def _url(self, endpoint: str) -> str:
+        """v3-ендпоінти висять на base_url (…/v3), v4 — на корені хоста."""
+        if endpoint.startswith("/v4/"):
+            root = self.base_url.rsplit("/v3", 1)[0] if self.base_url.endswith("/v3") \
+                else self.base_url
+            return f"{root}{endpoint}"
+        return f"{self.base_url}{endpoint}"
+
     async def _request(self, method: str, endpoint: str, params=None, json_data=None):
-        url = f"{self.base_url}{endpoint}"
+        url = self._url(endpoint)
         last_exc = None
         # hold one GLOBAL slot for the whole request (incl. retries) => never more
         # than TELEZIP_MAX_CONCURRENCY in flight across ALL processes
@@ -185,6 +193,12 @@ class TelezipClient:
                         return await resp.json()
                 except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
                     last_exc = e
+                    # 4xx (крім 429) — відповідь сервера «так не можна»: пустий
+                    # юзернейм, чужий ендпоінт, немає прав. Повтор нічого не
+                    # змінить, лише зжере квоту й 15 с чекання в інтерактиві.
+                    if isinstance(e, RuntimeError) and str(e).startswith("TeleZip 4") \
+                            and "429" not in str(e):
+                        break
                     # 500/timeout = window too heavy → fail fast (1 retry) so
                     # find_posts_range can split it; 429/connection keep full budget.
                     overload = isinstance(e, asyncio.TimeoutError) or \
@@ -228,6 +242,7 @@ class TelezipClient:
                          languages: Optional[List[str]] = None, unique: bool = True,
                          channel_ids: Optional[List[int]] = None,
                          channel_names: Optional[List[str]] = None,
+                         extra_body: Optional[Dict[str, Any]] = None,
                          ) -> List[Dict[str, Any]]:
         """Search /Find. Optionally restrict to a list of channel ids/usernames.
 
@@ -254,6 +269,12 @@ class TelezipClient:
             body["channelIds"] = list(channel_ids)
         if channel_names:
             body["channelNames"] = list(channel_names)
+        if extra_body:
+            # Режими запиту понад text= (exact=/channeltext=/regex= у діалекті бота)
+            # документовані, але НЕ перевірені на цьому API. Тому не вигадуємо
+            # іменовані параметри, а даємо прокинути перевірене розвідкою
+            # (`tz_probe`) поле як є — і одразу бачимо відповідь сервера.
+            body.update(extra_body)
         data = await self._request("POST", "/Find", json_data=body)
         return [self._parse_msg(m) for m in data]
 
@@ -262,6 +283,7 @@ class TelezipClient:
                                channel_ids: Optional[List[int]] = None,
                                channel_names: Optional[List[str]] = None,
                                min_window: timedelta = timedelta(hours=2),
+                               extra_body: Optional[Dict[str, Any]] = None,
                                ) -> List[Dict[str, Any]]:
         """Adaptive-window /Find. Try the WHOLE [date_from, date_to] first; on a
         500 / internal-search-timeout (window too heavy — the broad negation query
@@ -276,7 +298,7 @@ class TelezipClient:
         while no single request is ever too heavy."""
         try:
             return await self.find_posts(query, date_from, date_to, languages,
-                                         unique, channel_ids, channel_names)
+                                         unique, channel_ids, channel_names, extra_body)
         except RuntimeError as e:
             span = date_to - date_from
             # Don't split a 429, and never produce a window < min_window (so we only
@@ -288,9 +310,9 @@ class TelezipClient:
                         e, date_from.isoformat(), date_to.isoformat(), mid.isoformat())
             halves = await asyncio.gather(
                 self.find_posts_range(query, date_from, mid, languages, unique,
-                                      channel_ids, channel_names, min_window),
+                                      channel_ids, channel_names, min_window, extra_body),
                 self.find_posts_range(query, mid, date_to, languages, unique,
-                                      channel_ids, channel_names, min_window),
+                                      channel_ids, channel_names, min_window, extra_body),
             )
             out: List[Dict[str, Any]] = []
             seen: set = set()
@@ -322,3 +344,188 @@ class TelezipClient:
             "language": c.get("Language") or c.get("language") or "",
             "is_channel": c.get("IsChannel") if "IsChannel" in c else c.get("isChannel"),
         }
+
+    async def raw(self, method: str, endpoint: str,
+                  params: Optional[Dict[str, Any]] = None,
+                  json_data: Optional[Dict[str, Any]] = None) -> Any:
+        """Сирий виклик довільного ендпоінта — розвідка API (`tz_probe`).
+
+        Офіційний гайд лежить за Google-логіном, а клієнт покриває лише
+        перевірені `/Find` і `/Channels`. Замість того щоб ВИГАДУВАТИ решту
+        сигнатур, даємо спитати сам сервер і побачити сиру відповідь.
+        """
+        return await self._request(method.upper(), endpoint, params=params,
+                                   json_data=json_data)
+
+    async def find_channel_by_name(self, username: str, days: int = 7
+                                   ) -> Optional[Dict[str, Any]]:
+        """Картка каналу за @юзернеймом.
+
+        `/Channels` шукає лише за числовим id, тож username спершу зводимо до id
+        через `/Find` з `channelNames` (той самий фільтр, яким збирає конвеєр):
+        будь-який свіжий пост каналу несе `channelId`.
+        """
+        now = djtz.now()
+        rows = await self.find_posts("*", now - timedelta(days=days), now,
+                                     unique=True,
+                                     channel_names=[username.lstrip("@")])
+        cid = next((r.get("channel_id") for r in rows if r.get("channel_id")), None)
+        if not cid:
+            return None
+        meta = await self.get_channel(cid)
+        if meta:
+            meta["recent_posts"] = len(rows)
+        return meta
+
+    # ------------------------------------------------------------------ v4 API
+    # Повний пошуковий контракт (див. docs/telezip-api.md): усі режими запиту
+    # (text/exact/regex/опис каналу), фільтри автора, каналу, тегів і медіа,
+    # пагінація й семплювання. Конвеєр лишається на v3 /Find — тут працює
+    # операторська розвідка, якій потрібні ліміти й сторінки.
+
+    @staticmethod
+    def build_criteria(*, date_from=None, date_to=None, term: str = "",
+                       exact: str = "", regex: str = "", channel_term: str = "",
+                       channel_ids=None, channel_names=None,
+                       user_ids=None, user_names=None,
+                       languages=None, required_tags=None, excluded_tags=None,
+                       has_media=None, unique=None, source: str = "",
+                       top_message_id=None, extra=None) -> Dict[str, Any]:
+        """Тіло запиту v4 із «людських» аргументів (порожні поля не шлемо)."""
+        body: Dict[str, Any] = {}
+        if date_from is not None:
+            body["fromDate"] = date_from.isoformat()
+        if date_to is not None:
+            body["toDate"] = date_to.isoformat()
+        if term:
+            body["searchTerm"] = term
+        if exact:
+            body["exactTerm"] = exact
+        if regex:
+            body["regexPattern"] = regex
+        if channel_term:
+            body["channelTerm"] = channel_term
+        if channel_ids:
+            body["channelIds"] = list(channel_ids)
+        if channel_names:
+            body["channelNames"] = list(channel_names)
+        if user_ids:
+            body["fromUserId"] = list(user_ids)
+        if user_names:
+            body["fromUserName"] = list(user_names)
+        if languages:
+            body["languages"] = list(languages)
+        if required_tags:
+            body["requiredTags"] = list(required_tags)
+        if excluded_tags:
+            body["excludedTags"] = list(excluded_tags)
+        if has_media is not None:
+            body["hasMedia"] = bool(has_media)
+        if unique is not None:
+            body["unique"] = bool(unique)
+        if source:
+            body["source"] = source
+        if top_message_id:
+            body["topMessageId"] = int(top_message_id)
+        if extra:
+            body.update(extra)
+        return body
+
+    async def search(self, criteria: Dict[str, Any], limit: int = 0,
+                     page_size: int = 0, page_token: str = "",
+                     sample_only: bool = False, group_by_channel: bool = False
+                     ) -> Dict[str, Any]:
+        """POST /v4/messages — пошук із лімітом або пагінацією.
+
+        `limit` і `pageSize` взаємовиключні (так вимагає API). Повертає
+        {total, next_page_token, messages[]} у нормалізованому вигляді.
+        """
+        body = dict(criteria)
+        if page_size:
+            body["pageSize"] = int(page_size)
+            if page_token:
+                body["pageToken"] = page_token
+        elif limit:
+            body["limit"] = int(limit)
+            if sample_only:
+                body["sampleOnly"] = True
+        if group_by_channel:
+            body["groupByChannel"] = True
+        data = await self._request("POST", "/v4/messages", json_data=body)
+        return {
+            "total": data.get("totalMessages", 0),
+            "next_page_token": data.get("nextPageToken"),
+            "messages": [self._parse_msg(m) for m in (data.get("messages") or [])],
+        }
+
+    async def search_stats(self, criteria: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /v4/messages/stats — скільки/де/коли БЕЗ викачування повідомлень."""
+        return await self._request("POST", "/v4/messages/stats", json_data=dict(criteria))
+
+    async def search_channels(self, *, channel_ids=None, channel_names=None,
+                              title: str = "", about: str = "", channel_term: str = "",
+                              source: str = "", page_size: int = 0,
+                              page_token: str = "") -> Dict[str, Any]:
+        """GET /v4/channels — пошук каналів за id/іменем/назвою/описом."""
+        params: List[tuple] = []
+        for cid in (channel_ids or []):
+            params.append(("channelIds", int(cid)))
+        for name in (channel_names or []):
+            params.append(("channelNames", name))
+        if title:
+            params.append(("title", title))
+        if about:
+            params.append(("about", about))
+        if channel_term:
+            params.append(("channelTerm", channel_term))
+        if source:
+            params.append(("source", source))
+        if page_size:
+            params.append(("pageSize", int(page_size)))
+        if page_token:
+            params.append(("pageToken", page_token))
+        return await self._request("GET", "/v4/channels", params=params)
+
+    async def search_users(self, *, user_ids=None, usernames=None, term: str = "",
+                           is_bot=None, is_active=None, page_size: int = 20,
+                           page_token: str = "") -> Dict[str, Any]:
+        """GET /v4/users — профілі юзерів за id/іменем/вільним текстом."""
+        params: List[tuple] = [("pageSize", int(page_size))]
+        for uid in (user_ids or []):
+            params.append(("userIds", int(uid)))
+        for name in (usernames or []):
+            params.append(("usernames", name))
+        if term:
+            params.append(("userTerm", term))
+        if is_bot is not None:
+            params.append(("isBot", str(bool(is_bot)).lower()))
+        if is_active is not None:
+            params.append(("isActive", str(bool(is_active)).lower()))
+        if page_token:
+            params.append(("pageToken", page_token))
+        return await self._request("GET", "/v4/users", params=params)
+
+    async def users_by_username(self, usernames) -> Dict[str, Any]:
+        """GET /v4/users/by-username — юзернейм → TelegramID (масово)."""
+        params = [("username", u.lstrip("@")) for u in usernames]
+        return await self._request("GET", "/v4/users/by-username", params=params)
+
+    async def message_context(self, channel_id: int, message_id: int,
+                              anchor_date: str = "", before: int = 20,
+                              after: int = 20) -> Dict[str, Any]:
+        """GET /v4/messages/context — сусідні повідомлення навколо знайденого."""
+        params: List[tuple] = [("channelId", int(channel_id)),
+                               ("messageId", int(message_id)),
+                               ("before", max(0, min(int(before), 100))),
+                               ("after", max(0, min(int(after), 100)))]
+        if anchor_date:
+            params.append(("anchorDate", anchor_date))
+        return await self._request("GET", "/v4/messages/context", params=params)
+
+    async def index_stats(self) -> Dict[str, Any]:
+        """GET /v4/stats — розмір індексу, ЛАГ індексації і ГЛИБИНА пошуку."""
+        return await self._request("GET", "/v4/stats")
+
+    async def search_macros(self) -> List[Dict[str, Any]]:
+        """GET /SearchMacros — серверні макроси (##ім'я → готовий підзапит)."""
+        return await self._request("GET", "/SearchMacros")

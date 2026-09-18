@@ -450,3 +450,47 @@ def channels_find(query: str, limit: int = 20):
              c.enrolled_in.count()] for c in qs]
     return fmt.table(["id", "username", "назва", "підписників", "регіон", "у моніторингах"],
                      rows) if rows else f"каналів за «{query}» немає"
+
+
+@tool("task_update", group="monitoring", mutates=True)
+def task_update(ref: str, telezip_query: str = "", languages: str = "",
+                unique: bool = None, chunk_days: int = 0, is_active: bool = None,
+                min_subscribers: int = -1, llm_model: str = ""):
+    """Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.
+
+    Замикає маршрут розвідки: `tz_calibrate` показав, що запит здоровий →
+    фіксуємо його в задачі → `run_create` збирає ним period. Старий запит
+    друкується у відповіді — щоб було куди відкотитись.
+    """
+    t = common.resolve_task(ref)
+    changed = []
+    if telezip_query:
+        old = t.telezip_query
+        t.telezip_query = telezip_query
+        changed.append(f"запит: було «{fmt.trunc(old, 160)}»")
+    if languages:
+        t.languages = [x.strip() for x in languages.replace(",", " ").split() if x.strip()]
+        changed.append(f"мови={t.languages}")
+    if unique is not None:
+        t.telezip_unique = bool(unique)
+        changed.append(f"unique={fmt.flag(t.telezip_unique)} "
+                       f"({'репости згортаються' if t.telezip_unique else 'повне охоплення'})")
+    if chunk_days:
+        t.collect_chunk_days = max(1, int(chunk_days))
+        changed.append(f"чанк={t.collect_chunk_days} дн")
+    if is_active is not None:
+        t.is_active = bool(is_active)
+        changed.append(f"активна={fmt.flag(t.is_active)}")
+    if min_subscribers >= 0:
+        t.min_channel_subscribers = int(min_subscribers)
+        changed.append(f"мін. підписників={t.min_channel_subscribers}")
+    if llm_model:
+        t.llm_model = llm_model
+        changed.append(f"модель={llm_model}")
+    if not changed:
+        return f"#{t.id} {t.slug}: нічого не змінено (жоден параметр не передано)"
+    t.save()
+    return fmt.joinsec(
+        fmt.section(f"Задача #{t.id} {t.slug}", "\n".join(changed)),
+        f"новий запит: {fmt.trunc(t.telezip_query, 300)}" if telezip_query else "",
+        "Зібрати ним період: run_create task=" + t.slug)

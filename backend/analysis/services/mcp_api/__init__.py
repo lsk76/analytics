@@ -5,6 +5,6 @@
 """
 from .registry import TOOLS, Tool, ToolError, call, manifest, readonly, tool  # noqa: F401
 
-from . import service, accounts, monitoring  # noqa: E402,F401  (реєструють інструменти)
+from . import service, accounts, monitoring, telezip  # noqa: E402,F401  (реєструють інструменти)
 
 __all__ = ["TOOLS", "Tool", "ToolError", "call", "manifest", "readonly", "tool"]

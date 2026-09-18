@@ -242,3 +242,18 @@ def test_account_warm_up_needs_channels(account):
     Channel.objects.create(username="warmme", title="Канал")
     out = mcp_api.call("account_warm_up", {"ref": str(account.id), "channels": 1})
     assert "job #" in out and account.warm_up_jobs.count() == 1
+
+
+def test_task_update_changes_collection_params_and_shows_old_query():
+    task = TaskFactory(slug="q-task", telezip_query="старий запит")
+    out = mcp_api.call("task_update", {"ref": "q-task", "telezip_query": "новий +(запит)",
+                                       "languages": "ru,uk", "unique": True,
+                                       "chunk_days": 2})
+    task.refresh_from_db()
+    assert task.telezip_query == "новий +(запит)"
+    assert task.languages == ["ru", "uk"] and task.telezip_unique is True
+    assert task.collect_chunk_days == 2
+    assert "старий запит" in out          # є куди відкотитись
+    assert "run_create task=q-task" in out
+
+    assert "нічого не змінено" in mcp_api.call("task_update", {"ref": "q-task"})

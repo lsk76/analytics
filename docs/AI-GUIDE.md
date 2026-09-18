@@ -184,6 +184,11 @@ docs/                       # ARCHITECTURE, comments-…, ethnic-…, econ-… p
 
 ## 6. Граблі (перевірені кров'ю)
 
+- **TeleZip має ГЛИБИНУ індексу** (`/v4/stats` → `searchDateLimit`; 2026-09-18 —
+  з 2025-10-01, 352 дні): старіше НЕ шукається зовсім, відповідь просто порожня.
+  Вікно повзе — що зібрано торік, перезібрати вже не можна. Повний контракт API
+  (режими exact/regex/channelTerm, фільтр автора, статистика без викачування) —
+  **docs/telezip-api.md**, з чату — MCP-інструменти `tz_*`.
 - **TeleZip:** негація `-(…)` у запиті = 500/timeout/429 (68× повільніше). Збирай
   `'*'` + `unique=True` по одному каналу; великі періоди — **по днях**, не місяцями.
   DNS у контейнері після падіння VPN: `echo "77.88.192.66 api.telezip.net" >> /etc/hosts`
@@ -226,6 +231,8 @@ docker compose exec -T web python manage.py shell -c \
 - `docs/econ-events-pipeline.md` — економічні події E1-E4: keyword-регекси, усі промпти.
 - `docs/infospace-monitoring-pipeline.md` — **ДИЗАЙН (не реалізовано)**: конвеєр
   «моніторинг інформпростору» (RSS/сайти/TG-акаунти → Post → AI-скрін → живі Event).
+- `docs/telezip-api.md` — **повний контракт TeleZip API** (v3+v4): ендпоінти,
+  поля запиту, межі, глибина індексу, граблі промацування.
 - `docs/mcp-server.md` — **MCP-сервер керування сервісом** (акаунти ТГ, моніторинги,
   збори, черги, контейнери) — чим користуватись замість разових `manage.py shell`.
 - `docs/telemetrio-vs-telezip.md` — Telemetr.io API: клієнт, квоти, чим він НЕ є

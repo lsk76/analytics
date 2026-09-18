@@ -173,6 +173,44 @@ def _is_transient_error(e: Exception) -> bool:
     return any(m in msg for m in _TRANSIENT_MARKERS)
 
 
+def ingest_rows(task, rows, *, cache_channels: bool = True) -> int:
+    """Записати рядки відповіді TeleZip у Post-и задачі. Повертає скільки збережено.
+
+    Виділено з `collect_once`, бо тим самим шляхом іде і разовий ad-hoc збір
+    (MCP `tz_ingest`): у постів мають бути ті самі поля й та сама стадія, інакше
+    ad-hoc пости поводяться в конвеєрі інакше за зібрані воркером.
+    """
+    n = 0
+    for p in rows:
+        url = p.get("message_url")
+        if not url:
+            continue
+        post, _ = Post.objects.update_or_create(
+            task=task, url=url,
+            defaults={
+                "channel_name": p.get("channel_name") or "",
+                "telezip_date": P._post_dt(p.get("date")),
+                "posted_at": P._post_dt(p.get("date")),
+                "text": p.get("content") or "",
+                "content_hash": p.get("content_hash") or "",
+                "telezip_mid": p.get("mid"),
+            },
+        )
+        if p.get("channel_id"):
+            post.classification = {**(post.classification or {}), "_tz_channel_id": p["channel_id"]}
+            post.save(update_fields=["classification"])
+        n += 1
+
+    # cache channel metadata for the channels we just saw (collector = only TeleZip user)
+    cids = {p.get("channel_id") for p in rows if p.get("channel_id")}
+    if cache_channels and cids:
+        try:
+            _cache_channels(task, list(cids))
+        except Exception as e:  # noqa: BLE001 — don't lose collected posts over channel meta
+            logger.warning("channel meta fetch failed (will link from cache later): %s", e)
+    return n
+
+
 def collect_once(task):
     """Process ONE pending CollectChunk. Returns True if it did work."""
     chunk = _claim_chunk(task)
@@ -209,34 +247,7 @@ def collect_once(task):
                     _maybe_finish_job(chunk.job)
         return True
 
-    n = 0
-    for p in rows:
-        url = p.get("message_url")
-        if not url:
-            continue
-        post, _ = Post.objects.update_or_create(
-            task=task, url=url,
-            defaults={
-                "channel_name": p.get("channel_name") or "",
-                "telezip_date": P._post_dt(p.get("date")),
-                "posted_at": P._post_dt(p.get("date")),
-                "text": p.get("content") or "",
-                "content_hash": p.get("content_hash") or "",
-                "telezip_mid": p.get("mid"),
-            },
-        )
-        if p.get("channel_id"):
-            post.classification = {**(post.classification or {}), "_tz_channel_id": p["channel_id"]}
-            post.save(update_fields=["classification"])
-        n += 1
-
-    # cache channel metadata for the channels we just saw (collector = only TeleZip user)
-    cids = {p.get("channel_id") for p in rows if p.get("channel_id")}
-    if cids:
-        try:
-            _cache_channels(task, list(cids))
-        except Exception as e:  # noqa: BLE001 — don't lose collected posts over channel meta
-            logger.warning("channel meta fetch failed (will link from cache later): %s", e)
+    n = ingest_rows(task, rows)
 
     chunk.status = "done"
     chunk.posts_collected = n

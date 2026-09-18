@@ -25,6 +25,9 @@
 - **Конвеєри НЕ вигадувати** — вони задокументовані: `docs/comments-analysis-pipeline.md`
   (критика), `docs/ethnic-events-pipeline.md` / `docs/econ-events-pipeline.md` (ad-hoc події),
   `docs/ARCHITECTURE.md` (events-воркери). Промпти monitor — `analysis/pilot/prompts.py`.
+- **TeleZip:** повний API (exact/regex/фільтр по опису каналу й автору, статистика
+  без викачування, пошук каналів і юзерів) — `docs/telezip-api.md`, з чату `tz_*`.
+  Глибина індексу ~352 дні: старіше не шукається взагалі.
 - **TeleZip:** без негації в запитах; збір по днях/по одному каналу; після падіння VPN —
   `echo "77.88.192.66 api.telezip.net" >> /etc/hosts` у контейнері.
 - Зміни коду воркерів/адмінки → `docker compose restart worker-…` / `web`.

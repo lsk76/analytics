@@ -564,6 +564,62 @@
   ]
  },
  {
+  "name": "task_update",
+  "group": "monitoring",
+  "mutates": true,
+  "doc": "Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "telezip_query",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "languages",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "unique",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "chunk_days",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "min_subscribers",
+    "type": "int",
+    "default": -1,
+    "required": false
+   },
+   {
+    "name": "llm_model",
+    "type": "str",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "tasks_list",
   "group": "monitoring",
   "mutates": false,
@@ -676,5 +732,800 @@
   "mutates": false,
   "doc": "Список інструментів MCP-шару (назва, група, чи змінює стан, параметри).",
   "params": []
+ },
+ {
+  "name": "tz_calibrate",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Перевірити запит ПЕРЕД збором: обсяг, частка репостів, ризик відлупу.",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "default": 3,
+    "required": false
+   },
+   {
+    "name": "exact",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "regex",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channel_term",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channels",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "users",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "languages",
+    "type": "str",
+    "default": "ru",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "project_days",
+    "type": "int",
+    "default": 30,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 180,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_channel",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Картка одного каналу (підписники, мова, активність) + чи він є в нас.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 120,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_channel_posts",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Усе з ОДНОГО каналу/чату за період (канон: `*` + фільтр каналу).",
+  "params": [
+   {
+    "name": "channel",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "default": 1,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "default": "*",
+    "required": false
+   },
+   {
+    "name": "users",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "thread",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 300,
+    "required": false
+   },
+   {
+    "name": "samples",
+    "type": "int",
+    "default": 10,
+    "required": false
+   },
+   {
+    "name": "chars",
+    "type": "int",
+    "default": 220,
+    "required": false
+   },
+   {
+    "name": "unique",
+    "type": "bool",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 180,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_channels",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Пошук КАНАЛІВ у базі TeleZip за назвою/описом — «хто взагалі пише про X».",
+  "params": [
+   {
+    "name": "term",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "about",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "names",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "source",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "page_size",
+    "type": "int",
+    "default": 30,
+    "required": false
+   },
+   {
+    "name": "page_token",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 120,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_context",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Що було НАВКОЛО повідомлення: N сусідніх до і після (аудит знахідки).",
+  "params": [
+   {
+    "name": "channel",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "message_id",
+    "type": "int",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "before",
+    "type": "int",
+    "default": 10,
+    "required": false
+   },
+   {
+    "name": "after",
+    "type": "int",
+    "default": 10,
+    "required": false
+   },
+   {
+    "name": "anchor_date",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "chars",
+    "type": "int",
+    "default": 200,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 120,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_ingest",
+  "group": "telezip",
+  "mutates": true,
+  "doc": "Записати результат разового пошуку в задачу як Post-и (ad-hoc збір).",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "default": 1,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channels",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "languages",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "unique",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dry_run",
+    "type": "bool",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 180,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_macros",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Серверні макроси пошуку (`##ім'я` → готовий підзапит) — готові набори термінів.",
+  "params": [
+   {
+    "name": "filter",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 40,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 60,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_probe",
+  "group": "telezip",
+  "mutates": true,
+  "doc": "Сирий виклик будь-якого ендпоінта TeleZip (v3 і `/v4/...`) — розвідка API.",
+  "params": [
+   {
+    "name": "endpoint",
+    "type": "str",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "method",
+    "type": "str",
+    "default": "GET",
+    "required": false
+   },
+   {
+    "name": "params",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "body",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 60,
+    "required": false
+   },
+   {
+    "name": "chars",
+    "type": "int",
+    "default": 1500,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_search",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Разовий пошук у TeleZip — НІЧОГО не пише в БД. Усі режими й фільтри.",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "default": 1,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "exact",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "regex",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channel_term",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channels",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "users",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "languages",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "exclude_tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "has_media",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "unique",
+    "type": "bool",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "source",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "thread",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "extra",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "default": 200,
+    "required": false
+   },
+   {
+    "name": "sample",
+    "type": "bool",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "page_size",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "page_token",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "samples",
+    "type": "int",
+    "default": 5,
+    "required": false
+   },
+   {
+    "name": "chars",
+    "type": "int",
+    "default": 220,
+    "required": false
+   },
+   {
+    "name": "top",
+    "type": "int",
+    "default": 15,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 180,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_slots_set",
+  "group": "telezip",
+  "mutates": true,
+  "doc": "Змінити глобальний ліміт паралельних запитів до TeleZip (таблиця слотів).",
+  "params": [
+   {
+    "name": "count",
+    "type": "int",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "tz_stats",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Скільки цього є: повідомлення/автори/канали + динаміка — БЕЗ викачування.",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "default": 7,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "exact",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "regex",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channel_term",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channels",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "users",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "languages",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "exclude_tags",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "has_media",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "source",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "thread",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "extra",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "top",
+    "type": "int",
+    "default": 15,
+    "required": false
+   },
+   {
+    "name": "by",
+    "type": "str",
+    "default": "day",
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 180,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_status",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.",
+  "params": [
+   {
+    "name": "deep",
+    "type": "bool",
+    "default": true,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tz_syntax",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Шпаргалка TeleZip: режими запиту, фільтри, оператори, ліміти, граблі.",
+  "params": []
+ },
+ {
+  "name": "tz_user",
+  "group": "telezip",
+  "mutates": false,
+  "doc": "Хто це написав: профіль автора за @ім'ям/id або вільний пошук по імені.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "term",
+    "type": "str",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "is_bot",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "posts_days",
+    "type": "int",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "posts_limit",
+    "type": "int",
+    "default": 20,
+    "required": false
+   },
+   {
+    "name": "chars",
+    "type": "int",
+    "default": 200,
+    "required": false
+   },
+   {
+    "name": "page_size",
+    "type": "int",
+    "default": 20,
+    "required": false
+   },
+   {
+    "name": "timeout",
+    "type": "int",
+    "default": 120,
+    "required": false
+   }
+  ]
  }
 ]

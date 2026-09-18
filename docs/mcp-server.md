@@ -22,7 +22,8 @@ Claude Code ──stdio──> mcp_server/server.py ──docker compose exec -T
 ```
 
 - **`backend/analysis/services/mcp_api/`** — УСЯ предметна логіка: реєстр
-  інструментів, резолви посилань, форматери. Хендлер повертає ГОТОВИЙ ТЕКСТ
+  інструментів, резолви посилань, форматери; `telezip.py` — повний пошуковий
+  API TeleZip (контракт — `docs/telezip-api.md`). Хендлер повертає ГОТОВИЙ ТЕКСТ
   (таблицю), бо це кінцева відповідь моделі, а не проміжна структура.
 - **`backend/analysis/management/commands/mcp_rpc.py`** — транспорт у контейнер:
   читає JSON зі stdin, друкує результат між маркерами `<<<MCP-RESULT-*>>>`
@@ -132,11 +133,31 @@ monitor-компоуз, див. [[analytics-prod-server]] у пам'яті). Д�
 `ref` розуміє `7`, `#7`, номер телефону, частину назви, а для групових —
 `all` / `active` / `problem` (для проксі — `all` / `broken`).
 
+### TeleZip (повний пошуковий API — `docs/telezip-api.md`)
+
+| інструмент | що робить | параметри |
+|------------|-----------|-----------|
+| `tz_status` | мережа, ключ, **глибина індексу й лаг**, слоти, свіжість збору | deep=True |
+| `tz_syntax` | шпаргалка: режими запиту, фільтри, оператори, ліміти | — |
+| `tz_stats` | скільки цього є + динаміка, БЕЗ викачування повідомлень | query, exact, regex, channel_term, channels, users, days/дати, languages, tags, has_media, source, thread, by=day\|hour |
+| `tz_search` | разовий пошук: усі режими й фільтри, ліміт/семпл/сторінки | ті самі + unique, limit, sample, page_size, page_token, samples, chars |
+| `tz_calibrate` | обсяг, частка репостів, ризик відлупу ПЕРЕД збором | query…, days=3, project_days=30 |
+| `tz_channel_posts` | усе з одного каналу за період (`*` + фільтр каналу) | channel, days/дати, query='*', thread, limit |
+| `tz_channels` | пошук КАНАЛІВ за назвою/описом — «хто пише про X» | term, title, about, names, source, page_size, page_token |
+| `tz_channel` | картка каналу + чи він є в нашому довіднику | ref |
+| `tz_user` | автор: @ім'я/id → профіль, за бажанням його дописи | ref, term, is_bot, is_active, posts_days |
+| `tz_context` | N повідомлень до/після знайденого (аудит контексту) | channel, message_id, before, after, anchor_date |
+| `tz_macros` | серверні макроси `##ім'я` → готові підзапити | filter, limit |
+| `tz_ingest` **[пише]** | записати результат пошуку в задачу (dry_run=true за замовчуванням) | task, query, days/дати, channels, languages, unique, dry_run |
+| `tz_slots_set` **[пише]** | глобальний ліміт паралельних запитів (наживо) | count 1..8 |
+| `tz_probe` **[пише]** | сирий виклик будь-якого ендпоінта — розвідка API | endpoint, method, params, body |
+
 ### Моніторинги
 
 | інструмент | що робить | параметри |
 |------------|-----------|-----------|
 | `tasks_list` | задачі: конвеєр, обсяги, що підключено | pipeline='', active_only=False |
+| `task_update` **[пише]** | параметри збору задачі: запит TeleZip, мови, unique, чанк | ref, telezip_query, languages, unique, chunk_days, is_active, min_subscribers, llm_model |
 | `task_show` | картка моніторингу (конфіг стадій, черги, події, збори) | ref |
 | `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
 | `run_show` | збір детально (аналог «Збори → Статус») | run_id |
@@ -158,6 +179,11 @@ monitor-компоуз, див. [[analytics-prod-server]] у пам'яті). Д�
 «джерело не оновлюється»    sources_list(problems_only) → source_update(poll_now) → worker_once(info_collect)
 «зібрати період»            run_create → run_show → (ready) events_stats
 «поміняти промпт»           settings_list → setting_set → service_restart(worker-…)
+«новий запит до TeleZip»    tz_syntax → tz_stats → tz_calibrate → tz_search
+                            → task_update → run_create
+«хто пише про тему»         tz_channels(term=…) → tz_channel → chats_list/chat_update
+«хто автор коментаря»       tz_user(ref=@…) / tz_context(channel, message_id)
+«TeleZip мовчить»           tz_status (мережа/глибина/лаг) → tz_slots_set
 ```
 
 ## 7. Граблі
@@ -172,6 +198,11 @@ monitor-компоуз, див. [[analytics-prod-server]] у пам'яті). Д�
   коштував ~3с НА ЗАДАЧУ (45с на екран `service_health`). Якщо додаєш зріз —
   перевір план, а перед `.values().annotate()` не забувай `.order_by()`
   (інваріант §1.5 AI-GUIDE).
+- **TeleZip має ГЛИБИНУ пошуку** (`tz_status` → `searchDateLimit`): старіше за
+  неї не шукається взагалі — порожня відповідь, а не помилка. Вікно повзе, тож
+  зібране торік перезібрати вже не вийде.
+- **Перед широким пошуком — `tz_stats`**: він рахує на боці TeleZip і не тягне
+  повідомлення; `tz_search` на широкому вікні ловить «відлуп» (межі — `tz_syntax`).
 - **Нові інструменти пиши в Django-шарі**, не в `server.py`: host бере їх із
   маніфесту автоматично. Докстрінг першим абзацом — це опис, який бачить
   модель; параметри анотуй типами (`str`/`int`/`float`/`bool`) — з них
