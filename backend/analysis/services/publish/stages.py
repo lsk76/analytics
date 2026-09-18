@@ -201,12 +201,24 @@ def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> 
     ] if x)
 
 
+def _topic_words(event) -> set:
+    """Слова-відбиток сюжету: сигнатура зі скріну, інакше резюме події."""
+    if event is None:
+        return set()
+    sig = ""
+    head = event.posts.first() if hasattr(event, "posts") else None
+    if head is not None:
+        sig = ((head.classification or {}).get("signature") or "").strip()
+    text = sig or (event.summary or "")
+    return {w for w in re.findall(r"\w+", text.lower()) if len(w) > 3}
+
+
 def _shingles(text: str) -> set:
     words = re.findall(r"\w+", (text or "").lower())
     return set(zip(words, words[1:])) if len(words) > 1 else set(words)
 
 
-def _is_recent_duplicate(config, post_text: str, summary: str = "") -> bool:
+def _is_recent_duplicate(config, post_text: str, event=None) -> bool:
     """Чи це той самий факт, що вже пішов у канал за останню добу.
 
     Дедуп між задачами відсутній за побудовою: infospace зводить дублі лише в
@@ -232,18 +244,20 @@ def _is_recent_duplicate(config, post_text: str, summary: str = "") -> bool:
             if len(new & prev) / min(len(new), len(prev)) >= 0.6:
                 return True
 
-    # Другий прохід — за РЕЗЮМЕ події. Сирі тексти одного federal-сюжету з
-    # різних каналів майже не перетинаються біграмами (кожна редакція пише
-    # по-своєму), і заява Памфілової про перебої зв'язку пішла в канал вісім
-    # разів. Резюме ж пише одна й та сама модель однією мовою, тож збіг там
-    # видно. Поріг нижчий: резюме коротке, спільних біграм у ньому менше.
-    cur = _shingles(summary)
-    if len(cur) >= 6:
+    # Другий прохід — за СИГНАТУРОЮ сюжету. Сирі тексти одного федерального
+    # приводу з різних каналів біграмами майже не перетинаються (кожна
+    # редакція пише по-своєму), і заява Памфілової про перебої зв'язку пішла
+    # в канал вісім разів. Сигнатуру ж пише одна модель однією мовою — це її
+    # робота, бути стабільним відбитком факту. Біграми й тут надто строгі
+    # (0.12-0.25 на очевидних дублях), тому порівнюємо СЛОВА: на дублях
+    # 0.5-0.86, на різних сюжетах 0-0.06 — поріг 0.5 лягає в цей розрив.
+    cur = _topic_words(event)
+    if len(cur) >= 5:
         for row in recent:
-            old = _shingles(getattr(row.event, "summary", "") or "")
-            if len(old) < 6:
+            prev = _topic_words(row.event)
+            if len(prev) < 5:
                 continue
-            if len(cur & old) / min(len(cur), len(old)) >= 0.5:
+            if len(cur & prev) / min(len(cur), len(prev)) >= 0.5:
                 return True
     return False
 
@@ -275,7 +289,7 @@ def _process(config, pub) -> bool:
         if not post_text.strip():
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")
             return False
-        if _is_recent_duplicate(config, post_text, event.summary):
+        if _is_recent_duplicate(config, post_text, event):
             pub.status = PublishedEvent.STATUS_SKIPPED
             pub.ai_verdict = False
             pub.ai_reason = "дубль: той самий факт уже в каналі за останню добу"
