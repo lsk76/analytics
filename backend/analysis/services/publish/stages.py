@@ -42,8 +42,6 @@ def _candidate_events(config):
     if config.task_id:
         qs = qs.filter(task_id=config.task_id)
     region_ids = list(config.regions.values_list("id", flat=True))
-    if region_ids:
-        qs = qs.filter(region_subject_id__in=region_ids)
     if config.publish_from:
         qs = qs.filter(event_date__gte=config.publish_from)
     if config.max_age_days:
@@ -58,8 +56,18 @@ def _candidate_events(config):
         # AND-група: фільтр «Теги» вище — це АБО, а тут вимога на додачу
         qs = qs.filter(tags__in=req_ids)
     null_ok = list(config.allow_null_region_tags.values_list("id", flat=True))
-    if null_ok:
-        # подія без регіону — лише якщо тема дозволена «всюди» (у нас це ДЕГ)
+    # ГЕО-ВОРОТА. «Теги без регіону» — це теми, дозволені ВСЮДИ (у нас ДЕГ і
+    # збої), тож вони обходять і порожній регіон, і чужий: сюжет із Москви має
+    # пройти, хоч Москви нема в списку суб'єктів. Решта тем живе лише в
+    # обраних регіонах. Раніше список регіонів був окремим жорстким AND, і
+    # ДЕГ-подія з чужого регіону випадала, а гео-відсів решти тримався ЛИШЕ на
+    # промпті — модель під навантаженням приписувала федеральним заявам
+    # випадковий регіон каналу-джерела, і той мотлох ішов у канал.
+    if region_ids and null_ok:
+        qs = qs.filter(Q(region_subject_id__in=region_ids) | Q(tags__in=null_ok))
+    elif region_ids:
+        qs = qs.filter(region_subject_id__in=region_ids)
+    elif null_ok:
         qs = qs.filter(Q(region_subject__isnull=False) | Q(tags__in=null_ok))
     excl_ids = list(config.exclude_tags.values_list("id", flat=True))
     if excl_ids:
@@ -198,7 +206,7 @@ def _shingles(text: str) -> set:
     return set(zip(words, words[1:])) if len(words) > 1 else set(words)
 
 
-def _is_recent_duplicate(config, post_text: str) -> bool:
+def _is_recent_duplicate(config, post_text: str, summary: str = "") -> bool:
     """Чи це той самий факт, що вже пішов у канал за останню добу.
 
     Дедуп між задачами відсутній за побудовою: infospace зводить дублі лише в
@@ -208,21 +216,35 @@ def _is_recent_duplicate(config, post_text: str) -> bool:
     порівнюємо за спільними біграмами: 0.6 ловить перекази того самого тексту,
     але не зшиває різні епізоди з тими ж словами.
     """
-    new = _shingles(post_text)
-    if len(new) < 8:
-        return False                      # надто коротке — не судимо
     since = djtz.now() - timedelta(hours=24)
-    recent = (PublishedEvent.objects
-              .filter(config=config, status=PublishedEvent.STATUS_PUBLISHED,
-                      published_at__gte=since)
-              .order_by("-id").values_list("post_text", flat=True)[:120])
-    for old in recent:
-        prev = _shingles(old or "")
-        if not prev:
-            continue
-        inter = len(new & prev)
-        if inter / min(len(new), len(prev)) >= 0.6:
-            return True
+    recent = list(PublishedEvent.objects
+                  .filter(config=config, status=PublishedEvent.STATUS_PUBLISHED,
+                          published_at__gte=since)
+                  .select_related("event")
+                  .order_by("-id")[:120])
+
+    new = _shingles(post_text)
+    if len(new) >= 8:
+        for row in recent:
+            prev = _shingles(row.post_text or "")
+            if not prev:
+                continue
+            if len(new & prev) / min(len(new), len(prev)) >= 0.6:
+                return True
+
+    # Другий прохід — за РЕЗЮМЕ події. Сирі тексти одного federal-сюжету з
+    # різних каналів майже не перетинаються біграмами (кожна редакція пише
+    # по-своєму), і заява Памфілової про перебої зв'язку пішла в канал вісім
+    # разів. Резюме ж пише одна й та сама модель однією мовою, тож збіг там
+    # видно. Поріг нижчий: резюме коротке, спільних біграм у ньому менше.
+    cur = _shingles(summary)
+    if len(cur) >= 6:
+        for row in recent:
+            old = _shingles(getattr(row.event, "summary", "") or "")
+            if len(old) < 6:
+                continue
+            if len(cur & old) / min(len(cur), len(old)) >= 0.5:
+                return True
     return False
 
 
@@ -253,7 +275,7 @@ def _process(config, pub) -> bool:
         if not post_text.strip():
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")
             return False
-        if _is_recent_duplicate(config, post_text):
+        if _is_recent_duplicate(config, post_text, event.summary):
             pub.status = PublishedEvent.STATUS_SKIPPED
             pub.ai_verdict = False
             pub.ai_reason = "дубль: той самий факт уже в каналі за останню добу"
