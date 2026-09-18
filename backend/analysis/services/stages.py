@@ -671,6 +671,13 @@ def _create_event(task, posts_in):
         region_subject, settlement = resolve_region(loc) if loc else (None, "")
         if not settlement and sett_hint:
             settlement = sett_hint
+        # Останній фолбек — гео САМОГО ДЖЕРЕЛА (денормалізоване в Post). Для
+        # infospace каналу немає, тож inferred_region вище не спрацьовує, і
+        # регіональна новина, що не називає регіон у тексті, лишалась без гео:
+        # у каналі це пост без хештега республіки (ловили на «Честной Якутии»).
+        if region_subject is None and getattr(head, "region_subject_id", None):
+            region_subject = head.region_subject
+            region = region or region_subject.name
     uniq_channels = {p.channel_id for p in posts_in if p.channel_id}
     ev = Event.objects.create(
         task=task,
