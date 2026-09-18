@@ -71,8 +71,11 @@ echo '{"ref":"3"}' | docker compose exec -T web python manage.py mcp_rpc account
 | `TGA_TIMEOUT` | `240` | таймаут одного виклику, секунд |
 
 Прод аналітики (`analytics.matter-d.pro`) — стек `DC_LIVE` (базовий +
-monitor-компоуз, див. [[analytics-prod-server]] у пам'яті). Додати другим
-сервером у `.mcp.json`:
+monitor-компоуз, див. [[analytics-prod-server]] у пам'яті) — уже зареєстрований
+у `.mcp.json` другим сервером **у режимі лише-читання** (рішення власника
+2026-09-18): дивитись стан можна, змінювати — ні. Обидва шари відмовляють:
+host — на docker-діях, контейнер — на інструментах із поміткою «пише». Щоб
+тимчасово дозволити зміни, прибери рядок `TGA_READONLY`:
 
 ```json
 "tg-analytics-prod": {
@@ -82,13 +85,17 @@ monitor-компоуз, див. [[analytics-prod-server]] у пам'яті). Д�
     "TGA_SSH": "tg-analytics",
     "TGA_DIR": "/opt/tg-event-analytics",
     "TGA_COMPOSE_FILES": "docker-compose.yml:docker-compose.monitor.yml",
-    "TGA_READONLY": "1"
+    "TGA_READONLY": "1",
+    "TGA_TIMEOUT": "300"
   }
 }
 ```
 
-⚠ На проді інструменти з'являться лише після деплою коду (`git pull` +
-`make live-restart-web`): `mcp_rpc` — команда Django, вона має бути в образі.
+Деплой на прод: `git push` → на сервері `git fetch origin main &&
+git merge --ff-only origin/main` (у гілки немає upstream, голий `pull` падає) →
+`make live-restart-web`. Образ перезбирати НЕ треба: `./backend` змонтований, а
+host-залежності MCP (`mcp_server/`) на сервер не їдуть — там працює лише
+`manage.py mcp_rpc`.
 
 ## 5. Каталог інструментів
 
