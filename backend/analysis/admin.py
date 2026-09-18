@@ -1101,15 +1101,124 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
         return f"{n_active}/{n_total}" if n_total else "—"
 
 
+class ChatKindFilter(admin.SimpleListFilter):
+    """Як чат адресується — від цього залежить, чи він узагалі читається."""
+    title = "Тип чату"
+    parameter_name = "chat_kind"
+
+    def lookups(self, request, model_admin):
+        return [("public", "публічний (@юзернейм)"),
+                ("linked", "група обговорення (linked:)"),
+                ("invite", "приватна (за інвайтом +)")]
+
+    def queryset(self, request, qs):
+        v = self.value()
+        if v == "public":
+            return qs.exclude(channel__username__startswith="linked:") \
+                     .exclude(channel__username__startswith="+") \
+                     .exclude(channel__username="")
+        if v == "linked":
+            return qs.filter(channel__username__startswith="linked:")
+        if v == "invite":
+            return qs.filter(channel__username__startswith="+")
+        return qs
+
+
+class ChatStreamHealthFilter(admin.SimpleListFilter):
+    """Чи чат реально читається. «Мовчить» ловить тихий злам: рядок активний,
+    стрім увімкнено, а watermark нульовий або останній збір протух."""
+    title = "Стан збору"
+    parameter_name = "stream_health"
+
+    def lookups(self, request, model_admin):
+        return [("ok", "🟢 читається"),
+                ("never", "🔴 жодного разу не прочитано"),
+                ("stale", "🟡 мовчить >3 год"),
+                ("err", "⚠️ помилка в нотатках")]
+
+    def queryset(self, request, qs):
+        cutoff = djtz.now() - datetime.timedelta(hours=3)
+        v = self.value()
+        if v == "ok":
+            return qs.filter(stream_last_msg_id__gt=0, last_streamed_at__gte=cutoff)
+        if v == "never":
+            return qs.filter(stream_last_msg_id=0)
+        if v == "stale":
+            return qs.filter(stream_last_msg_id__gt=0).filter(
+                Q(last_streamed_at__isnull=True) | Q(last_streamed_at__lt=cutoff))
+        if v == "err":
+            return qs.filter(notes__startswith="[tgs_stream]")
+        return qs
+
+
 @admin.register(MonitorChat)
 class MonitorChatAdmin(admin.ModelAdmin):
-    """Standalone-сторінка чатів моніторингу (для bulk-операцій)."""
-    list_display = ("task", "channel", "is_active", "is_critical_source",
-                    "priority", "added_by", "created_at")
-    list_filter = ("task", "is_active", "is_critical_source")
+    """Standalone-сторінка чатів моніторингу (для bulk-операцій і вибірок).
+
+    Колонки й фільтри зроблені під питання «що ми реально слухаємо в цьому
+    регіоні» — тому тут розмір аудиторії і стан збору, а не лише прапорці.
+    """
+    list_display = ("chat_link", "task", "region", "subscribers", "chat_kind",
+                    "is_active", "stream_enabled", "stream_state", "tg_account",
+                    "is_critical_source", "priority")
+    list_filter = ("task", "is_active", "stream_enabled",
+                   ("channel__region_subject", admin.RelatedOnlyFieldListFilter),
+                   ChatKindFilter, ChatStreamHealthFilter,
+                   "is_critical_source", "forward_media")
     search_fields = ("channel__username", "channel__title", "notes")
-    autocomplete_fields = ("task", "channel")
-    list_editable = ("is_active", "is_critical_source", "priority")
+    autocomplete_fields = ("task", "channel", "tg_account")
+    list_editable = ("is_active", "stream_enabled", "is_critical_source", "priority")
+    list_select_related = ("task", "channel", "channel__region_subject", "tg_account")
+    ordering = ("channel__region_subject__name", "-channel__subscribers")
+    list_per_page = 200
+
+    @admin.display(description="Чат", ordering="channel__title")
+    def chat_link(self, obj):
+        c = obj.channel
+        u = (c.username or "").strip()
+        title = c.title or u or f"#{c.id}"
+        if u.startswith("linked:"):
+            href = f"https://t.me/{u.split(':', 1)[1]}"      # батьківський канал
+        elif u.startswith("+"):
+            href = f"https://t.me/{u}"
+        elif u:
+            href = f"https://t.me/{u}"
+        else:
+            return title
+        return format_html('<a href="{}" target="_blank">{}</a><br>'
+                           '<span style="color:#888">@{}</span>', href, title, u)
+
+    @admin.display(description="Регіон", ordering="channel__region_subject__name")
+    def region(self, obj):
+        return obj.channel.region_subject or "—"
+
+    @admin.display(description="Підписників", ordering="channel__subscribers")
+    def subscribers(self, obj):
+        n = obj.channel.subscribers or 0
+        return f"{n:,}".replace(",", " ") if n else "—"
+
+    @admin.display(description="Тип")
+    def chat_kind(self, obj):
+        u = (obj.channel.username or "").strip()
+        if u.startswith("linked:"):
+            return "обговорення"
+        if u.startswith("+"):
+            return "інвайт"
+        return "публічний" if u else "—"
+
+    @admin.display(description="Стан збору", ordering="last_streamed_at")
+    def stream_state(self, obj):
+        err = obj.notes.startswith("[tgs_stream]")
+        if not obj.stream_last_msg_id:
+            return format_html('<span title="{}">🔴 не читано</span>',
+                               obj.notes[:200] if err else "")
+        cutoff = djtz.now() - datetime.timedelta(hours=3)
+        if not obj.last_streamed_at or obj.last_streamed_at < cutoff:
+            return format_html('<span title="{}">🟡 мовчить</span>',
+                               obj.last_streamed_at or "—")
+        return format_html('<span title="{}">🟢 {}</span>',
+                           obj.notes[:200] if err else obj.last_streamed_at,
+                           obj.last_streamed_at.strftime("%H:%M"))
 
 
 class SourceHealthFilter(admin.SimpleListFilter):
