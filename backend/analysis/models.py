@@ -1437,6 +1437,14 @@ class PublishConfig(models.Model):
     review_status = models.CharField(
         max_length=12, choices=Event.REVIEW_CHOICES, default=Event.REVIEW_APPROVED,
         verbose_name="Статус аудиту", help_text="Публікуємо лише події цього статусу.")
+    allow_null_region_tags = models.ManyToManyField(
+        Tag, blank=True, related_name="null_region_publish_configs",
+        verbose_name="Без регіону — лише з тегами",
+        help_text="Подія без визначеного суб'єкта РФ публікується ЛИШЕ якщо має один "
+                  "із цих тегів. Порожньо = регіон не обов'язковий. Потрібно там, де "
+                  "тема прив'язана до гео (фальсифікації в наших республіках), а одна "
+                  "тема — ні (ДЕГ по всій РФ): на промпт тут покладатися не можна, "
+                  "модель ставила регіон null і тема проходила крізь гео-ворота.")
     max_age_days = models.PositiveSmallIntegerField(
         default=0, verbose_name="Не публікувати старше, діб",
         help_text="Ковзне вікно по event_date (даті НОВИНИ): 0 = без обмеження. "

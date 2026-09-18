@@ -53,6 +53,10 @@ def _candidate_events(config):
     tag_ids = list(config.tags.values_list("id", flat=True))
     if tag_ids:
         qs = qs.filter(tags__in=tag_ids)
+    null_ok = list(config.allow_null_region_tags.values_list("id", flat=True))
+    if null_ok:
+        # подія без регіону — лише якщо тема дозволена «всюди» (у нас це ДЕГ)
+        qs = qs.filter(Q(region_subject__isnull=False) | Q(tags__in=null_ok))
     excl_ids = list(config.exclude_tags.values_list("id", flat=True))
     if excl_ids:
         qs = qs.exclude(tags__in=excl_ids)
