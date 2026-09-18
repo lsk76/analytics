@@ -9,6 +9,10 @@ x-worker: &worker
     POSTGRES_PORT: 5432
     # нативний краш (segfault у C-розширенні) → стеки всіх потоків у docker logs
     PYTHONFAULTHANDLER: "1"
+    # httpx2 інакше бере truststore, а той на КОЖНОМУ рукостисканні робить
+    # set_default_verify_paths() на спільному SSLContext → гонка двох потоків
+    # у libcrypto і segfault (падав worker-info-screen: 3 запити паралельно).
+    SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
   volumes:
     - ./backend:/app/backend
   depends_on:
