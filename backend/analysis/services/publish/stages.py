@@ -309,14 +309,19 @@ def _process(config, pub) -> bool:
 
 
 def _send_via_account(config, media, post_text):
-    """Пост від імені акаунта: медіа першоджерела в тому ж повідомленні."""
+    """Пост від імені акаунта: медіа першоджерела в тому ж повідомленні.
+
+    -> (message_id, with_media). Другий елемент — ФАКТ, а не намір: у метаданих
+    ми бачимо лише адресу оригіналу, а чи було там фото, знає лише відправка.
+    Без цього облік показував «None» і частка постів із медіа була невідома.
+    """
     from accounts.services.telegram_client import TelegramUserClient
     res = TelegramUserClient.send_post_sync(
         config.forward_account, config.chat_id, post_text,
         src_chat=(media or {}).get("chat"), src_msg_id=(media or {}).get("mid") or 0)
     if not res.get("ok"):
         raise telegram.TelegramError(f"акаунт #{config.forward_account_id}: {res.get('error')}")
-    return res.get("message_id")
+    return res.get("message_id"), bool(res.get("with_media"))
 
 
 def _send(config, pub, event, post_text, media=None) -> bool:
@@ -328,7 +333,8 @@ def _send(config, pub, event, post_text, media=None) -> bool:
     """
     try:
         if config.post_as_account and config.forward_account_id:
-            mid = _send_via_account(config, media, post_text)
+            mid, with_media = _send_via_account(config, media, post_text)
+            pub.ai_reason = f"raw_mode + {'медіа' if with_media else 'текст'}"
         else:
             mid = telegram.send_message(config.resolved_token(), config.chat_id, post_text)
     except telegram.TelegramError as e:
