@@ -690,11 +690,24 @@ def _create_event(task, posts_in):
     # resolve tags per the task's chosen categories (values are lists)
     tag_objs = []
     cls_tags = cls.get("tags") or {}
+    # Модель зрідка віддає tags ПЛОСКИМ СПИСКОМ (["фальсифікації","важливість_3"])
+    # замість мапи категорій. Раніше це валило стадію на `.get` і пост навічно
+    # застрягав у info_screened — подія просто не народжувалась. Плоский список
+    # розкладаємо по категоріях: resolve сам віддасть None для чужої категорії.
+    flat = []
+    if isinstance(cls_tags, (list, tuple)):
+        flat, cls_tags = list(cls_tags), {}
+    elif not isinstance(cls_tags, dict):
+        cls_tags = {}
     from analysis.services import tags as tag_service
     for c in task.tag_categories.all():
         vals = cls_tags.get(c.key) or []
         if isinstance(vals, str):
             vals = [vals]
+        # плоскі значення розкидаємо ЛИШЕ по закритих категоріях: у відкритій
+        # resolve створив би тег із чужого значення замість відкинути його
+        if flat and getattr(c, "closed", False):
+            vals = list(vals) + flat
         for v in vals:
             # єдиний сервіс тегів: closed-флаг бере з TagCategory, а не з call-site
             if v and (o := tag_service.resolve(c.key, str(v))):
