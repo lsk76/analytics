@@ -305,15 +305,15 @@ async def _stream_chat(client, mc, patterns, media_peer):
         except FloodWaitError:
             raise
         except Exception as e:  # noqa: BLE001
-            return None, mc.stream_last_msg_id, 0, f"linked: {type(e).__name__}: {str(e)[:70]}"
+            return None, mc.stream_last_msg_id, 0, f"linked: {type(e).__name__}: {str(e)[:70]}", 0
     if entity is None:
-        return None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash"
+        return None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash", 0
     first = not mc.stream_last_msg_id
     # перший полінг — найновіші N; далі — від watermark уперед (reverse), щоб
     # сплеск, більший за ліміт, не лишив діри в середині
     kwargs = dict(limit=STREAM_BACKFILL) if first else dict(
         min_id=mc.stream_last_msg_id, limit=STREAM_LIMIT, reverse=True)
-    found, max_id, n_media = [], mc.stream_last_msg_id, 0
+    found, max_id, n_media, n_seen = [], mc.stream_last_msg_id, 0, 0
     try:
         async for m in client.iter_messages(entity, **kwargs):
             max_id = max(max_id, int(m.id))
@@ -331,6 +331,7 @@ async def _stream_chat(client, mc, patterns, media_peer):
             text = (getattr(m, "message", None) or "").strip()
             if not text:
                 continue
+            n_seen += 1
             hit = next((p.pattern for p in patterns if p.search(text)), None)
             if not hit:
                 continue
@@ -347,8 +348,8 @@ async def _stream_chat(client, mc, patterns, media_peer):
     except FloodWaitError:
         raise
     except Exception as e:  # noqa: BLE001
-        return None, max_id, n_media, f"{type(e).__name__}: {str(e)[:90]}"
-    return found, max_id, n_media, None
+        return None, max_id, n_media, f"{type(e).__name__}: {str(e)[:90]}", n_seen
+    return found, max_id, n_media, None, n_seen
 
 
 async def _stream_account(acc, chats, patterns, media_chat_id, out):
@@ -379,7 +380,7 @@ async def _stream_account(acc, chats, patterns, media_chat_id, out):
                                "він має бути учасником", acc.id, media_chat_id, e)
         for mc in chats:
             try:
-                msgs, max_id, n_media, err = await _stream_chat(
+                msgs, max_id, n_media, err, n_seen = await _stream_chat(
                     client, mc, patterns, media_peer if mc.forward_media else None)
             except FloodWaitError as e:
                 # FloodWait буває на ГОДИНИ. Без паузи стадія поверталась до
@@ -388,7 +389,7 @@ async def _stream_account(acc, chats, patterns, media_chat_id, out):
                 # флуднутий акаунт замість того, щоб піти до вільного.
                 await _mark_flood(acc.id, e.seconds, chats)
                 return
-            out.append((mc, msgs, max_id, n_media, err))
+            out.append((mc, msgs, max_id, n_media, err, n_seen))
     except FloodWaitError as e:
         await _mark_flood(acc.id, getattr(e, "seconds", 60), chats)
     except Exception as e:  # noqa: BLE001
@@ -440,8 +441,9 @@ def tgs_stream_once(task) -> bool:
     out: list = []
     asyncio.run(_stream_all(pool, by_acc, patterns, task.stream_media_chat_id, out))
 
-    n_new = n_media = n_rebind = 0
-    for mc, msgs, max_id, media, err in out:
+    n_new = n_media = n_rebind = n_seen_total = 0
+    for mc, msgs, max_id, media, err, seen in out:
+        n_seen_total += seen
         n_media += media
         fields = ["last_streamed_at"]
         if err:
@@ -463,8 +465,10 @@ def tgs_stream_once(task) -> bool:
             fields.append("stream_last_msg_id")
         mc.last_streamed_at = dj_tz.now()
         mc.save(update_fields=fields)
-    logger.info("tgs_stream: чатів %d, збігів %d, медіа %d, перепризначено %d",
-                len(out), n_new, n_media, n_rebind)
+    # n_seen — скільки текстових повідомлень взагалі проглянуто: без нього
+    # «збігів 2» не відрізнити від «чати мовчать» і «регулярка вузька».
+    logger.info("tgs_stream: чатів %d, прочитано %d, збігів %d, медіа %d, перепризначено %d",
+                len(out), n_seen_total, n_new, n_media, n_rebind)
     return True
 
 
