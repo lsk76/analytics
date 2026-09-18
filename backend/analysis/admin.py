@@ -649,13 +649,13 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
     list_filter = ("is_active", "task", "review_status", "regions")
     search_fields = ("name", "chat_id")
     autocomplete_fields = ("task", "tags")
-    filter_horizontal = ("tags", "exclude_tags", "allow_null_region_tags", "regions")
+    filter_horizontal = ("tags", "require_tags", "exclude_tags", "allow_null_region_tags", "regions")
     _BASE_FIELDSETS = (
         (None, {"fields": ("name", "is_active")}),
         ("Відбір подій (дзеркало фасетів списку подій)", {
             "description": "«Теги» — це АБО (досить одного збігу). Поріг на кшталт "
                            "«важливість 3+» задається через «Теги-виключення».",
-            "fields": ("task", "tags", "exclude_tags", "regions", "review_status",
+            "fields": ("task", "tags", "require_tags", "exclude_tags", "regions", "review_status",
                        "publish_from", "max_age_days", "allow_null_region_tags")}),
         ("Telegram-канал", {"fields": ("chat_id", "bot_token")}),
         ("Публікація без ШІ (оригінал + теги)", {

@@ -1425,6 +1425,13 @@ class PublishConfig(models.Model):
     tags = models.ManyToManyField(
         Tag, blank=True, related_name="publish_configs", verbose_name="Теги",
         help_text="Порожньо = будь-які теги; інакше подія має мати ХОЧА Б ОДИН із цих тегів.")
+    require_tags = models.ManyToManyField(
+        Tag, blank=True, related_name="required_publish_configs",
+        verbose_name="Обов'язкові теги (І)",
+        help_text="Подія публікується лише якщо має ХОЧА Б ОДИН із цих тегів — на "
+                  "додачу до фільтра «Теги». Потрібно для порога важливості: "
+                  "виключення не ловить подію, у якої тега важливості НЕМА ЗОВСІМ "
+                  "(модель іноді його не ставить), і рутина проходила в канал.")
     exclude_tags = models.ManyToManyField(
         Tag, blank=True, related_name="excluded_from_publish_configs",
         verbose_name="Теги-виключення",
