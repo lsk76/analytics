@@ -1561,7 +1561,7 @@ class ClassifiedFilter(admin.SimpleListFilter):
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
     list_display = ("username", "title", "subscribers", "region_subject",
-                    "chat_type", "comments_open", "msgs_per_day", "topics_display")
+                    "chat_type", "msgs_per_day", "topics_display")
     # Порядок навмисний: суб'єкт (розгорнутий) -> тип -> тема -> підписники ->
     # повідомлень за добу, далі другорядне. Мову прибрано — не використовувалась.
     list_filter = (ChannelSubjectFilter, ChannelTypeFilter, ChannelTopicFilter,
