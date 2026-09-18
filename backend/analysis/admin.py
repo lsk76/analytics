@@ -1447,16 +1447,42 @@ class MultiExcludeFilter(MultiSelectFilter):
             }
 
 
-class ChannelSubjectMultiFilter(MultiExcludeFilter):
-    """Суб'єкт РФ з ✓/✗ — головний фільтр довідника, тож завжди розгорнутий."""
-    title = "Суб'єкт РФ"
-    parameter_name = "region_id"
-    field = "region_subject_id"
-    option_label = "суб'єкт"
+class ChannelSubjectFilter(SubjectFilter):
+    """Суб'єкт РФ: той самий select2-мультиселект з пошуком, що й на подіях, але
+    фасети рахуються по КАНАЛАХ (агрегація прямо на відфільтрованому наборі —
+    без pk__in по 117k рядків). Головний фільтр довідника, тож завжди розгорнутий.
+    """
     always_open = True
 
-    def options(self, request):
-        return [(str(r.id), r.name) for r in Region.objects.order_by("name")]
+    def filter_is_active(self):
+        return True
+
+    def lookups(self, request, model_admin):
+        return [(str(r.id), r.name) for r in
+                Region.objects.filter(channels__isnull=False).distinct().order_by("name")]
+
+    def choices(self, changelist):
+        selected = self.request.GET.getlist(self.parameter_name)
+        yield {
+            "selected": len(selected) == 0,
+            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+            "display": _("All"),
+            "value": "__all__",
+        }
+        base = facet_base(changelist, self.request, self)
+        rows = (base.filter(region_subject__isnull=False)
+                .values("region_subject__id", "region_subject__name")
+                .annotate(n=Count("pk")).order_by())
+        present = {str(r["region_subject__id"]): (r["region_subject__name"], r["n"])
+                   for r in rows}
+        for rid in selected:                     # вибране лишаємо видимим навіть із 0
+            if rid not in present:
+                r = Region.objects.filter(id=rid).first()
+                if r:
+                    present[rid] = (r.name, 0)
+        for rid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
+            yield {"selected": rid in selected, "query_string": "",
+                   "display": f"{name} ({n})", "value": rid}
 
 
 class ChannelTypeFilter(MultiExcludeFilter):
@@ -1491,7 +1517,9 @@ class ChannelTopicFilter(MultiExcludeFilter):
         тому рахуємо LATERAL-ом за один прохід.
         """
         base = facet_base(changelist, self.request, self)
-        sql, params = base.values_list("pk", flat=True).query.sql_with_params()
+        # .order_by() обовʼязково: ordering="-subscribers" + distinct() дає
+        # SELECT DISTINCT id, subscribers — і підзапит на дві колонки падає.
+        sql, params = base.order_by().values_list("pk", flat=True).query.sql_with_params()
         with connection.cursor() as cur:
             cur.execute(
                 f"SELECT t.v, count(*) FROM analysis_channel c, "
@@ -1538,7 +1566,7 @@ class ChannelAdmin(admin.ModelAdmin):
                     "discusses_problems", "topics_display")
     # Порядок навмисний: суб'єкт (розгорнутий) -> тип -> тема -> підписники ->
     # повідомлень за добу, далі другорядне. Мову прибрано — не використовувалась.
-    list_filter = (ChannelSubjectMultiFilter, ChannelTypeFilter, ChannelTopicFilter,
+    list_filter = (ChannelSubjectFilter, ChannelTypeFilter, ChannelTopicFilter,
                    ("subscribers", SubscribersRangeFilter),
                    ("msgs_per_day", MsgsPerDayRangeFilter),
                    "comments_open", "participants_visible", "access",
