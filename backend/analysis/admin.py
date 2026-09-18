@@ -1354,21 +1354,164 @@ class SourceSubscriptionAdmin(admin.ModelAdmin):
 
 from rangefilter.filters import NumericRangeFilterBuilder as _NRFB
 SubscribersRangeFilter = _NRFB(title="Підписники")
+MsgsPerDayRangeFilter = _NRFB(title="Повідомлень за добу")
 
 
-class ChannelTopicFilter(admin.SimpleListFilter):
-    """Filter by a value inside the JSON `topics` list (Postgres @> contains)."""
+class MultiExcludeFilter(MultiSelectFilter):
+    """Faceted include/exclude checkboxes for a PLAIN field (no tags involved).
+
+    Same widget as the per-category tag filters on events: two checkboxes per
+    option, ✓ include and ✗ exclude, several options may be ticked in either
+    column. URL: ?<param>=v (repeatable) and ?<param>_excl=v (repeatable);
+    include is OR-ed inside the filter, then exclude is subtracted.
+
+    Subclasses define `field` (ORM lookup, e.g. "chat_type") plus `options()`
+    returning [(value, label)] and may set `always_open`.
+    """
+    template = "admin/filters/multi_select_with_exclude.html"
+    field = None
+    option_label = "значення"   # підпис колонки у шапці віджета
+    always_open = False
+
+    @property
+    def exclude_param(self):
+        return f"{self.parameter_name}_excl"
+
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        # SimpleListFilter pops only `parameter_name`; without this the
+        # companion param leaks into queryset.filter() as a field lookup.
+        params.pop(self.exclude_param, None)
+
+    def expected_parameters(self):
+        return [self.parameter_name, self.exclude_param]
+
+    def filter_is_active(self):
+        return self.always_open or super().filter_is_active()
+
+    def options(self, request):
+        """[(value, label)] — the full option list, ignoring facets."""
+        raise NotImplementedError
+
+    def lookups(self, request, model_admin):  # ensures has_output()
+        return self.options(request)
+
+    def _apply(self, qs, values, negate):
+        lookup = {f"{self.field}__in": values}
+        return qs.exclude(**lookup) if negate else qs.filter(**lookup)
+
+    def queryset(self, request, queryset):
+        inc = self.request.GET.getlist(self.parameter_name)
+        exc = self.request.GET.getlist(self.exclude_param)
+        if inc:
+            queryset = self._apply(queryset, inc, negate=False)
+        if exc:
+            queryset = self._apply(queryset, exc, negate=True)
+        return queryset
+
+    def filter_queryset(self, queryset, values):  # base-class contract
+        return self._apply(queryset, values, negate=False)
+
+    def facet_counts(self, changelist):
+        """{value: count} over the selection with every OTHER filter applied."""
+        base = facet_base(changelist, self.request, self)
+        rows = base.values(self.field).annotate(n=Count("pk")).order_by()
+        return {str(r[self.field]): r["n"] for r in rows if r[self.field] not in (None, "")}
+
+    def choices(self, changelist):
+        included = self.request.GET.getlist(self.parameter_name)
+        excluded = self.request.GET.getlist(self.exclude_param)
+        yield {
+            "selected": not (included or excluded),
+            "query_string": changelist.get_query_string(
+                remove=[self.parameter_name, self.exclude_param]),
+            "display": _("All"),
+            "value": "__all__",
+        }
+        try:
+            counts = self.facet_counts(changelist)
+        except Exception:  # noqa: BLE001 — a broken facet must not kill the page
+            counts = {}
+        for value, label in self.options(self.request):
+            value = str(value)
+            n = counts.get(value)
+            # Options with no rows left are dropped, unless the user has them
+            # ticked — otherwise there would be no way to untick them.
+            if n is None and value not in included and value not in excluded:
+                continue
+            yield {
+                "included": value in included,
+                "excluded": value in excluded,
+                "display": f"{label} ({n or 0})",
+                "value": value,
+            }
+
+
+class ChannelSubjectMultiFilter(MultiExcludeFilter):
+    """Суб'єкт РФ з ✓/✗ — головний фільтр довідника, тож завжди розгорнутий."""
+    title = "Суб'єкт РФ"
+    parameter_name = "region_id"
+    field = "region_subject_id"
+    option_label = "суб'єкт"
+    always_open = True
+
+    def options(self, request):
+        return [(str(r.id), r.name) for r in Region.objects.order_by("name")]
+
+
+class ChannelTypeFilter(MultiExcludeFilter):
+    title = "Тип"
+    parameter_name = "ctype"
+    field = "chat_type"
+    option_label = "тип"
+
+    def options(self, request):
+        return list(Channel.CHAT_TYPE_CHOICES)
+
+
+class ChannelTopicFilter(MultiExcludeFilter):
+    """Тема з `Channel.topics` (JSON-список). Значення беремо з самої БД, бо
+    рубрикатор довідника й старі теми дають різні набори."""
     title = "Тема"
     parameter_name = "topic"
-    TOPICS = ["новини", "локал-чат", "барахолка/оголошення", "авто/ДТП",
-              "етнічне/міжнаціональне", "політика/опозиція", "влада/силовики",
-              "релігія", "кримінал/ЧП", "знайомства/дозвілля", "інше"]
+    field = "topics"
+    option_label = "тема"
+    HIDDEN = {"_cat"}       # службовий маркер «уже категоризовано»
 
-    def lookups(self, request, model_admin):
-        return [(t, t) for t in self.TOPICS]
+    def _apply(self, qs, values, negate):
+        q = Q()
+        for v in values:
+            q |= Q(topics__contains=[v])
+        return qs.exclude(q) if negate else qs.filter(q)
 
-    def queryset(self, request, qs):
-        return qs.filter(topics__contains=[self.value()]) if self.value() else qs
+    def facet_counts(self, changelist):
+        """Один запит: розгортаємо jsonb-масив тем і рахуємо кожну.
+
+        `topics__contains` по кожній темі окремо — це 10+ сканів по 108k рядків,
+        тому рахуємо LATERAL-ом за один прохід.
+        """
+        base = facet_base(changelist, self.request, self)
+        sql, params = base.values_list("pk", flat=True).query.sql_with_params()
+        with connection.cursor() as cur:
+            cur.execute(
+                f"SELECT t.v, count(*) FROM analysis_channel c, "
+                f"LATERAL jsonb_array_elements_text(c.topics) AS t(v) "
+                f"WHERE jsonb_typeof(c.topics) = 'array' AND c.id IN ({sql}) "
+                f"GROUP BY 1",
+                params)
+            return {row[0]: row[1] for row in cur.fetchall()}
+
+    def options(self, request):
+        counts = getattr(self, "_opts_cache", None)
+        if counts is None:
+            with connection.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT t.v FROM analysis_channel c, "
+                    "LATERAL jsonb_array_elements_text(c.topics) AS t(v) "
+                    "WHERE jsonb_typeof(c.topics) = 'array' ORDER BY 1")
+                counts = [r[0] for r in cur.fetchall()]
+            self._opts_cache = counts
+        return [(t, t) for t in counts if t not in self.HIDDEN]
 
 
 class ClassifiedFilter(admin.SimpleListFilter):
@@ -1387,48 +1530,19 @@ class ClassifiedFilter(admin.SimpleListFilter):
         return qs
 
 
-class ChannelSubjectFilter(SubjectFilter):
-    """Same select2 faceted RF-subject filter as EventAdmin, but faceted by CHANNEL
-    counts (aggregated directly on the filtered set — no pk__in over 108k rows)."""
-
-    def lookups(self, request, model_admin):
-        return [(str(r.id), r.name) for r in
-                Region.objects.filter(channels__isnull=False).distinct().order_by("name")]
-
-    def choices(self, changelist):
-        selected = self.request.GET.getlist(self.parameter_name)
-        yield {
-            "selected": len(selected) == 0,
-            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
-            "display": _("All"),
-            "value": "__all__",
-        }
-        base = facet_base(changelist, self.request, self)
-        rows = (base.filter(region_subject__isnull=False)
-                .values("region_subject__id", "region_subject__name")
-                .annotate(n=Count("pk")).order_by())
-        present = {str(r["region_subject__id"]): (r["region_subject__name"], r["n"])
-                   for r in rows}
-        for rid in selected:
-            if rid not in present:
-                r = Region.objects.filter(id=rid).first()
-                if r:
-                    present[rid] = (r.name, 0)
-        for rid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
-            yield {"selected": rid in selected, "query_string": "",
-                   "display": f"{name} ({n})", "value": rid}
-
-
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
     list_display = ("username", "title", "subscribers", "region_subject", "settlement",
                     "chat_type", "comments_open", "linked_chat_display",
-                    "participants_visible", "human_msgs_per_day",
+                    "participants_visible", "msgs_per_day", "human_msgs_per_day",
                     "discusses_problems", "topics_display")
-    list_filter = (ChannelSubjectFilter, "chat_type", "comments_open",
-                   "participants_visible", "access", "discusses_problems",
-                   ChannelTopicFilter, ("subscribers", SubscribersRangeFilter),
-                   ClassifiedFilter, "enriched", "is_channel", "language")
+    # Порядок навмисний: суб'єкт (розгорнутий) -> тип -> тема -> підписники ->
+    # повідомлень за добу, далі другорядне. Мову прибрано — не використовувалась.
+    list_filter = (ChannelSubjectMultiFilter, ChannelTypeFilter, ChannelTopicFilter,
+                   ("subscribers", SubscribersRangeFilter),
+                   ("msgs_per_day", MsgsPerDayRangeFilter),
+                   "comments_open", "participants_visible", "access",
+                   "discusses_problems", ClassifiedFilter, "enriched", "is_channel")
     search_fields = ("username", "title", "description", "settlement")
     ordering = ("-subscribers",)
     list_select_related = ("region_subject", "linked_chat")

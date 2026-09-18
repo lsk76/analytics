@@ -39,7 +39,7 @@
     <li class="hdr">
         <span class="h-inc" title="включити">✓</span>
         <span class="h-exc" title="виключити">✗</span>
-        <span style="flex:1">{% trans "tag" %}</span>
+        <span style="flex:1">{{ spec.option_label|default:_("tag") }}</span>
     </li>
     {% for choice in choices %}
         {% if choice.value == '__all__' %}
