@@ -28,7 +28,8 @@ class Command(BaseCommand):
         parser.add_argument("tool", nargs="?", default="",
                             help="назва інструмента (без неї — список)")
         parser.add_argument("--payload", default="",
-                            help="параметри JSON-об'єктом (інакше читаються зі stdin)")
+                            help="параметри JSON-об'єктом (host-шар шле саме так; "
+                                 "руками можна й піпою в stdin)")
         parser.add_argument("--list", action="store_true",
                             help="манифест інструментів у JSON")
         parser.add_argument("--raw", action="store_true",
@@ -61,9 +62,7 @@ class Command(BaseCommand):
     # ---- внутрішнє ---------------------------------------------------------
 
     def _payload(self, opts):
-        raw = opts["payload"]
-        if not raw and not sys.stdin.isatty():
-            raw = sys.stdin.read()
+        raw = opts["payload"] or self._stdin_if_ready()
         raw = (raw or "").strip()
         if not raw:
             return {}
@@ -76,6 +75,24 @@ class Command(BaseCommand):
             self._emit({"ok": False, "error": "payload має бути JSON-об'єктом"}, opts)
             return None
         return data
+
+    @staticmethod
+    def _stdin_if_ready(timeout: float = 0.5) -> str:
+        """Прочитати stdin, ЛИШЕ якщо там справді щось є.
+
+        `docker compose exec -T` лишає stdin відкритим, коли команду запускають
+        руками з фонової оболонки: сліпий `sys.stdin.read()` тоді чекає EOF,
+        якого не буде ніколи (ловили зависання на 11 годин). select відповідає
+        на питання «чи є що читати» за півсекунди й не блокується.
+        """
+        import select
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        except (OSError, ValueError):
+            return ""
+        return sys.stdin.read() if ready else ""
 
     def _emit(self, result, opts):
         if opts["raw"]:

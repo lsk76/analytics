@@ -78,9 +78,12 @@ def call(tool: str, payload: dict | None = None, timeout: int | None = None) -> 
     argv = TARGET.compose("exec", "-T")
     if TARGET.readonly:
         argv += ["-e", "MCP_READONLY=1"]
-    argv += [TARGET.web, "python", "manage.py", "mcp_rpc", tool]
-    proc = TARGET.run(argv, stdin=json.dumps(payload or {}, ensure_ascii=False),
-                      timeout=timeout)
+    # Параметри йдемо АРГУМЕНТОМ, не через stdin: argv не проходить через шелл
+    # (екранування безпечне), а виклик не залежить від того, чи хтось колись
+    # закриє наш stdin — саме на цьому команда зависала назавжди.
+    argv += [TARGET.web, "python", "manage.py", "mcp_rpc", tool,
+             "--payload", json.dumps(payload or {}, ensure_ascii=False)]
+    proc = TARGET.run(argv, stdin="", timeout=timeout)
     out = proc.stdout or ""
     if MARK_BEGIN not in out:
         tail = (proc.stderr or out or "").strip()[-1200:]
