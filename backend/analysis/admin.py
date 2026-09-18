@@ -1560,10 +1560,8 @@ class ClassifiedFilter(admin.SimpleListFilter):
 
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
-    list_display = ("username", "title", "subscribers", "region_subject", "settlement",
-                    "chat_type", "comments_open", "linked_chat_display",
-                    "participants_visible", "msgs_per_day", "human_msgs_per_day",
-                    "discusses_problems", "topics_display")
+    list_display = ("username", "title", "subscribers", "region_subject",
+                    "chat_type", "comments_open", "msgs_per_day", "topics_display")
     # Порядок навмисний: суб'єкт (розгорнутий) -> тип -> тема -> підписники ->
     # повідомлень за добу, далі другорядне. Мову прибрано — не використовувалась.
     list_filter = (ChannelSubjectFilter, ChannelTypeFilter, ChannelTopicFilter,
@@ -1573,20 +1571,10 @@ class ChannelAdmin(admin.ModelAdmin):
                    "discusses_problems", ClassifiedFilter, "enriched", "is_channel")
     search_fields = ("username", "title", "description", "settlement")
     ordering = ("-subscribers",)
-    list_select_related = ("region_subject", "linked_chat")
+    list_select_related = ("region_subject",)
     list_per_page = 50
     show_full_result_count = False          # 108k rows — skip the slow full COUNT(*)
     autocomplete_fields = ("region_subject", "linked_chat", "joined_by")
-
-    @admin.display(description="Група обговорення", ordering="linked_chat__subscribers")
-    def linked_chat_display(self, obj):
-        """Канал -> його linked-група: саме там лежать коментарі, тож лінк туди."""
-        lc = obj.linked_chat
-        if not lc:
-            return "—"
-        return format_html('<a href="{}">{}</a>',
-                           reverse("admin:analysis_channel_change", args=[lc.pk]),
-                           lc.username or lc.title or f"#{lc.pk}")
 
     @admin.display(description="Теми")
     def topics_display(self, obj):
