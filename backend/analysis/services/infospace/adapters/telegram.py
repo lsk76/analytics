@@ -129,6 +129,9 @@ class TelegramAdapter(BaseSourceAdapter):
         acc = self._account(source)
         if acc is None:
             raise RuntimeError("немає авторизованого TelegramAccount для полінгу")
+        # яким акаунтом читали — щоб на транспортному збої стадія знала, чию
+        # проксі відправити на перевірку (transient, у БД не пишеться)
+        source._tg_account_used = acc
         handle = self._handle(source)
         poll_cursor = dict(source.poll_cursor or {})
         first_poll = "last_msg_id" not in poll_cursor
