@@ -273,7 +273,7 @@ class TelezipClient:
             # Режими запиту понад text= (exact=/channeltext=/regex= у діалекті бота)
             # документовані, але НЕ перевірені на цьому API. Тому не вигадуємо
             # іменовані параметри, а даємо прокинути перевірене розвідкою
-            # (`tz_probe`) поле як є — і одразу бачимо відповідь сервера.
+            # поле як є — і одразу бачимо відповідь сервера.
             body.update(extra_body)
         data = await self._request("POST", "/Find", json_data=body)
         return [self._parse_msg(m) for m in data]
@@ -348,7 +348,7 @@ class TelezipClient:
     async def raw(self, method: str, endpoint: str,
                   params: Optional[Dict[str, Any]] = None,
                   json_data: Optional[Dict[str, Any]] = None) -> Any:
-        """Сирий виклик довільного ендпоінта — розвідка API (`tz_probe`).
+        """Сирий виклик довільного ендпоінта — розвідка API (лише з коду).
 
         Офіційний гайд лежить за Google-логіном, а клієнт покриває лише
         перевірені `/Find` і `/Channels`. Замість того щоб ВИГАДУВАТИ решту

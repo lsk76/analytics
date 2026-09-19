@@ -446,7 +446,7 @@ def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = Non
 @tool("events_stats", group="monitoring", params={
       "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
       "days": "Скільки останніх діб узяти.",
-      "group_by": "Розріз: day | week | month | region | task | tag:<ключ категорії> (напр. tag:importance).",
+      "group_by": "Розріз: day | week | month | region | task | tag:<ключ категорії> (напр. tag:importance). Ключі категорій окремим інструментом не віддаються — їх видно в адмінці, /admin/analysis/tagcategory/.",
       "region": "Назва субʼєкта РФ або її частина (напр. Дагестан).",
       "limit": "Скільки рядків показати.",
       "review_status": "Статус аудиту подій: approved (дефолт) | pending | rejected | all."})
@@ -503,7 +503,13 @@ def events_stats(task: str = "", days: int = 14, group_by: str = "day",
       "query": "@username або частина назви каналу в НАШОМУ довіднику. Пошук у базі TeleZip — це tz_channels.",
       "limit": "Скільки каналів показати."})
 def channels_find(query: str, limit: int = 20):
-    """Знайти канал/чат у довіднику (`Channel`) за username/назвою — id для інших дій."""
+    """Знайти канал/чат у нашому довіднику (`Channel`) за username/назвою.
+
+    Колонка «id» — це id рядка довідника, і він НЕ підходить ні для
+    `chat_update` (там id рядка whitelist із `chats_list`), ні для
+    `tz_find(channel=…)` (там TelegramID або @username). Із цієї таблиці для
+    інших інструментів бери @username, а рядок whitelist шукай у `chats_list`.
+    """
     qs = (Channel.objects.filter(Q(username__icontains=query.lstrip("@"))
                                  | Q(title__icontains=query))
           .select_related("region_subject").order_by("-subscribers")[:limit])
@@ -516,13 +522,13 @@ def channels_find(query: str, limit: int = 20):
 
 @tool("task_update", group="monitoring", mutates=True, params={
       "ref": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
-      "telezip_query": "Новий пошуковий запит задачі. Порожньо = не змінювати; щоб ОЧИСТИТИ запит, передай '-'. Синтаксис — як у tz_find (пробіл = АБО).",
-      "languages": "Мови через кому (ru, uk…). Порожньо = не змінювати.",
+      "telezip_query": "Новий пошуковий запит задачі. Порожньо = не змінювати; щоб ОЧИСТИТИ запит, передай '-'. УВАГА, ДІАЛЕКТ ІНШИЙ, НІЖ У tz_find: збір ходить у v3, де ПРОБІЛ = АБО, а І — це `+` перед групою (`тема +(дія) -(шум)`). У tz_find (v4) навпаки. Запит, перенесений звідси в tz_find без переписування, тихо дасть 0 збігів, і навпаки.",
+      "languages": "Мови через кому (ru, uk…). Порожньо = не змінювати; очистити список звідси не можна — це робиться в адмінці задачі.",
       "unique": "Згортати репости при зборі. Не передавати = не змінювати.",
       "chunk_days": "Розмір чанка збору в днях. 0 = не змінювати.",
       "is_active": "Увімкнути/вимкнути задачу. Не передавати = не змінювати.",
       "min_subscribers": "Відсівати канали, менші за це число підписників. -1 = не змінювати, 0 = вимкнути фільтр.",
-      "llm_model": "Перевизначити модель LLM для задачі. Порожньо = не змінювати."})
+      "llm_model": "Перевизначити модель LLM для задачі. Порожньо = не змінювати; повернути дефолт із коду звідси не можна — це робиться в адмінці задачі."})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
                 min_subscribers: int = -1, llm_model: str = ""):

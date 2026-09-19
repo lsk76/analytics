@@ -233,7 +233,8 @@ def test_descriptions_do_not_mention_removed_tools_or_renamed_params():
 def test_tool_description_carries_the_whole_docstring():
     """У схему має йти ВЕСЬ докстрінг, а не перший абзац: застереження в кінці."""
     find = [m for m in mcp_api.manifest() if m["name"] == "tz_find"][0]
-    assert "ПРОБІЛ = АБО" in find["doc"], "застереження не дійшло до опису"
+    assert "ПРОБІЛ = І" in find["doc"], "застереження про синтаксис не дійшло"
+    assert "$0.10" in find["doc"], "застереження про ціну (кінець докстрінга) не дійшло"
     assert find["summary"] and "\n" not in find["summary"]
 
 
@@ -249,11 +250,22 @@ def test_telezip_surface_mirrors_the_api():
     assert tz == {"tz_find", "tz_channels", "tz_users", "tz_status"}
 
 
-def test_query_docs_warn_about_the_or_default():
-    """Найчастіша помилка: пробіл сприймають як І."""
-    for name in ("tz_find",):
-        spec = [m for m in mcp_api.manifest() if m["name"] == name][0]
-        q = [p for p in spec["params"] if p["name"] == "text"][0]
-        assert "АБО" in q["doc"] and "+" in q["doc"]
+def test_query_docs_name_the_v4_dialect():
+    """Найдорожча помилка: писати запит у діалекті v3 там, де працює v4.
+
+    `tz_find` ходить у POST /v4/messages, де ПРОБІЛ = І, а АБО — це `|`.
+    Запит у діалекті бота/v3 не падає з помилкою, а тихо віддає 0 збігів,
+    тому описи мають називати обидва діалекти явно.
+    """
+    spec = [m for m in mcp_api.manifest() if m["name"] == "tz_find"][0]
+    q = [p for p in spec["params"] if p["name"] == "text"][0]
+    assert "ПРОБІЛ = І" in q["doc"], "не сказано, що пробіл — це І"
+    assert "|" in q["doc"], "не показано, чим писати АБО"
+    assert "v3" in q["doc"], "не попереджено про протилежний діалект збору"
+
+    # запит задачі йде у v3 /Find — там усе навпаки, і опис має це казати
+    upd = [m for m in mcp_api.manifest() if m["name"] == "task_update"][0]
+    tq = [p for p in upd["params"] if p["name"] == "telezip_query"][0]
+    assert "ПРОБІЛ = АБО" in tq["doc"] and "v3" in tq["doc"]
 
 
