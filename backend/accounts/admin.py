@@ -281,11 +281,15 @@ class TestBotJobAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
 
 @admin.register(TelegramAccount)
 class TelegramAccountAdmin(admin.ModelAdmin):
-    list_display = ("name", "phone_number", "is_authenticated", "is_active",
-                    "tag_list", "spam_status", "spam_status_checked_at", "last_used_at")
-    list_filter = ("is_authenticated", "is_active", "spam_status", AccountTagFilter)
+    list_display = ("name", "phone_number", "is_authenticated", "state", "is_active",
+                    "tag_list", "spam_status", "spam_status_checked_at", "last_ok_at")
+    list_filter = ("state", "is_authenticated", "is_active", "spam_status", AccountTagFilter)
     search_fields = ("name", "phone_number", "tags__name")
-    readonly_fields = ("authorize_button", "channels_button", "messages_button")
+    # стан веде gateway (accounts/gateway/state.py): в адмінці лише читання
+    readonly_fields = ("authorize_button", "channels_button", "messages_button",
+                       "state", "cooldown_until", "transport_failures",
+                       "resolve_exhausted_until", "last_ok_at", "last_error",
+                       "gateway_connected")
     filter_horizontal = ("tags",)
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",
               "add_tag_action", "set_owner_action", "create_bot_action", "sync_bots_action"]

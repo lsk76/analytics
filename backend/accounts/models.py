@@ -174,7 +174,47 @@ class TelegramAccount(models.Model):
     spam_status_checked_at = models.DateTimeField(null=True, blank=True,
                                                    verbose_name="Перевірено (SpamBot)")
 
+    # --- стан у gateway (accounts/gateway/state.py — єдине місце переходів) ---
+    # Рядок — дзеркало для адмінки/MCP/політики вибору; правду знає gateway.
+    STATE_READY, STATE_COOLDOWN, STATE_NEEDS_PROXY = "ready", "cooldown", "needs_proxy"
+    STATE_DEAUTHORIZED, STATE_BANNED = "deauthorized", "banned"
+    STATE_CHOICES = [
+        (STATE_READY, "Готовий"),
+        (STATE_COOLDOWN, "Пауза (cooldown)"),
+        (STATE_NEEDS_PROXY, "Потрібна проксі"),
+        (STATE_DEAUTHORIZED, "Розлогінений"),
+        (STATE_BANNED, "Забанений"),
+    ]
+    state = models.CharField(max_length=16, choices=STATE_CHOICES, default=STATE_READY,
+                             verbose_name="Стан")
+    cooldown_until = models.DateTimeField(null=True, blank=True, verbose_name="Пауза до")
+    transport_failures = models.PositiveIntegerField(
+        default=0, verbose_name="Транспортних збоїв поспіль",
+        help_text="Проксі не зʼєднує / таймаут. Скидається успішною операцією.")
+    resolve_exhausted_until = models.DateTimeField(
+        null=True, blank=True, verbose_name="Резолв юзернеймів вичерпано до",
+        help_text="«No user has X as username» — добовий ліміт резолву; акаунт "
+                  "лишається придатним для операцій без резолву.")
+    last_ok_at = models.DateTimeField(null=True, blank=True, verbose_name="Остання успішна операція")
+    last_error = models.TextField(blank=True, verbose_name="Остання помилка")
+    gateway_connected = models.BooleanField(
+        default=False, verbose_name="Зʼєднання в gateway",
+        help_text="Gateway зараз тримає живий клієнт цього акаунта.")
+
     objects = TelegramAccountQuerySet.as_manager()
+
+    @property
+    def is_available(self) -> bool:
+        """Можна давати в роботу: стан ready і пауза (якщо була) минула."""
+        from django.utils import timezone as _tz
+        if self.state != self.STATE_READY:
+            return False
+        return not self.cooldown_until or self.cooldown_until <= _tz.now()
+
+    def can_resolve(self) -> bool:
+        """Чи не вичерпано добовий ліміт резолву юзернеймів."""
+        from django.utils import timezone as _tz
+        return not self.resolve_exhausted_until or self.resolve_exhausted_until <= _tz.now()
 
     def client_kwargs(self) -> dict:
         """Непорожні device-параметри для TelegramClient (порожні — дефолти Telethon)."""
