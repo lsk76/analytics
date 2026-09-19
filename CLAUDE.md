@@ -30,11 +30,14 @@
 - **Конвеєри НЕ вигадувати** — вони задокументовані: `docs/comments-analysis-pipeline.md`
   (критика), `docs/ethnic-events-pipeline.md` / `docs/econ-events-pipeline.md` (ad-hoc події),
   `docs/ARCHITECTURE.md` (events-воркери). Промпти monitor — `analysis/pilot/prompts.py`.
-- **TeleZip:** повний API (exact/regex/фільтр по опису каналу й автору, статистика
-  без викачування, пошук каналів і юзерів) — `docs/telezip-api.md`, з чату `tz_*`.
+- **TeleZip у MCP — рівно три ендпоінти:** `tz_find` (/FIND, `stats=true` —
+  лічильники без викачування), `tz_channels` (/CHANNELS), `tz_users` (/USERS)
+  + `tz_status` (діагностика). Параметри названі як у боті: `text`, `exact`,
+  `channeltext`, `channel`, `user`, `lang`. **Пробіл у запиті = АБО, не І.**
+  Нових обгорток НЕ вигадувати. Контракт — `docs/telezip-api.md`.
   Глибина індексу ~352 дні: старіше не шукається взагалі.
 - **ОДИН ЗАПИТ TeleZip ≈ $0.10** — платиться за виклик, не за обсяг. Тому обсяг
-  питай `tz_stats` (1 виклик), а не пошуком; `collect_chunk_days` — прямий
+  питай `tz_find(stats=true)` (1 виклик), а не пошуком; `collect_chunk_days` — прямий
   множник ціни збору (30 днів по дню = $3, по 3 дні = $1); важке вікно
   ділиться навпіл і кожна половина оплачується окремо.
 - **TeleZip:** без негації в запитах; збір по днях/по одному каналу; після падіння VPN —
