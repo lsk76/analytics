@@ -1,0 +1,127 @@
+"""proxy_healthcheck — taskless-стадія для run_worker.py: періодична перевірка
+й авторемонт пулу Proxy.
+
+Marsproxies sticky-сесії (`user:secret_country-xx_session-<id>_lifetime-168h`)
+не гарантують IP на весь заявлений термін («cannot assure... will try to keep
+it for as long as possible» — з їхньої документації), тож проксі можуть
+відвалюватись у будь-який момент. `session-<id>` — довільний рядок, який
+клієнт сам вигадує (не потребує реєстрації через API), тож на невдалий
+конект пробуємо просто згенерувати новий `session-id` під тим самим
+акаунтом/країною — це і є автономний ремонт без ручних списків від оператора.
+Спрацьовує лише для ще не деактивованої (провайдером) країни/міста — якщо
+цілий гео-пул знятий з обслуговування, авторемонт це не полагодить.
+"""
+import asyncio
+import logging
+from datetime import timedelta
+
+import socks
+from django.conf import settings
+from django.db import transaction
+from django.db.models import F, Q
+from django.utils import timezone as djtz
+from telethon import TelegramClient
+
+logger = logging.getLogger(__name__)
+from telethon.sessions import StringSession
+
+from ..models import Proxy
+from .telegram_client import run_async
+
+HEALTHCHECK_INTERVAL = timedelta(hours=4)  # не частіше цього — не спамити провайдера
+REGEN_ATTEMPTS = 3
+
+from accounts.gateway.proxies import generate_new_session  # noqa: E402,F401 — перенесено в gateway
+
+
+def _parse_socks5(proxy_string: str):
+    host, port, username, password = proxy_string.split(":", 3)
+    return (socks.SOCKS5, host, int(port), True, username or None, password or None)
+
+
+async def _test(proxy_tuple, timeout):
+    client = TelegramClient(StringSession(""), int(settings.TELEGRAM_API_ID),
+                            settings.TELEGRAM_API_HASH, proxy=proxy_tuple,
+                            connection_retries=0)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=timeout)
+        return client.is_connected()
+    except Exception:
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+def test_proxy_connectivity(proxy_string: str, timeout: float = 12) -> bool:
+    """Живий конект (без TelegramAccount/сесії) — лише мережа+проксі, для здоров'я пулу."""
+    try:
+        tup = _parse_socks5(proxy_string)
+    except Exception:
+        return False
+    try:
+        return bool(run_async(_test(tup, timeout)))
+    except Exception:
+        return False
+
+
+def _claim_proxy():
+    now = djtz.now()
+    cutoff = now - HEALTHCHECK_INTERVAL
+    with transaction.atomic():
+        p = (Proxy.objects
+             .filter(is_active=True)
+             .filter(Q(last_tested_at__isnull=True) | Q(last_tested_at__lt=cutoff))
+             .select_for_update(skip_locked=True)
+             .order_by(F("last_tested_at").asc(nulls_first=True))
+             .first())
+        if p:
+            p.last_tested_at = now
+            p.save(update_fields=["last_tested_at"])
+    return p
+
+
+def proxy_healthcheck_once() -> bool:
+    """Одна проксі за виклик (гейт — не частіше HEALTHCHECK_INTERVAL на проксі)."""
+    p = _claim_proxy()
+    if not p:
+        return False
+
+    if test_proxy_connectivity(p.proxy_string):
+        if not p.is_working:
+            logger.info("proxy_healthcheck: id=%s знову робоча (...%s)",
+                       p.id, p.proxy_string[-25:])
+        p.is_working = True
+        p.fail_count = 0
+        p.save(update_fields=["is_working", "fail_count"])
+        return True
+
+    logger.warning("proxy_healthcheck: id=%s не з'єднується (...%s), спроба авторемонту",
+                   p.id, p.proxy_string[-25:])
+    p.fail_count += 1
+    p.is_working = False
+    fixed = False
+    for attempt in range(1, REGEN_ATTEMPTS + 1):
+        candidate = generate_new_session(p.proxy_string)
+        if not candidate:
+            logger.warning("proxy_healthcheck: id=%s не у форматі marsproxies sticky-session "
+                          "— авторемонт неможливий, лишається BROKEN", p.id)
+            break
+        if test_proxy_connectivity(candidate):
+            logger.info("proxy_healthcheck: id=%s АВТОРЕМОНТ вдався (спроба %d/%d), "
+                       "новий session-id: ...%s", p.id, attempt, REGEN_ATTEMPTS,
+                       candidate[-25:])
+            p.proxy_string = candidate
+            p.is_working = True
+            p.fail_count = 0
+            fixed = True
+            break
+    if not fixed and generate_new_session(p.proxy_string):
+        logger.error("proxy_healthcheck: id=%s всі %d спроби авторемонту провалились — "
+                     "ймовірно, гео/акаунт провайдера деактивовано, потрібне ручне втручання",
+                     p.id, REGEN_ATTEMPTS)
+    p.save(update_fields=(["proxy_string", "is_working", "fail_count"] if fixed
+                          else ["is_working", "fail_count"]))
+    return True

@@ -1,0 +1,1010 @@
+"""
+Telethon client wrapper over TelegramAccount — auth (code flow) + enrichment.
+
+Enrichment used by the pipeline:
+  * get_message_date(url)   — reliable publish date (UTC)
+  * get_channel_meta(handle)— title/description/subscribers for region fallback & cache
+"""
+import asyncio
+import logging
+import re
+from contextlib import asynccontextmanager, contextmanager
+from typing import Optional, Tuple
+
+from django.db import connection
+from telethon import TelegramClient
+from telethon.errors import (AuthKeyDuplicatedError, AuthKeyUnregisteredError,
+                             PhoneNumberBannedError, SessionRevokedError,
+                             UserDeactivatedBanError, UserDeactivatedError)
+from telethon.sessions import StringSession
+
+logger = logging.getLogger(__name__)
+
+
+def run_async(coro):
+    """Run a coroutine from sync Django code, even if a loop already exists."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import threading
+            result = {}
+
+            def _runner():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result["value"] = new_loop.run_until_complete(coro)
+                finally:
+                    new_loop.close()
+
+            t = threading.Thread(target=_runner)
+            t.start()
+            t.join()
+            return result.get("value")
+    except RuntimeError:
+        pass
+    return asyncio.run(coro)
+
+
+class AccountBusy(RuntimeError):
+    """Акаунт уже має живий клієнт в іншому процесі."""
+
+
+def _lock_acquire(acc_id: int, ns: int = 771) -> bool:
+    with connection.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s, %s)", [ns, int(acc_id)])
+        return bool(cur.fetchone()[0])
+
+
+def _lock_release(acc_id: int, ns: int = 771) -> None:
+    with connection.cursor() as cur:
+        cur.execute("SELECT pg_advisory_unlock(%s, %s)", [ns, int(acc_id)])
+
+
+@asynccontextmanager
+async def account_exclusive_async(account, ns: int = 771):
+    """Async-версія account_exclusive для стріму (там усе всередині корутини)."""
+    from asgiref.sync import sync_to_async
+    acc_id = getattr(account, "pk", None) or getattr(account, "id", None)
+    if not acc_id:
+        yield
+        return
+    try:
+        got = await sync_to_async(_lock_acquire)(acc_id, ns)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("account_exclusive_async: лок #%s недоступний: %r", acc_id, e)
+        yield
+        return
+    if not got:
+        raise AccountBusy(f"акаунт #{acc_id} уже використовується іншим процесом")
+    try:
+        yield
+    finally:
+        try:
+            await sync_to_async(_lock_release)(acc_id, ns)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("account_exclusive_async: не зняв лок #%s: %r", acc_id, e)
+
+
+@contextmanager
+def account_exclusive(account, ns: int = 771):
+    """Один акаунт — ОДИН клієнт у всій системі (advisory-lock у Postgres).
+
+    Telegram кидає AuthKeyDuplicated не за зміну IP, а за ОДНОЧАСНІ конекшени
+    з тим самим auth key — і вбиває ключ назавжди («can no longer be used»).
+    У нас так згоріли сесії: 5 реплік збирача, стрім чатів, публікація й
+    сервісні воркери брали клієнта того самого акаунта незалежно один від
+    одного, кожен через свій вихід проксі.
+
+    Локи БЕРУТЬ лише синхронні входи (usage: `with account_exclusive(acc):`
+    перед run_async). Усередині корутини DB-виклик заборонений, тож лок
+    навмисно не вбудований у _client(): фабрика клієнта викликається і з
+    async-коду, і магія там дала б SynchronousOnlyOperation.
+    """
+    acc_id = getattr(account, "pk", None) or getattr(account, "id", None)
+    if not acc_id:
+        yield
+        return
+    try:
+        got = _lock_acquire(acc_id, ns)
+    except Exception as e:  # noqa: BLE001 — лок страховка, а не умова роботи
+        logger.debug("account_exclusive: лок #%s недоступний: %r", acc_id, e)
+        yield
+        return
+    if not got:
+        raise AccountBusy(f"акаунт #{acc_id} уже використовується іншим процесом")
+    try:
+        yield
+    finally:
+        try:
+            _lock_release(acc_id, ns)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("account_exclusive: не зняв лок #%s: %r", acc_id, e)
+
+
+
+class TelegramUserClient:
+    """Thin wrapper using a TelegramAccount's stored StringSession + proxy."""
+
+    @staticmethod
+    def parse_telegram_url(url: str) -> Optional[Tuple[str, int]]:
+        """t.me/<handle>/<id> or t.me/c/<internal>/<id> -> (handle_or_cid, msg_id)."""
+        m = re.match(r"https?://t\.me/c/(\d+)/(\d+)", url)
+        if m:
+            return (f"-100{m.group(1)}", int(m.group(2)))
+        m = re.match(r"https?://t\.me/([A-Za-z0-9_]+)/(\d+)", url)
+        if m:
+            return (m.group(1), int(m.group(2)))
+        return None
+
+    @staticmethod
+    def _prime_proxy(account) -> None:
+        """Force-load account.proxy (FK) синхронно, поки ще немає активного event loop.
+
+        Ліниве звернення до FK усередині asyncio.run() (з _client, викликаного
+        з корутини) валить Django SynchronousOnlyOperation — ORM забороняє
+        неявний доступ з активного loop'а.
+        """
+        account.proxy  # noqa: B018 — навмисно, лише щоб прогріти кеш FK
+
+    @classmethod
+    def _client(cls, account) -> TelegramClient:
+        proxy = account.proxy.to_telethon_proxy() if account.proxy else None
+        return TelegramClient(
+            StringSession(account.session_string or ""),
+            int(account.api_id), account.api_hash, proxy=proxy,
+            # Відбиток пристрою імпортованої сесії. Без нього Telethon підставить
+            # свій дефолт, і в «Активних сесіях» акаунта пристрій СТРИБНЕ — для
+            # Telegram це ознака вкраденої сесії. Порожні поля = дефолти Telethon.
+            **account.client_kwargs(),
+        )
+
+    # ---- перевірка живості (лише читання: get_me, нічого не надсилає) ----
+    @classmethod
+    def check_alive_sync(cls, account) -> dict:
+        """Стан акаунта БЕЗ надсилання повідомлень: connect + get_me.
+
+        Розрізняє живий / розлогінений / забанений / деактивований /
+        відкликаний / таймаут проксі. НЕ пише в @SpamBot і нікому іншому.
+        """
+        async def _run():
+            client = cls._client(account)
+            try:
+                await asyncio.wait_for(client.connect(), timeout=25)
+                if not await client.is_user_authorized():
+                    return {"state": "розлогінений", "ok": False}
+                me = await client.get_me()
+                uname = f"@{me.username}" if me.username else "—"
+                prem = " · premium" if getattr(me, "premium", False) else ""
+                return {"state": "живий", "ok": True, "detail": f"{uname}{prem}"}
+            except (UserDeactivatedBanError, PhoneNumberBannedError):
+                return {"state": "ЗАБАНЕНИЙ", "ok": False}
+            except UserDeactivatedError:
+                return {"state": "деактивований", "ok": False}
+            except (AuthKeyUnregisteredError, SessionRevokedError):
+                return {"state": "сесію відкликано", "ok": False}
+            except Exception as e:  # noqa: BLE001
+                return {"state": f"помилка: {type(e).__name__}", "ok": False,
+                        "detail": str(e)[:80]}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=75)) or {"state": "?", "ok": False}
+        except Exception:
+            return {"state": "таймаут (75с, найімовірніше мертва проксі)", "ok": False}
+
+    # ---- статус акаунта через @SpamBot (обмеження на резолв юзернеймів/повідомлення) ----
+    @classmethod
+    def check_spam_status_sync(cls, account) -> dict:
+        """/start до @SpamBot — офіційний спосіб дізнатись, чи акаунт обмежений.
+
+        Саме таке обмеження (а не мертва проксі) валило резолв юзернеймів у
+        тестовому прогоні бота для «голих»/непрогрітих акаунтів. Читання +
+        одне службове повідомлення в @SpamBot (це і є призначення бота)."""
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"status": "unknown", "detail": "акаунт не авторизований", "ok": False}
+                bot = await client.get_entity("SpamBot")
+                await client.send_message(bot, "/start")
+                deadline = asyncio.get_event_loop().time() + 15
+                reply = None
+                while asyncio.get_event_loop().time() < deadline:
+                    await asyncio.sleep(1)
+                    msgs = [m for m in await client.get_messages(bot, limit=3) if not m.out]
+                    if msgs and (msgs[0].text or "").strip():
+                        reply = msgs[0].text.strip()
+                        break
+                if not reply:
+                    return {"status": "unknown", "detail": "немає відповіді за 15с", "ok": False}
+                low = reply.lower()
+                if "good news" in low or "no limits" in low or "free of any limitations" in low:
+                    status = "free"
+                elif "frozen" in low:
+                    status = "frozen"
+                elif "limited" in low or "restrict" in low:
+                    status = "limited"
+                else:
+                    status = "unknown"
+                return {"status": status, "detail": reply[:300], "ok": True}
+            except Exception as e:  # noqa: BLE001
+                return {"status": "unknown", "detail": f"{type(e).__name__}: {str(e)[:120]}",
+                        "ok": False}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "status": "unknown", "detail": "порожній результат", "ok": False}
+        except Exception as e:  # noqa: BLE001
+            return {"status": "unknown", "detail": f"{type(e).__name__}: {str(e)[:120]}",
+                    "ok": False}
+
+    # ---- auth (code flow) ----
+    @classmethod
+    def send_code_sync(cls, account) -> dict:
+        async def _run():
+            client = cls._client(account)
+            await client.connect()
+            try:
+                sent = await client.send_code_request(account.phone_number)
+                return {"success": True, "phone_code_hash": sent.phone_code_hash,
+                        "code_type": type(sent.type).__name__,
+                        "next_type": type(sent.next_type).__name__ if sent.next_type else None,
+                        "session_string": client.session.save()}
+            finally:
+                await client.disconnect()
+        cls._prime_proxy(account)
+        res = run_async(_run())
+        if res and res.get("success"):
+            account.session_string = res["session_string"]
+            account.auth_code_hash = res["phone_code_hash"]
+            account.save(update_fields=["session_string", "auth_code_hash"])
+        return res or {"success": False}
+
+    @classmethod
+    def verify_code_sync(cls, account, code: str, password: str = None) -> dict:
+        async def _run():
+            client = cls._client(account)
+            await client.connect()
+            try:
+                try:
+                    await client.sign_in(account.phone_number, code,
+                                         phone_code_hash=account.auth_code_hash)
+                except Exception as e:
+                    if "password" in str(e).lower() and password:
+                        await client.sign_in(password=password)
+                    else:
+                        raise
+                return {"success": True, "session_string": client.session.save()}
+            finally:
+                await client.disconnect()
+        cls._prime_proxy(account)
+        res = run_async(_run())
+        if res and res.get("success"):
+            account.session_string = res["session_string"]
+            account.is_authenticated = True
+            account.auth_code_hash = ""
+            account.save(update_fields=["session_string", "is_authenticated", "auth_code_hash"])
+        return res or {"success": False}
+
+    # ---- enrichment ----
+    @classmethod
+    async def _with_client(cls, account, fn):
+        client = cls._client(account)
+        await client.connect()
+        try:
+            return await fn(client)
+        except (AuthKeyUnregisteredError, SessionRevokedError,
+                UserDeactivatedError, UserDeactivatedBanError,
+                # AuthKeyDuplicated — сесію вже ВБИТО за паралельні конекшени:
+                # ключ «can no longer be used», далі це просто мертвий акаунт
+                AuthKeyDuplicatedError) as e:
+            # Сесію вбито (власник розлогінив усі пристрої / Telegram відкликав).
+            # Без цього рядка акаунт лишався is_authenticated=True і пул давав
+            # його знову й знову: 7 виборчих джерел довбали мертві сесії
+            # добу й не читались узагалі.
+            await cls._mark_deauthorized(account, type(e).__name__)
+            raise
+        finally:
+            await client.disconnect()
+
+    @classmethod
+    async def _mark_deauthorized(cls, account, reason: str) -> None:
+        from asgiref.sync import sync_to_async
+
+        @sync_to_async
+        def _save():
+            from accounts.models import TelegramAccount
+            TelegramAccount.objects.filter(pk=account.pk).update(is_authenticated=False)
+
+        try:
+            await _save()
+            logger.warning("акаунт #%s: %s — знімаю авторизацію, пул його більше "
+                           "не видасть (потрібен повторний вхід)", account.pk, reason)
+        except Exception as e:  # noqa: BLE001 — облік не має валити виклик
+            logger.warning("акаунт #%s: не зміг зняти авторизацію: %r", account.pk, e)
+
+    @classmethod
+    async def get_message_date(cls, account, url: str):
+        parsed = cls.parse_telegram_url(url)
+        if not parsed:
+            return None
+        handle, msg_id = parsed
+        async def fn(client):
+            entity = int(handle) if str(handle).lstrip("-").isdigit() else handle
+            msg = await client.get_messages(entity, ids=msg_id)
+            from datetime import timezone
+            return msg.date.astimezone(timezone.utc) if msg and msg.date else None
+        return await cls._with_client(account, fn)
+
+    @classmethod
+    async def fetch_history(cls, account, handle, min_id: int = 0, limit: int = 50,
+                            reverse: bool = False, peer_sink: dict = None) -> list:
+        """Повідомлення каналу після min_id (watermark), до limit штук.
+
+        Полінг історії каналу акаунтом (підписуватись не треба для публічних).
+        reverse=False — найновіші перші (для backfill першого полінгу: беремо
+        останні N). reverse=True — найстаріші перші ВІД min_id: суцільний догін
+        без діри, коли між полінгами накопичилось >limit повідомлень (інакше
+        watermark перестрибнув би на найновіший id і пропустив середину).
+        Повертає список dict {id, text, date(UTC)}; порожні (медіа) — пропуск."""
+        from datetime import timezone as _tz
+
+        async def fn(client):
+            entity = int(handle) if str(handle).lstrip("-").isdigit() else handle
+            if peer_sink is not None:
+                # (id, access_hash) джерела — щоб ПУБЛІКАЦІЯ потім не платила
+                # за ResolveUsernameRequest (його добовий ліміт виїдався за
+                # день і медіа зникало на 19 годин). Тут резолв уже зроблено
+                # й закешовано в сесії збирача, тож це безкоштовно.
+                try:
+                    ip = await client.get_input_entity(entity)
+                    cid, ah = getattr(ip, "channel_id", None), getattr(ip, "access_hash", None)
+                    if cid and ah:
+                        peer_sink.update({"id": int(cid), "access_hash": int(ah)})
+                except Exception as e:  # noqa: BLE001 — кеш peer не має валити збір
+                    logger.debug("fetch_history: peer %s не дістали: %r", handle, e)
+            out = []
+            async for msg in client.iter_messages(
+                    entity, min_id=min_id or 0, limit=limit, reverse=reverse):
+                text = (getattr(msg, "message", None) or "").strip()
+                if not text:
+                    continue
+                out.append({
+                    "id": msg.id, "text": text,
+                    "date": msg.date.astimezone(_tz.utc) if msg.date else None,
+                    # який тип медіа висить на пості — щоб публікація могла
+                    # послатись на оригінал і винести фото/відео в канал
+                    "media_kind": ("photo" if getattr(msg, "photo", None)
+                                   else "video" if getattr(msg, "video", None) else None),
+                })
+            return out
+        return await cls._with_client(account, fn)
+
+    @classmethod
+    def forward_message_sync(cls, account, from_chat, msg_id: int, to_chat) -> dict:
+        """Переслати повідомлення з публічного чату в наш канал АКАУНТОМ.
+
+        Копія робиться на боці Telegram: файл не йде через нас, альбом лишається
+        альбомом, зберігається «Переслано з …». Ціна — акаунт мусить бути
+        учасником каналу-приймача, а чат-джерело не має забороняти пересилання
+        (noforwards), інакше Telegram відмовить.
+        """
+        cls._prime_proxy(account)
+
+        async def _run():
+            client = cls._client(account)
+            await client.connect()
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                dst = int(to_chat) if str(to_chat).lstrip("-").isdigit() else to_chat
+                src = int(from_chat) if str(from_chat).lstrip("-").isdigit() else from_chat
+                res = await client.forward_messages(dst, int(msg_id), src)
+                mid = res[0].id if isinstance(res, list) and res else getattr(res, "id", None)
+                return {"ok": True, "message_id": mid}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        return run_async(_run())
+
+    @classmethod
+    def send_post_sync(cls, account, to_chat, text: str,
+                       src_chat=None, src_msg_id: int = 0, src_peer=None) -> dict:
+        """Опублікувати пост ВІД ІМЕНІ АКАУНТА, з медіа першоджерела в ТОМУ Ж
+        повідомленні.
+
+        Медіа беремо посиланням на оригінал (`msg.media`), а не файлом: Telegram
+        перевикористовує свою ж копію, тож нічого не качається й не заливається,
+        і обмеження на розмір не діє. Ціна — підпис до медіа має ліміт 1024
+        символи проти 4096 у звичайного поста, тому текст ріжеться викликачем.
+        """
+        cls._prime_proxy(account)
+
+        async def _run():
+            client = cls._client(account)
+            await client.connect()
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                dst = int(to_chat) if str(to_chat).lstrip("-").isdigit() else to_chat
+                media = None
+                out_peer: dict = {}
+                if src_chat and src_msg_id:
+                    # peer із бази — щоб НЕ витрачати добовий ліміт резолву
+                    # юзернеймів: на ньому акаунт ловив FloodWait по 19 годин
+                    # і пост виходив без медіа.
+                    if src_peer and src_peer.get("id") and src_peer.get("access_hash"):
+                        from telethon.tl.types import InputPeerChannel
+                        src = InputPeerChannel(int(src_peer["id"]),
+                                               int(src_peer["access_hash"]))
+                    else:
+                        src = (int(src_chat) if str(src_chat).lstrip("-").isdigit()
+                               else src_chat)
+                    try:
+                        orig = await client.get_messages(src, ids=int(src_msg_id))
+                        # хеш, який САМ цей акаунт щойно отримав резолвом —
+                        # віддаємо викликачу, щоб закешував під себе
+                        try:
+                            ip = await client.get_input_entity(src)
+                            if getattr(ip, "access_hash", None):
+                                out_peer.update({"id": int(ip.channel_id),
+                                                 "access_hash": int(ip.access_hash)})
+                        except Exception:  # noqa: BLE001
+                            pass
+                        # ЛИШЕ справжні вкладення. Перевіряти msg.photo не
+                        # годиться: Telethon віддає в ньому і картинку ПРЕВ'Ю
+                        # посилання, тож webpage проскакував і send_file падав
+                        # («Cannot use MessageMediaWebPage as file»). Дивимось
+                        # на сам тип медіа.
+                        from telethon.tl.types import (MessageMediaDocument,
+                                                       MessageMediaPhoto)
+                        if isinstance(getattr(orig, "media", None),
+                                      (MessageMediaPhoto, MessageMediaDocument)):
+                            media = orig.media
+                    except Exception as e:  # noqa: BLE001 — без медіа пост усе одно вийде
+                        logger.warning("send_post: медіа %s/%s не дістали: %r",
+                                       src_chat, src_msg_id, e)
+                if media is not None:
+                    res = await client.send_file(dst, media, caption=text,
+                                                 parse_mode="html")
+                else:
+                    res = await client.send_message(dst, text, parse_mode="html",
+                                                    link_preview=False)
+                return {"ok": True, "message_id": getattr(res, "id", None),
+                        "with_media": media is not None,
+                        "src_peer": out_peer or None}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        return run_async(_run())
+
+    # ---- тестовий прогін довільного бота (опитувальники тощо) ----
+    @classmethod
+    def test_bot_flow_sync(cls, account, bot_username: str, feedback_text: str = "",
+                           choices: Optional[list] = None, max_steps: int = 15) -> dict:
+        """Пройти /start → серію кнопкових кроків → (за наявності) відгук текстом.
+
+        Не знає наперед текстів/варіантів конкретного бота — фіксує фактичні
+        тексти й кнопки кожного кроку, щоб оператор звірив їх вручну.
+        choices — індекси кнопок (з 0) для кожного кроку з кнопками; якщо
+        коротший за кількість кроків або не заданий — решта кроків тиснуть
+        випадкову кнопку (з перших чотирьох варіантів, як типовий опитувальник
+        1-4). Крок без кнопок після відправки відгуку вважається фінальним.
+        """
+        import random
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            steps = []
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "steps": steps}
+                bot = await client.get_entity(bot_username)
+                await client.send_message(bot, "/start")
+                last_id, last_text, q_index, sent_feedback = 0, "", 0, False
+                for i in range(max_steps):
+                    msg = await _wait_reply(client, bot, last_id, last_text)
+                    if msg is None:
+                        steps.append({"step": i + 1, "error": "немає відповіді за 15с"})
+                        return {"ok": False, "error": "таймаут очікування відповіді бота",
+                                "steps": steps}
+                    buttons = [b.text for row in (msg.buttons or []) for b in row]
+                    step = {"step": i + 1, "text": msg.text or "", "buttons": buttons}
+                    steps.append(step)
+                    last_id, last_text = msg.id, msg.text or ""
+                    if buttons:
+                        if choices and q_index < len(choices):
+                            idx = choices[q_index]
+                        else:
+                            idx = random.randint(0, min(3, len(buttons) - 1))
+                        idx = max(0, min(idx, len(buttons) - 1))
+                        step["clicked"] = buttons[idx]
+                        q_index += 1
+                        await msg.click(idx)
+                    elif not sent_feedback and feedback_text:
+                        await client.send_message(bot, feedback_text)
+                        step["sent_feedback"] = feedback_text
+                        sent_feedback = True
+                    else:
+                        break
+                return {"ok": True, "steps": steps}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=180)) or {
+                "ok": False, "error": "порожній результат", "steps": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "steps": []}
+
+    # ---- підписки акаунта (перегляд + прогрів випадковими каналами) ----
+    @classmethod
+    def list_dialogs_sync(cls, account) -> dict:
+        """Список діалогів акаунта (канали/групи/приват) — для перевірки «прогрітості»."""
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "dialogs": []}
+                out = []
+                async for d in client.iter_dialogs(limit=200):
+                    kind = "канал" if d.is_channel else ("група" if d.is_group else "приват")
+                    out.append({
+                        "kind": kind, "name": d.name,
+                        "username": getattr(d.entity, "username", None),
+                        "id": d.id,
+                    })
+                return {"ok": True, "dialogs": out}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "ok": False, "error": "порожній результат", "dialogs": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "dialogs": []}
+
+    @classmethod
+    def get_recent_messages_sync(cls, account, peer, limit: int = 20) -> dict:
+        """Останні повідомлення з одним діалогом (peer — username/int id, напр. 777000 —
+        службовий чат «Telegram», де приходять коди входу для авторизації в іншому клієнті)."""
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "messages": []}
+                entity = await client.get_entity(peer)
+                out = []
+                async for m in client.iter_messages(entity, limit=limit):
+                    out.append({
+                        "id": m.id, "out": bool(m.out), "text": m.text or "",
+                        "date": m.date.isoformat() if m.date else None,
+                    })
+                return {"ok": True, "messages": out}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}",
+                        "messages": []}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=30)) or {
+                "ok": False, "error": "порожній результат", "messages": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "messages": []}
+
+    @classmethod
+    def join_channels_sync(cls, account, handles: list) -> dict:
+        """Підписати акаунт на список каналів (@handle або t.me/handle), з паузою між ними.
+
+        Для «прогріву» нового/обмеженого акаунта — Telegram довіряє акаунтам
+        зі звичайною активністю (підписки, читання) більше, ніж голим сесіям.
+        """
+        import random as _random
+
+        async def _run():
+            from telethon.errors import (ChannelPrivateError, FloodWaitError,
+                                        UsernameInvalidError, UsernameNotOccupiedError)
+            from telethon.tl.functions.channels import JoinChannelRequest
+
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            joined, failed = [], []
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований",
+                            "joined": [], "failed": []}
+                for handle in handles:
+                    clean = handle.strip().lstrip("@").replace("https://t.me/", "").strip("/")
+                    if not clean:
+                        continue
+                    try:
+                        entity = await client.get_entity(clean)
+                        await client(JoinChannelRequest(entity))
+                        joined.append(clean)
+                    except FloodWaitError as e:
+                        failed.append(f"{clean}: flood-wait {e.seconds}с")
+                        break  # решту цього разу не пробуємо — акаунт і так у cooldown
+                    except (ChannelPrivateError, UsernameInvalidError,
+                           UsernameNotOccupiedError) as e:
+                        failed.append(f"{clean}: {type(e).__name__}")
+                    except Exception as e:  # noqa: BLE001
+                        failed.append(f"{clean}: {type(e).__name__}: {str(e)[:80]}")
+                    await asyncio.sleep(_random.uniform(3, 8))
+                return {"ok": True, "joined": joined, "failed": failed}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=300)) or {
+                "ok": False, "error": "порожній результат", "joined": [], "failed": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}",
+                    "joined": [], "failed": []}
+
+    # ---- завести нового бота через @BotFather (/newbot) ----
+    @classmethod
+    def create_bot_via_botfather_sync(cls, account, name: str, username: str,
+                                      photo_bytes: Optional[bytes] = None) -> dict:
+        """/newbot -> назва -> username -> токен. За наявності фото — /setuserpic."""
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                bot = await client.get_entity("BotFather")
+
+                await client.send_message(bot, "/newbot")
+                msg = await _wait_reply(client, bot, 0, "")
+                if msg is None:
+                    return {"ok": False, "error": "BotFather не відповів на /newbot"}
+
+                await client.send_message(bot, name)
+                msg2 = await _wait_reply(client, bot, msg.id, msg.text or "")
+                if msg2 is None:
+                    return {"ok": False, "error": "BotFather не відповів на назву",
+                            "detail": (msg.text or "")[:300]}
+
+                await client.send_message(bot, username)
+                msg3 = await _wait_reply(client, bot, msg2.id, msg2.text or "", timeout=20)
+                if msg3 is None:
+                    return {"ok": False, "error": "BotFather не відповів на username",
+                            "detail": (msg2.text or "")[:300]}
+
+                text = msg3.text or ""
+                m = re.search(r"\d{6,}:[A-Za-z0-9_-]{30,}", text)
+                if not m:
+                    return {"ok": False, "error": "не вдалось знайти токен у відповіді",
+                            "detail": text[:400]}
+                token = m.group(0)
+
+                photo_ok = None
+                photo_error = None
+                if photo_bytes:
+                    photo_res = await cls._set_bot_photo(client, bot, msg3, username, photo_bytes)
+                    photo_ok = photo_res.get("ok")
+                    photo_error = photo_res.get("error")
+
+                return {"ok": True, "token": token, "username": username,
+                        "photo_ok": photo_ok, "photo_error": photo_error}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=120)) or {
+                "ok": False, "error": "порожній результат"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # ---- синхронізація списку ботів акаунта через @BotFather (/token) ----
+    @classmethod
+    def sync_bots_via_botfather_sync(cls, account) -> dict:
+        """/token показує кнопки з усіма ботами акаунта; клік на кожну — видає токен.
+
+        Після кожного кліку список кнопок «з'їдається» відповіддю з токеном,
+        тож перед наступним ботом шлемо /token знову.
+        """
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований", "bots": []}
+                bot = await client.get_entity("BotFather")
+
+                await client.send_message(bot, "/token")
+                msg = await _wait_reply(client, bot, 0, "")
+                if msg is None:
+                    return {"ok": False, "error": "BotFather не відповів на /token", "bots": []}
+
+                usernames = [b.text.lstrip("@") for row in (msg.buttons or []) for b in row
+                            if b.text]
+                found = []
+                for uname in usernames:
+                    clicked = False
+                    for row in msg.buttons or []:
+                        for b in row:
+                            if b.text.lstrip("@") == uname:
+                                await msg.click(text=b.text)
+                                clicked = True
+                                break
+                        if clicked:
+                            break
+                    if not clicked:
+                        continue
+                    reply = await _wait_reply(client, bot, msg.id, msg.text or "")
+                    token = None
+                    if reply and reply.text:
+                        m = re.search(r"\d{6,}:[A-Za-z0-9_-]{30,}", reply.text)
+                        token = m.group(0) if m else None
+                    display_name = ""
+                    try:
+                        ent = await client.get_entity(uname)
+                        display_name = getattr(ent, "first_name", "") or ""
+                    except Exception:
+                        pass
+                    found.append({"username": uname, "token": token, "name": display_name})
+
+                    await client.send_message(bot, "/token")
+                    last_id = reply.id if reply else msg.id
+                    last_text = reply.text if reply else (msg.text or "")
+                    msg2 = await _wait_reply(client, bot, last_id, last_text)
+                    if msg2 is None:
+                        break
+                    msg = msg2
+
+                return {"ok": True, "bots": found}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=180)) or {
+                "ok": False, "error": "порожній результат", "bots": []}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}", "bots": []}
+
+    # ---- редагування вже заведеного бота: назва (/setname), аватарка (/setuserpic) ----
+    @classmethod
+    def set_bot_name_sync(cls, account, username: str, new_name: str) -> dict:
+        async def _wait_reply(client, bot, after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                bot = await client.get_entity("BotFather")
+                await client.send_message(bot, "/setname")
+                msg = await _wait_reply(client, bot, 0, "")
+                if msg is None or not msg.buttons:
+                    return {"ok": False, "error": "BotFather не показав список ботів"}
+                clicked = False
+                for row in msg.buttons:
+                    for b in row:
+                        if username.lower() in (b.text or "").lower():
+                            await msg.click(text=b.text)
+                            clicked = True
+                            break
+                    if clicked:
+                        break
+                if not clicked:
+                    return {"ok": False, "error": f"бот @{username} не знайдений у списку BotFather"}
+                msg2 = await _wait_reply(client, bot, msg.id, msg.text or "")
+                if msg2 is None:
+                    return {"ok": False, "error": "BotFather не відповів після вибору бота"}
+                await client.send_message(bot, new_name)
+                msg3 = await _wait_reply(client, bot, msg2.id, msg2.text or "")
+                if msg3 is None:
+                    return {"ok": False, "error": "BotFather не підтвердив нову назву"}
+                text = msg3.text or ""
+                return {"ok": "success" in text.lower(), "detail": text[:300]}
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "ok": False, "error": "порожній результат"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    @classmethod
+    def set_bot_photo_sync(cls, account, username: str, photo_bytes: bytes) -> dict:
+        from types import SimpleNamespace
+
+        async def _run():
+            client = cls._client(account)
+            await asyncio.wait_for(client.connect(), timeout=25)
+            try:
+                if not await client.is_user_authorized():
+                    return {"ok": False, "error": "акаунт не авторизований"}
+                bot = await client.get_entity("BotFather")
+                return await cls._set_bot_photo(client, bot, SimpleNamespace(id=0, text=""),
+                                                username, photo_bytes)
+            finally:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+        cls._prime_proxy(account)
+        try:
+            return run_async(asyncio.wait_for(_run(), timeout=60)) or {
+                "ok": False, "error": "порожній результат"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    @classmethod
+    async def _set_bot_photo(cls, client, bot, last_msg, username: str, photo_bytes: bytes) -> dict:
+        import io
+
+        async def _wait_reply(after_id, after_text, timeout=15.0, interval=0.5):
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                await asyncio.sleep(interval)
+                incoming = [m for m in await client.get_messages(bot, limit=5) if not m.out]
+                if not incoming:
+                    continue
+                newest = incoming[0]
+                if newest.id != after_id or (newest.text or "") != after_text:
+                    return newest
+            return None
+
+        try:
+            await client.send_message(bot, "/setuserpic")
+            pm = await _wait_reply(last_msg.id, last_msg.text or "")
+            if pm is None or not pm.buttons:
+                return {"ok": False, "error": "BotFather не показав список ботів на /setuserpic"}
+            clicked = False
+            for row in pm.buttons:
+                for b in row:
+                    if username.lower() in (b.text or "").lower():
+                        await pm.click(text=b.text)
+                        clicked = True
+                        break
+                if clicked:
+                    break
+            if not clicked:
+                return {"ok": False, "error": f"бот @{username} не знайдений у списку BotFather"}
+            pm2 = await _wait_reply(pm.id, pm.text or "")
+            if pm2 is None:
+                return {"ok": False, "error": "BotFather не відповів після вибору бота"}
+            photo_file = io.BytesIO(photo_bytes)
+            # Без .name Telethon не бачить розширення й шле як файл ("unnamed") —
+            # BotFather вимагає саме "Photo", інакше просить надіслати ще раз.
+            photo_file.name = "photo.jpg"
+            await client.send_file(bot, photo_file, force_document=False)
+            pm3 = await _wait_reply(pm2.id, pm2.text or "", timeout=20)
+            if pm3 is None:
+                return {"ok": False, "error": "BotFather не підтвердив отримання фото"}
+            text = pm3.text or ""
+            if "success" in text.lower():
+                return {"ok": True}
+            return {"ok": False, "error": "BotFather відхилив фото", "detail": text[:300]}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    @classmethod
+    async def get_channel_meta(cls, account, handle: str) -> dict:
+        async def fn(client):
+            entity = int(handle) if str(handle).lstrip("-").isdigit() else handle
+            ent = await client.get_entity(entity)
+            full = None
+            try:
+                from telethon.tl.functions.channels import GetFullChannelRequest
+                full = await client(GetFullChannelRequest(ent))
+            except Exception:
+                pass
+            return {
+                "tg_id": getattr(ent, "id", None),
+                "username": getattr(ent, "username", None),
+                "title": getattr(ent, "title", None),
+                "description": getattr(full.full_chat, "about", "") if full else "",
+                "subscribers": getattr(full.full_chat, "participants_count", 0) if full else 0,
+            }
+        return await cls._with_client(account, fn)
