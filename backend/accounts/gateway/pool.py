@@ -77,14 +77,16 @@ class AccountPool:
             if not connection.in_atomic_block:
                 close_old_connections()
         while True:
-            await sync_to_async(_tidy)()
+            # спершу пауза: одразу після старту нікого не лагодимо, реактивний
+            # ремонт (після транспортних збоїв) і так іде через чергу
             interval = await sync_to_async(_setting_int)("gateway_repair_interval_sec", 600)
+            await asyncio.sleep(interval)
+            await sync_to_async(_tidy)()
             try:
                 for account_id in await sync_to_async(rp.due_for_repair)():
                     self.schedule_repair(account_id)
             except Exception as e:  # noqa: BLE001
                 logger.exception("repair-scheduler: %r", e)
-            await asyncio.sleep(interval)
 
     async def _idle_worker(self):
         """gateway_idle_disconnect_sec > 0 → відключати клієнтів, що мовчать

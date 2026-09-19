@@ -28,8 +28,9 @@ PROACTIVE_BATCH = 5
 
 def due_for_repair() -> list[int]:
     """Кому час: (а) cooldown із ≥ repair_after транспортних збоїв; (б) needs_proxy
-    раз на годину — раптом провайдер повернув гео; (в) профілактика: ready без
-    успішної операції понад 4 год, по PROACTIVE_BATCH за тик."""
+    раз на годину — раптом провайдер повернув гео; (в) профілактика (Setting
+    gateway_repair_proactive=1): ready без успішної операції понад 4 год, по
+    PROACTIVE_BATCH за тик."""
     from accounts.models import TelegramAccount as A
     from analysis.models import Setting
     try:
@@ -43,10 +44,13 @@ def due_for_repair() -> list[int]:
     ids += list(base.filter(state=A.STATE_NEEDS_PROXY,
                             updated_at__lt=now - NEEDS_PROXY_RETRY)
                 .values_list("id", flat=True))
-    ids += list(base.filter(state=A.STATE_READY)
-                .filter(Q(last_ok_at__isnull=True) | Q(last_ok_at__lt=now - PROACTIVE_AFTER))
-                .order_by("last_ok_at")[:PROACTIVE_BATCH]
-                .values_list("id", flat=True))
+    # профілактика — лише за явним дозволом оператора: вона ЗАХОДИТЬ у Telegram
+    # реальними сесіями, і на дев-стеку з копією прод-акаунтів це небезпечно
+    if Setting.get("gateway_repair_proactive", "0") == "1":
+        ids += list(base.filter(state=A.STATE_READY)
+                    .filter(Q(last_ok_at__isnull=True) | Q(last_ok_at__lt=now - PROACTIVE_AFTER))
+                    .order_by("last_ok_at")[:PROACTIVE_BATCH]
+                    .values_list("id", flat=True))
     return list(dict.fromkeys(ids))
 
 

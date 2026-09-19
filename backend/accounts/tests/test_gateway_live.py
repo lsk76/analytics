@@ -267,10 +267,15 @@ def test_repair_fails_to_needs_proxy(acc, fake, monkeypatch):
 
 def test_due_for_repair(acc):
     from accounts.gateway import repair as rp
+    from analysis.models import Setting
     acc.state, acc.transport_failures = "cooldown", 3
     acc.save()
     assert rp.due_for_repair() == [acc.id]
     acc.state, acc.transport_failures = "ready", 0
+    acc.save()
+    assert rp.due_for_repair() == []                       # профілактика вимкнена
+    Setting.objects.create(key="gateway_repair_proactive", value="1")
+    assert rp.due_for_repair() == [acc.id]                 # last_ok_at порожній
     acc.last_ok_at = timezone.now()
     acc.save()
     assert rp.due_for_repair() == []

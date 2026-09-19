@@ -219,7 +219,11 @@ Cooldown-константи — у `Setting` (`gateway_cooldown_base_sec`, `gate
 
 **Локальна інтеграція (дев-стек):**
 1. `docker compose up tg-gateway`, у дев-БД лишити 3–5 реальних акаунтів з
-   проксі (решту `is_active=False`).
+   проксі (решту `is_active=False`). **Дев-БД — копія прод-акаунтів:** будь-який
+   вхід у Telegram з локалі паралельно з продом ризикує AuthKeyDuplicated, тож
+   спершу вибрати акаунти, яких прод не використовує. Профілактичний ремонт
+   (`gateway_repair_proactive`) за замовчуванням вимкнено саме тому; на проді
+   увімкнути після cutover.
 2. `worker-info-collect` по 10 Telegram-джерелах, `tgs-stream` по 5 чатах,
    `publish` у тестовий канал.
 3. Сценарії руками: зупинити gateway під час збору (споживачі → `RateLimited`,

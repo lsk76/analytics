@@ -27,6 +27,7 @@ x-worker: &worker
     # set_default_verify_paths() на спільному SSLContext → гонка двох потоків
     # у libcrypto і segfault (падав worker-info-screen: 3 запити паралельно).
     SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    TG_GATEWAY_URL: http://tg-gateway:8010
   depends_on:
     db:
       condition: service_healthy
@@ -64,6 +65,7 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      TG_GATEWAY_URL: http://tg-gateway:8010
       DJANGO_DEBUG: "false"
     command: >
       sh -c "python manage.py collectstatic --noinput &&
@@ -91,6 +93,7 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      TG_GATEWAY_URL: http://tg-gateway:8010
       DJANGO_DEBUG: "false"
     command: >
       python manage.py run_mcp_server --host 0.0.0.0 --port 8765
@@ -129,6 +132,20 @@ services:
   worker-warm-up:          { <<: *worker, command: python manage.py run_worker --stage warm_up --interval 60 }
 
   # --- proxy healthcheck worker (accounts.Proxy: автоперевірка + авторемонт sticky-сесій) --
+  # --- tg-gateway: ЄДИНИЙ процес із Telethon (docs/tg-gateway-plan.md) ------
+  # Усі споживачі ходять сюди по HTTP у внутрішній мережі; без ports назовні.
+  tg-gateway:
+    <<: *worker
+    command: python manage.py run_tg_gateway
+    expose: ["8010"]
+    stop_grace_period: 40s
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   worker-proxy-health:     { <<: *worker, command: python manage.py run_worker --stage proxy_healthcheck --interval 600 }
 
   # --- spam-status worker (accounts.TelegramAccount: обмеження через @SpamBot) --
