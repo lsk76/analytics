@@ -75,9 +75,17 @@ class McpClient(models.Model):
     """OAuth-клієнт (реєструється сам за RFC 7591, або заводиться руками)."""
 
     client_id = models.CharField(max_length=64, unique=True, verbose_name="client_id")
-    client_secret_hash = models.CharField(
-        max_length=64, blank=True, verbose_name="Хеш client_secret",
+    # УВАГА: саме ЗНАЧЕННЯ, а не хеш. SDK звіряє секрет прямим порівнянням із
+    # тим, що поверне провайдер (`ClientAuthenticator`), тож хеша там замало —
+    # із ним автентифікація клієнта падає в 401 на /token.
+    # Ризик обмежений: це облікові дані ЗАСТОСУНКУ, не людини. Самим секретом
+    # нічого не отримати — потрібен ще код авторизації (тобто згода людини) або
+    # refresh-токен, а ті зберігаються хешами.
+    client_secret = models.CharField(
+        max_length=200, blank=True, verbose_name="client_secret",
         help_text="Порожньо — публічний клієнт (PKCE без секрету).")
+    client_secret_hash = models.CharField(
+        max_length=64, blank=True, verbose_name="Хеш client_secret (легасі)")
     name = models.CharField(max_length=200, blank=True, verbose_name="Назва")
     redirect_uris = models.JSONField(default=list, verbose_name="Redirect URI")
     scope = models.CharField(max_length=200, blank=True, verbose_name="Запитані скоупи")
@@ -91,9 +99,9 @@ class McpClient(models.Model):
         ordering = ["-created_at"]
 
     def check_secret(self, secret: str) -> bool:
-        if not self.client_secret_hash:
-            return True                      # публічний клієнт
-        return secrets.compare_digest(self.client_secret_hash, sha256(secret or ""))
+        if not self.client_secret:
+            return True                      # публічний клієнт (PKCE)
+        return secrets.compare_digest(self.client_secret, secret or "")
 
     def __str__(self):
         return self.name or self.client_id

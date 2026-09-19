@@ -32,15 +32,21 @@ def consent_url(key: str) -> str:
 
 
 def _client_to_sdk(row: McpClient) -> OAuthClientInformationFull:
+    """Рядок БД → модель SDK.
+
+    `client_secret` віддаємо як є: SDK звіряє його прямим порівнянням у
+    `ClientAuthenticator`. Спроба віддати None при виданому секреті дає
+    401 «registered for secret-based authentication but has no stored secret».
+    """
     return OAuthClientInformationFull(
         client_id=row.client_id,
-        client_secret=None,                      # секрет назовні не віддаємо
+        client_secret=row.client_secret or None,
         client_name=row.name or row.client_id,
         redirect_uris=row.redirect_uris or [],
         grant_types=row.grant_types or ["authorization_code", "refresh_token"],
         response_types=["code"],
         scope=row.scope or "mcp:read",
-        token_endpoint_auth_method="none" if not row.client_secret_hash else "client_secret_post",
+        token_endpoint_auth_method="client_secret_post" if row.client_secret else "none",
     )
 
 
@@ -62,7 +68,7 @@ class DjangoOAuthProvider(OAuthAuthorizationServerProvider):
         McpClient.objects.update_or_create(
             client_id=info.client_id,
             defaults={
-                "client_secret_hash": sha256(info.client_secret) if info.client_secret else "",
+                "client_secret": info.client_secret or "",
                 "name": info.client_name or "",
                 "redirect_uris": [str(u) for u in (info.redirect_uris or [])],
                 "scope": info.scope or "",

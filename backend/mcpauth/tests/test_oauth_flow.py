@@ -220,3 +220,69 @@ def test_async_wrappers_delegate_to_the_sync_layer(monkeypatch):
     monkeypatch.setattr(provider, "_load_access", fake_load)
     assert asyncio.run(provider.load_access_token("raw-token")) == "ACCESS"
     assert seen["token"] == "raw-token"
+
+
+# --- автентифікація клієнта на /token ---------------------------------------
+# Саме тут 2026-09-19 усе падало в 401: провайдер віддавав client_secret=None
+# (бо в базі лежав лише хеш), а SDK звіряє секрет ПРЯМИМ порівнянням. Тести
+# цього не ловили, бо ходили повз HTTP-шар — тепер ловлять.
+
+class FakeRequest:
+    """Мінімум, який потрібен ClientAuthenticator: form() і headers."""
+
+    def __init__(self, form, headers=None):
+        self._form, self.headers = form, headers or {}
+
+    async def form(self):
+        return self._form
+
+
+def _authenticate(form):
+    """Через async_to_sync, а не asyncio.run.
+
+    sync_to_async(thread_sensitive=True) повертає виконання в ПОТІК, що кликав,
+    лише коли цикл подій запущено через async_to_sync. З asyncio.run ORM іде в
+    окремий потік із власним з'єднанням і не бачить транзакції тесту —
+    провайдер відповідав би «Invalid client_id» на щойно створеного клієнта.
+    """
+    from asgiref.sync import async_to_sync
+    from mcp.server.auth.middleware.client_auth import ClientAuthenticator
+
+    auth = ClientAuthenticator(DjangoOAuthProvider())
+    return async_to_sync(auth.authenticate_request)(FakeRequest(form))
+
+
+@pytest.mark.django_db
+def test_token_endpoint_accepts_the_secret_it_issued():
+    """Клієнт, якому SDK видав секрет, має пройти автентифікацію з ним."""
+    McpClient.objects.create(client_id="cli-secret", client_secret="s3cr3t",
+                             redirect_uris=["http://127.0.0.1/cb"],
+                             grant_types=["authorization_code"])
+    client = _authenticate({"client_id": "cli-secret", "client_secret": "s3cr3t"})
+    assert client.client_id == "cli-secret"
+
+    from mcp.server.auth.middleware.client_auth import AuthenticationError
+    with pytest.raises(AuthenticationError):
+        _authenticate({"client_id": "cli-secret", "client_secret": "чужий"})
+
+
+@pytest.mark.django_db
+def test_public_client_authenticates_without_secret():
+    """Клієнт без секрета (PKCE) проходить без нього — і секрет не вимагається."""
+    McpClient.objects.create(client_id="cli-public", client_secret="",
+                             redirect_uris=["http://127.0.0.1/cb"],
+                             grant_types=["authorization_code"])
+    assert _authenticate({"client_id": "cli-public"}).client_id == "cli-public"
+
+
+@pytest.mark.django_db
+def test_registration_stores_secret_in_a_verifiable_form(provider):
+    """Те, що SDK видав клієнтові при реєстрації, має лишитись придатним до звірки."""
+    info = OAuthClientInformationFull(
+        client_id="cli-reg", client_secret="issued-by-sdk", client_name="X",
+        redirect_uris=["http://127.0.0.1/cb"], grant_types=["authorization_code"],
+        response_types=["code"], scope="mcp:read")
+    provider.register_client(info)
+    back = provider.get_client("cli-reg")
+    assert back.client_secret == "issued-by-sdk"
+    assert back.token_endpoint_auth_method == "client_secret_post"
