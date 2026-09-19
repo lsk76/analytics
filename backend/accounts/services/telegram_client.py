@@ -227,8 +227,32 @@ class TelegramUserClient:
         await client.connect()
         try:
             return await fn(client)
+        except (AuthKeyUnregisteredError, SessionRevokedError,
+                UserDeactivatedError, UserDeactivatedBanError) as e:
+            # Сесію вбито (власник розлогінив усі пристрої / Telegram відкликав).
+            # Без цього рядка акаунт лишався is_authenticated=True і пул давав
+            # його знову й знову: 7 виборчих джерел довбали мертві сесії
+            # добу й не читались узагалі.
+            await cls._mark_deauthorized(account, type(e).__name__)
+            raise
         finally:
             await client.disconnect()
+
+    @classmethod
+    async def _mark_deauthorized(cls, account, reason: str) -> None:
+        from asgiref.sync import sync_to_async
+
+        @sync_to_async
+        def _save():
+            from accounts.models import TelegramAccount
+            TelegramAccount.objects.filter(pk=account.pk).update(is_authenticated=False)
+
+        try:
+            await _save()
+            logger.warning("акаунт #%s: %s — знімаю авторизацію, пул його більше "
+                           "не видасть (потрібен повторний вхід)", account.pk, reason)
+        except Exception as e:  # noqa: BLE001 — облік не має валити виклик
+            logger.warning("акаунт #%s: не зміг зняти авторизацію: %r", account.pk, e)
 
     @classmethod
     async def get_message_date(cls, account, url: str):
