@@ -25,7 +25,10 @@ def _proxy_cell(a):
     return f"#{p.id}{fmt.flag(p.is_working and p.is_active, '', '✗')}"
 
 
-@tool("accounts_list", group="accounts")
+@tool("accounts_list", group="accounts", params={
+      "query": "Частина назви, номера або тега акаунта. Порожньо = усі видимі.",
+      "problems_only": "true — лише ті, що потребують уваги: не авторизовані, обмежені SpamBot, без проксі або з мертвою проксі.",
+      "limit": "Скільки акаунтів показати."})
 def accounts_list(query: str = "", problems_only: bool = False, limit: int = 100):
     """Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.
 
@@ -62,7 +65,7 @@ def accounts_list(query: str = "", problems_only: bool = False, limit: int = 100
             + f"\n\nпоказано {len(rows)} із {total} акаунтів у базі")
 
 
-@tool("account_show", group="accounts")
+@tool("account_show", group="accounts", params={"ref": 'Акаунт: числовий id, номер телефону або частина назви. Для групових дій — ключові слова: all (усі), active (активні), problem (не авторизовані, обмежені SpamBot, без проксі або з мертвою).'})
 def account_show(ref: str):
     """Картка акаунта: конфіг, проксі, що він обслуговує, останні завдання й боти."""
     a = common.resolve_account(ref)
@@ -120,7 +123,9 @@ def account_show(ref: str):
     return fmt.joinsec(*parts)
 
 
-@tool("account_check", group="accounts")
+@tool("account_check", group="accounts", params={
+      "ref": 'Акаунт: числовий id, номер телефону або частина назви. Для групових дій — ключові слова: all (усі), active (активні), problem (не авторизовані, обмежені SpamBot, без проксі або з мертвою).',
+      "pause": "Пауза між акаунтами в секундах, щоб не бити всі одночасно. Перевірка одного акаунта — 5-20 с, тож групу більшу за 12 інструмент не візьме."})
 def account_check(ref: str, pause: float = 2.0):
     """Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).
 
@@ -148,7 +153,9 @@ def account_check(ref: str, pause: float = 2.0):
             + f"\n\nживих {alive} із {len(accounts)}")
 
 
-@tool("account_spam_check", group="accounts", mutates=True)
+@tool("account_spam_check", group="accounts", mutates=True, params={
+      "ref": 'Акаунт: числовий id, номер телефону або частина назви. Для групових дій — ключові слова: all (усі), active (активні), problem (не авторизовані, обмежені SpamBot, без проксі або з мертвою).',
+      "pause": "Пауза між акаунтами в секундах. Це НАДСИЛАННЯ повідомлення боту @SpamBot від імені акаунта, тож група обмежена 15."})
 def account_spam_check(ref: str, pause: float = 2.0):
     """Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.
 
@@ -174,7 +181,12 @@ def account_spam_check(ref: str, pause: float = 2.0):
     return fmt.table(["id", "назва", "статус", "відповідь SpamBot"], rows)
 
 
-@tool("account_update", group="accounts", mutates=True)
+@tool("account_update", group="accounts", mutates=True, params={
+      "ref": 'Акаунт: числовий id, номер телефону або частина назви. Для групових дій — ключові слова: all (усі), active (активні), problem (не авторизовані, обмежені SpamBot, без проксі або з мертвою).',
+      "is_active": "Увімкнути/вимкнути акаунт для роботи стадій.",
+      "proxy": "Проксі: числовий id або частина рядка; '-' щоб відвʼязати.",
+      "add_tags": "Теги через кому — додати (створюються за потреби).",
+      "remove_tags": "Теги через кому — зняти."})
 def account_update(ref: str, is_active: bool = None, proxy: str = "",
                    add_tags: str = "", remove_tags: str = ""):
     """Змінити акаунт: активність, проксі, теги (теги — через кому).
@@ -209,7 +221,9 @@ def account_update(ref: str, is_active: bool = None, proxy: str = "",
     return f"#{a.id} {a.name}: " + "; ".join(changed)
 
 
-@tool("account_warm_up", group="accounts", mutates=True)
+@tool("account_warm_up", group="accounts", mutates=True, params={
+      "ref": 'Акаунт: числовий id, номер телефону або частина назви. Для групових дій — ключові слова: all (усі), active (активні), problem (не авторизовані, обмежені SpamBot, без проксі або з мертвою).',
+      "channels": "На скільки каналів підписати. 0 = випадково 5-10."})
 def account_warm_up(ref: str, channels: int = 0):
     """Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.
 
@@ -232,7 +246,10 @@ def account_warm_up(ref: str, channels: int = 0):
             + "\nПрогрес: account_jobs kind=warm_up")
 
 
-@tool("account_dialogs", group="accounts")
+@tool("account_dialogs", group="accounts", params={
+      "ref": "Акаунт: id, номер або частина назви (лише один, не група).",
+      "limit": "Скільки діалогів показати.",
+      "kind": "Фільтр типу: канал | група | приват. Порожньо = усі."})
 def account_dialogs(ref: str, limit: int = 40, kind: str = ""):
     """Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».
 
@@ -255,7 +272,10 @@ def account_dialogs(ref: str, limit: int = 40, kind: str = ""):
             + "\n\n" + fmt.table(["тип", "назва", "username"], rows))
 
 
-@tool("account_jobs", group="accounts")
+@tool("account_jobs", group="accounts", params={
+      "kind": "Черга: all | warm_up (прогрів) | test_bot (тестовий прогін бота).",
+      "status": "Статус завдання. Прогрів: pending | running | done | failed. Тестовий прогін ще має queued і cancelled. Порожньо = усі.",
+      "limit": "Скільки завдань показати."})
 def account_jobs(kind: str = "all", status: str = "", limit: int = 20):
     """Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота)."""
     parts = []
@@ -283,7 +303,9 @@ def account_jobs(kind: str = "all", status: str = "", limit: int = 20):
     return fmt.joinsec(*parts)
 
 
-@tool("proxies_list", group="accounts")
+@tool("proxies_list", group="accounts", params={
+      "problems_only": "true — лише мертві або зі збоями.",
+      "limit": "Скільки проксі показати."})
 def proxies_list(problems_only: bool = False, limit: int = 60):
     """Пул проксі: хто живий, скільки збоїв, кому призначені."""
     qs = (Proxy.objects.annotate(n_acc=Count("accounts"))
@@ -300,7 +322,9 @@ def proxies_list(problems_only: bool = False, limit: int = 60):
                       rows) + f"\n\nвільних (без акаунтів): {free}")
 
 
-@tool("proxy_check", group="accounts", mutates=True)
+@tool("proxy_check", group="accounts", mutates=True, params={
+      "ref": "Проксі: числовий id або частина рядка; ключові слова all (усі активні) чи broken (лише мертві).",
+      "repair": "true — при збої спробувати нову sticky-сесію і зберегти її. false — лише діагноз, але результат перевірки (жива/мертва, лічильник збоїв) усе одно записується, тому інструмент позначений як такий, що змінює стан."})
 def proxy_check(ref: str, repair: bool = True):
     """Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).
 

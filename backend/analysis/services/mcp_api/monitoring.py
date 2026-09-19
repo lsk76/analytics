@@ -13,7 +13,9 @@ PIPE_SHORT = {"events": "події", "monitor": "критика", "research": "
               "infospace": "інформпр.", "tgsearch": "TG-пошук"}
 
 
-@tool("tasks_list", group="monitoring")
+@tool("tasks_list", group="monitoring", params={
+      "pipeline": 'Конвеєр: events | monitor | research | infospace | tgsearch. Порожньо = усі.',
+      "active_only": "true — лише активні задачі."})
 def tasks_list(pipeline: str = "", active_only: bool = False):
     """Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено."""
     qs = common.scope_tasks(AnalysisTask.objects).order_by("id")
@@ -52,7 +54,7 @@ def tasks_list(pipeline: str = "", active_only: bool = False):
                       "постів", "подій", "ост. матеріал"], rows)
 
 
-@tool("task_show", group="monitoring")
+@tool("task_show", group="monitoring", params={"ref": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».'})
 def task_show(ref: str):
     """Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори."""
     t = common.resolve_task(ref)
@@ -122,7 +124,10 @@ def task_show(ref: str):
     return fmt.joinsec(*parts)
 
 
-@tool("runs_list", group="monitoring")
+@tool("runs_list", group="monitoring", params={
+      "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "status": 'Статус збору: pending | collecting | collected | awaiting_agent | done | failed | cancelled. Порожньо = усі.',
+      "limit": "Скільки зборів показати."})
 def runs_list(task: str = "", status: str = "", limit: int = 15):
     """Збори (ResearchRun): статус, період, прогрес чанків."""
     qs = common.scope_by_task(
@@ -146,7 +151,8 @@ def runs_list(task: str = "", status: str = "", limit: int = 15):
                       "постів", "подій", "створено"], rows)
 
 
-@tool("run_show", group="monitoring")
+@tool("run_show", group="monitoring", params={
+      "run_id": "Числовий id збору зі списку runs_list."})
 def run_show(run_id: int):
     """Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»)."""
     r = (common.scope_by_task(ResearchRun.objects.select_related("task"))
@@ -199,7 +205,12 @@ def run_show(run_id: int):
     return fmt.joinsec(*parts)
 
 
-@tool("run_create", group="monitoring", mutates=True)
+@tool("run_create", group="monitoring", mutates=True, params={
+      "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "date_from": "Перший день періоду, формат YYYY-MM-DD (напр. 2026-09-01).",
+      "date_to": "Останній день періоду, YYYY-MM-DD, ВКЛЮЧНО. Межа — 400 днів на один збір.",
+      "chunk_days": "Скільки днів в одному чанку TeleZip. 0 = взяти з налаштувань задачі. ПРЯМИЙ МНОЖНИК ЦІНИ: 1 запит (~$0.10) на чанк, тож 30 днів по дню = $3.00, по 3 дні = $1.00 — але більший чанк ближчий до відлупу.",
+      "title": "Необовʼязкова назва збору для списку."})
 def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
                title: str = ""):
     """Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).
@@ -232,7 +243,9 @@ def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
             + ("\n⚠ 0 нових чанків: період уже покрито попередніми зборами." if not made else ""))
 
 
-@tool("run_cancel", group="monitoring", mutates=True)
+@tool("run_cancel", group="monitoring", mutates=True, params={
+      "run_id": "Числовий id збору.",
+      "drop_pending_chunks": "true — прибрати ще не взяті чанки з черги. Уже зібрані пости лишаються в конвеєрі в будь-якому разі."})
 def run_cancel(run_id: int, drop_pending_chunks: bool = True):
     """Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки."""
     r = common.scope_by_task(ResearchRun.objects).filter(
@@ -248,7 +261,12 @@ def run_cancel(run_id: int, drop_pending_chunks: bool = True):
             "Уже зібрані пости лишились у конвеєрі.")
 
 
-@tool("chats_list", group="monitoring")
+@tool("chats_list", group="monitoring", params={
+      "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "active": "true — лише активні рядки whitelist, false — лише вимкнені, не передавати — усі.",
+      "stream_only": "true — лише чати в режимі стріму (полінг історії).",
+      "problems_only": "true — лише проблемні: без акаунта збору або стрім не оновлювався понад добу.",
+      "limit": "Скільки рядків показати."})
 def chats_list(task: str = "", active: bool = None, stream_only: bool = False,
                problems_only: bool = False, limit: int = 60):
     """Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.
@@ -287,7 +305,13 @@ def chats_list(task: str = "", active: bool = None, stream_only: bool = False,
             + f"\n\nпоказано {len(rows)} із {qs.count()}")
 
 
-@tool("chat_update", group="monitoring", mutates=True)
+@tool("chat_update", group="monitoring", mutates=True, params={
+      "chat": "Рядок whitelist: числовий id із chats_list або @username чату.",
+      "is_active": "Увімкнути/вимкнути чат для наступних зборів (історія лишається).",
+      "stream_enabled": "true — читати чат суцільно (стрім), false — шукати за словами.",
+      "account": "Telegram-акаунт збору: id/номер/назва, або '-' щоб відвʼязати.",
+      "priority": "Менше число = вище в списку.",
+      "forward_media": "Пересилати медіа цього чату в чат медіа задачі."})
 def chat_update(chat: str, is_active: bool = None, stream_enabled: bool = None,
                 account: str = "", priority: int = None, forward_media: bool = None):
     """Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.
@@ -323,7 +347,11 @@ def chat_update(chat: str, is_active: bool = None, stream_enabled: bool = None,
     return f"#{c.id} {c.task.slug}/@{c.channel.username}: " + "; ".join(changed)
 
 
-@tool("sources_list", group="monitoring")
+@tool("sources_list", group="monitoring", params={
+      "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "kind": "Тип джерела: telegram | rss | web | vk. Порожньо = усі.",
+      "problems_only": "true — лише проблемні: збої, підозра на якість або прострочений полінг (рахується тільки серед тих, кого воркер реально бере).",
+      "limit": "Скільки джерел показати."})
 def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
                  limit: int = 60):
     """Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені."""
@@ -369,7 +397,13 @@ def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
     return fmt.joinsec(*parts)
 
 
-@tool("source_update", group="monitoring", mutates=True)
+@tool("source_update", group="monitoring", mutates=True, params={
+      "ref": "Джерело: числовий id, частина URL або назви.",
+      "is_active": "Увімкнути/вимкнути опитування джерела.",
+      "poll_interval_sec": "Інтервал полінгу в секундах (нижня межа 60).",
+      "poll_now": "true — поставити джерело в чергу негайно.",
+      "reset_cursor": "true — забути, докуди вже прочитано, і перечитати заново. Може дати вал постів.",
+      "account": "Telegram-акаунт для полінгу (для kind=telegram): id/номер/назва або '-'."})
 def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = None,
                   poll_now: bool = False, reset_cursor: bool = False,
                   account: str = ""):
@@ -409,7 +443,13 @@ def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = Non
     return f"#{s.id} {s.name}: " + "; ".join(changed)
 
 
-@tool("events_stats", group="monitoring")
+@tool("events_stats", group="monitoring", params={
+      "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "days": "Скільки останніх діб узяти.",
+      "group_by": "Розріз: day | week | month | region | task | tag:<ключ категорії> (напр. tag:importance).",
+      "region": "Назва субʼєкта РФ або її частина (напр. Дагестан).",
+      "limit": "Скільки рядків показати.",
+      "review_status": "Статус аудиту подій: approved (дефолт) | pending | rejected | all."})
 def events_stats(task: str = "", days: int = 14, group_by: str = "day",
                  region: str = "", limit: int = 20, review_status: str = "approved"):
     """Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.
@@ -459,7 +499,9 @@ def events_stats(task: str = "", days: int = 14, group_by: str = "day",
     return fmt.section(head, fmt.table(["період", "подій", "постів", "охоплення"], rows))
 
 
-@tool("channels_find", group="monitoring")
+@tool("channels_find", group="monitoring", params={
+      "query": "@username або частина назви каналу в НАШОМУ довіднику. Пошук у базі TeleZip — це tz_channels.",
+      "limit": "Скільки каналів показати."})
 def channels_find(query: str, limit: int = 20):
     """Знайти канал/чат у довіднику (`Channel`) за username/назвою — id для інших дій."""
     qs = (Channel.objects.filter(Q(username__icontains=query.lstrip("@"))
@@ -472,7 +514,15 @@ def channels_find(query: str, limit: int = 20):
                      rows) if rows else f"каналів за «{query}» немає"
 
 
-@tool("task_update", group="monitoring", mutates=True)
+@tool("task_update", group="monitoring", mutates=True, params={
+      "ref": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "telezip_query": "Новий пошуковий запит задачі. Порожньо = не змінювати; щоб ОЧИСТИТИ запит, передай '-'. Синтаксис — як у tz_find (пробіл = АБО).",
+      "languages": "Мови через кому (ru, uk…). Порожньо = не змінювати.",
+      "unique": "Згортати репости при зборі. Не передавати = не змінювати.",
+      "chunk_days": "Розмір чанка збору в днях. 0 = не змінювати.",
+      "is_active": "Увімкнути/вимкнути задачу. Не передавати = не змінювати.",
+      "min_subscribers": "Відсівати канали, менші за це число підписників. -1 = не змінювати, 0 = вимкнути фільтр.",
+      "llm_model": "Перевизначити модель LLM для задачі. Порожньо = не змінювати."})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
                 min_subscribers: int = -1, llm_model: str = ""):
@@ -486,8 +536,11 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
     changed = []
     if telezip_query:
         old = t.telezip_query
-        t.telezip_query = telezip_query
-        changed.append(f"запит: було «{fmt.trunc(old, 160)}»")
+        # порожній рядок означає «не чіпати», тож для очищення потрібен явний
+        # маркер — інакше запит задачі неможливо стерти взагалі
+        t.telezip_query = "" if telezip_query.strip() == "-" else telezip_query
+        changed.append(f"запит: було «{fmt.trunc(old, 160)}»"
+                       + ("; стало ПОРОЖНЬО" if not t.telezip_query else ""))
     if languages:
         t.languages = [x.strip() for x in languages.replace(",", " ").split() if x.strip()]
         changed.append(f"мови={t.languages}")

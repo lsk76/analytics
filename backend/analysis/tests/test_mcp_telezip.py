@@ -178,10 +178,46 @@ def test_tz_find_warns_about_negation_and_star(fake):
 # Описи — це ІНТЕРФЕЙС для моделі: вона бачить лише їх, а синтаксис TeleZip не
 # збігається з очікуваннями (пробіл = АБО). Тому перевіряємо їх як код.
 
-def test_every_telezip_param_is_documented():
+def test_every_param_of_every_tool_is_documented():
+    """Не лише telezip: без опису модель вгадує значення будь-якого аргумента.
+
+    Саме на цьому зловили дірку 2026-09-19 — описи були тільки в tz_*, а
+    операційні інструменти (акаунти, збори, джерела) лишались голими.
+    """
     missing = [(m["name"], p["name"]) for m in mcp_api.manifest()
-               if m["group"] == "telezip" for p in m["params"] if not p["doc"]]
-    assert not missing, f"параметри без опису (модель їх вгадуватиме): {missing}"
+               for p in m["params"] if not p["doc"]]
+    assert not missing, f"параметри без опису: {missing}"
+
+
+def test_enumerated_params_list_their_allowed_values():
+    """Там, де значення обмежене набором, набір має бути в описі."""
+    by_name = {m["name"]: m for m in mcp_api.manifest()}
+    cases = [("tasks_list", "pipeline", ["events", "monitor", "infospace", "tgsearch"]),
+             ("runs_list", "status", ["collecting", "awaiting_agent", "cancelled"]),
+             ("sources_list", "kind", ["telegram", "rss", "web"]),
+             ("events_stats", "review_status", ["approved", "pending", "rejected", "all"]),
+             ("account_jobs", "kind", ["warm_up", "test_bot"])]
+    for tool, param, values in cases:
+        doc = [p for p in by_name[tool]["params"] if p["name"] == param][0]["doc"]
+        for v in values:
+            assert v in doc, f"{tool}.{param}: у описі немає значення «{v}»"
+
+
+def test_date_params_say_the_format_and_inclusivity():
+    run_create = {p["name"]: p["doc"] for p in
+                  [m for m in mcp_api.manifest() if m["name"] == "run_create"][0]["params"]}
+    assert "YYYY-MM-DD" in run_create["date_from"]
+    assert "ВКЛЮЧНО" in run_create["date_to"]
+
+
+def test_descriptions_do_not_mention_removed_tools_or_renamed_params():
+    """Найчастіша гниль у доці: імена, які пережили перейменування."""
+    dead = ["tz_probe", "tz_syntax", "tz_calibrate", "tz_stats(", "tz_search(",
+            "channel_term=", "query=\""]
+    for m in mcp_api.manifest():
+        blob = m["doc"] + " ".join(p["doc"] for p in m["params"])
+        for name in dead:
+            assert name not in blob, f"{m['name']}: згадка неіснуючого «{name}»"
 
 
 def test_tool_description_carries_the_whole_docstring():

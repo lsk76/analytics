@@ -156,7 +156,10 @@ def service_health():
     return fmt.joinsec(*parts)
 
 
-@tool("service_queues", group="service")
+@tool("service_queues", group="service", params={
+      "task": "Задача: id, slug або частина назви. Порожньо = усі видимі.",
+      "stage": "Стадія конвеєра: collected | enriched | preclustered | classified | deduped | mon_collected | mon_filtered | mon_prescreened | tgs_collected | tgs_screened | tgs_tagged | info_collected | info_screened | done | failed. Порожньо = усі непорожні.",
+      "errors": "Скільки прикладів свіжих помилок показати (0 — без них)."})
 def service_queues(task: str = "", stage: str = "", errors: int = 3):
     """Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.
 
@@ -196,7 +199,8 @@ def service_queues(task: str = "", stage: str = "", errors: int = 3):
     return fmt.joinsec(*parts)
 
 
-@tool("settings_list", group="service")
+@tool("settings_list", group="service", params={
+      "prefix": "Показати лише ключі, що містять цей текст."})
 def settings_list(prefix: str = ""):
     """Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою."""
     qs = Setting.objects.all()
@@ -209,7 +213,10 @@ def settings_list(prefix: str = ""):
         if rows else "налаштувань немає"
 
 
-@tool("setting_set", mutates=True, group="service", scope=SCOPE_ADMIN)
+@tool("setting_set", mutates=True, group="service", scope=SCOPE_ADMIN, params={
+      "key": "Ключ налаштування (напр. digest_report_prompt). Неіснуючий буде створено.",
+      "value": "Нове значення. ПОРОЖНЄ = повернутись до дефолту з коду.",
+      "description": "Опис для адмінки. Порожньо = не чіпати наявний."})
 def setting_set(key: str, value: str, description: str = ""):
     """Записати налаштування (`Setting`). Порожнє значення = дефолт із коду."""
     obj, created = Setting.objects.get_or_create(key=key.strip())
@@ -224,7 +231,8 @@ def setting_set(key: str, value: str, description: str = ""):
             f"стало: {fmt.trunc(value, 200) or '(порожньо — дефолт із коду)'}")
 
 
-@tool("publish_status", group="service")
+@tool("publish_status", group="service", params={
+      "limit": "Скільки останніх публікацій показати."})
 def publish_status(limit: int = 10):
     """Профілі публікації + останні публікації подій у Telegram."""
     rows = []
@@ -259,7 +267,19 @@ def publish_status(limit: int = 10):
 def tools_manifest():
     """Список інструментів MCP-шару (назва, група, чи змінює стан, параметри)."""
     from analysis.services.mcp_api.registry import manifest
-    rows = [[m["name"], m["group"], "змінює" if m["mutates"] else "читає",
-             ", ".join(p["name"] for p in m["params"]) or "—",
-             fmt.trunc(m.get("summary") or m["doc"], 70)] for m in manifest()]
-    return fmt.table(["інструмент", "група", "режим", "параметри", "що робить"], rows)
+    # «платне» окремою колонкою: інакше tz_find виглядає як звичайне читання,
+    # хоч кожен його виклик коштує грошей (див. docs/telezip-api.md §4)
+    paid = {"tz_find", "tz_channels", "tz_users"}
+    rows = []
+    for m in manifest():
+        mode = "змінює" if m["mutates"] else "читає"
+        if m["scope"] == "mcp:admin":
+            mode += " (адмін)"
+        rows.append([m["name"], m["group"], mode,
+                     "$0.10" if m["name"] in paid else "",
+                     ", ".join(p["name"] for p in m["params"]) or "—",
+                     fmt.trunc(m.get("summary") or m["doc"], 90)])
+    return (fmt.table(["інструмент", "група", "режим", "ціна виклику",
+                       "параметри", "що робить"], rows)
+            + "\n\nПовний опис інструмента з усіма застереженнями — у його схемі "
+              "(поле description), тут лише перший рядок.")
