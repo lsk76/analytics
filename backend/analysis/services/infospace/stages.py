@@ -105,6 +105,16 @@ def _schedule_rate_limited(source, retry_after):
     source.save(update_fields=["next_poll_at", "locked_at"])
 
 
+def _is_resolve_error(err) -> bool:
+    """«No user has X as username» — це ВИЧЕРПАНИЙ ЛІМІТ РЕЗОЛВУ на акаунті, а
+    не мертвий канал. Перевіряли живим акаунтом: усі шість «ніколи не
+    працювали» каналів існують і відкриваються. Тому джерело треба віддати
+    іншому акаунту, а не довбати тим самим до посиніння (25 джерел так і не
+    зібрали ні разу)."""
+    e = str(err or "")
+    return "as username" in e or "Cannot find any entity" in e
+
+
 def _schedule_fail(source, err):
     source.consecutive_failures = (source.consecutive_failures or 0) + 1
     backoff = source.poll_interval_sec * (2 ** min(source.consecutive_failures, 10))
@@ -112,8 +122,13 @@ def _schedule_fail(source, err):
     source.next_poll_at = djtz.now() + delay
     source.last_error = str(err)[:2000]
     source.locked_at = None
-    source.save(update_fields=["next_poll_at", "last_error",
-                               "consecutive_failures", "locked_at"])
+    fields = ["next_poll_at", "last_error", "consecutive_failures", "locked_at"]
+    if source.tg_account_id and _is_resolve_error(err):
+        logger.info("info_collect: %s — резолв не дався акаунту #%s, відвʼязую",
+                    source.name, source.tg_account_id)
+        source.tg_account = None        # наступний прохід візьме інший акаунт
+        fields.append("tg_account")
+    source.save(update_fields=fields)
 
 
 def _fanout(source, items):
