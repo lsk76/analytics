@@ -62,8 +62,12 @@ def actor() -> "Actor":
 
 
 class Tool:
-    def __init__(self, name, fn, mutates, group, scope=""):
+    def __init__(self, name, fn, mutates, group, scope="", params=None):
         self.name, self.fn, self.mutates, self.group = name, fn, mutates, group
+        # Описи параметрів ідуть у JSON-схему інструмента — це єдине, що модель
+        # бачить про аргумент, окрім його імені й типу. Без них вона вгадує
+        # (і, напр., пише пробіл там, де в TeleZip це АБО, а не І).
+        self.param_docs = dict(params or {})
         # «Що для цього треба мати»: читання — усім, зміни — операторам,
         # небезпечне (налаштування, контейнери, сире API) — лише адмінам.
         self.scope = scope or (SCOPE_WRITE if mutates else SCOPE_READ)
@@ -96,7 +100,7 @@ def readonly() -> bool:
     return os.environ.get("MCP_READONLY", "").strip().lower() in ("1", "true", "yes")
 
 
-def tool(name, *, mutates=False, group="service", scope=""):
+def tool(name, *, mutates=False, group="service", scope="", params=None):
     """Зареєструвати хендлер.
 
     `mutates=True` — інструмент змінює стан сервісу (і потребує mcp:write).
@@ -106,7 +110,7 @@ def tool(name, *, mutates=False, group="service", scope=""):
     def deco(fn):
         if name in TOOLS:
             raise RuntimeError(f"дубль інструмента MCP: {name}")
-        TOOLS[name] = Tool(name, fn, mutates, group, scope)
+        TOOLS[name] = Tool(name, fn, mutates, group, scope, params)
         return fn
     return deco
 
@@ -160,10 +164,15 @@ def manifest() -> list[dict]:
     """Опис інструментів для host-шару (звірка сигнатур у тестах/доках)."""
     return [{
         "name": t.name, "group": t.group, "mutates": t.mutates, "scope": t.scope,
-        "doc": t.doc.split("\n\n")[0],
+        # ПОВНИЙ докстрінг, а не перший абзац: саме він стає описом інструмента
+        # в JSON-схемі, і саме там живуть застереження («пробіл = АБО»), без
+        # яких модель складає хибні запити. `summary` — для компактних таблиць.
+        "doc": t.doc,
+        "summary": t.doc.split("\n\n")[0].replace("\n", " "),
         "params": [
             {"name": p.name,
              "type": _type_name(p.annotation),
+             "doc": t.param_docs.get(p.name, ""),
              "default": None if p.default is inspect.Parameter.empty else p.default,
              "required": p.default is inspect.Parameter.empty}
             for p in t.sig.parameters.values()

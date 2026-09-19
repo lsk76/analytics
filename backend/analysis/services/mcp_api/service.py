@@ -261,5 +261,5 @@ def tools_manifest():
     from analysis.services.mcp_api.registry import manifest
     rows = [[m["name"], m["group"], "змінює" if m["mutates"] else "читає",
              ", ".join(p["name"] for p in m["params"]) or "—",
-             fmt.trunc(m["doc"], 70)] for m in manifest()]
+             fmt.trunc(m.get("summary") or m["doc"], 70)] for m in manifest()]
     return fmt.table(["інструмент", "група", "режим", "параметри", "що робить"], rows)

@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import Annotated
+
+from pydantic import Field
 
 from mcp.server.mcpserver import MCPServer
 
@@ -40,6 +43,8 @@ def _build(spec: dict):
     args = []
     for p in spec["params"]:
         ann = p["type"] if p["type"] in PY_TYPES else "str"
+        if p.get("doc"):
+            ann = f"Annotated[{ann}, Field(description={p['doc']!r})]"
         if p["required"]:
             args.append(f"{p['name']}: {ann}")
         elif p["default"] is None:
@@ -48,7 +53,7 @@ def _build(spec: dict):
             args.append(f"{p['name']}: {ann} = {p['default']!r}")
     src = (f"def {spec['name']}({', '.join(args)}) -> str:\n"
            f"    return _call({spec['name']!r}, dict(locals()))\n")
-    ns = {"_call": _call_tool}
+    ns = {"_call": _call_tool, "Annotated": Annotated, "Field": Field}
     exec(src, ns)  # noqa: S102 — джерело будуємо самі з маніфесту, не з вводу
     return ns[spec["name"]]
 

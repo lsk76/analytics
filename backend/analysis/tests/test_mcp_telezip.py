@@ -276,3 +276,36 @@ def test_tz_syntax_is_offline_and_covers_modes():
     out = mcp_api.call("tz_syntax")
     for mode in ("query", "exact", "regex", "channel_term", "users", "source"):
         assert mode in out
+
+
+# --- контракт описів --------------------------------------------------------
+# Описи — це ІНТЕРФЕЙС для моделі: вона бачить лише їх, а синтаксис TeleZip не
+# збігається з очікуваннями (пробіл = АБО). Тому перевіряємо їх як код.
+
+def test_every_telezip_param_is_documented():
+    missing = [(m["name"], p["name"]) for m in mcp_api.manifest()
+               if m["group"] == "telezip" for p in m["params"] if not p["doc"]]
+    assert not missing, f"параметри без опису (модель їх вгадуватиме): {missing}"
+
+
+def test_tool_description_carries_the_whole_docstring():
+    """У схему має йти ВЕСЬ докстрінг, а не перший абзац: застереження в кінці."""
+    stats = [m for m in mcp_api.manifest() if m["name"] == "tz_stats"][0]
+    assert "ПРОБІЛ" in stats["doc"], "застереження про пробіл=АБО не дійшло до опису"
+    assert stats["summary"] and "\n" not in stats["summary"]
+
+
+def test_query_docs_warn_about_the_or_default():
+    """Найчастіша помилка: пробіл сприймають як І."""
+    for name in ("tz_stats", "tz_search", "tz_calibrate"):
+        spec = [m for m in mcp_api.manifest() if m["name"] == name][0]
+        q = [p for p in spec["params"] if p["name"] == "query"][0]
+        assert "АБО" in q["doc"] and "+" in q["doc"]
+
+
+def test_syntax_reference_covers_all_four_search_modes():
+    out = mcp_api.call("tz_syntax")
+    for mode in ("query", "exact", "regex", "channel_term"):
+        assert mode in out
+    assert "ПРОБІЛ = АБО" in out and "$0.10" in out
+    assert "##" in out            # кластерні макроси

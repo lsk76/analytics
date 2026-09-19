@@ -97,6 +97,8 @@ class Command(BaseCommand):
         args = []
         for p in spec["params"]:
             ann = p["type"] if p["type"] in PY_TYPES else "str"
+            if p.get("doc"):
+                ann = f"Annotated[{ann}, Field(description={p['doc']!r})]"
             if p["required"]:
                 args.append(f"{p['name']}: {ann}")
             elif p["default"] is None:
@@ -105,7 +107,9 @@ class Command(BaseCommand):
                 args.append(f"{p['name']}: {ann} = {p['default']!r}")
         src = (f"async def {spec['name']}({', '.join(args)}) -> str:\n"
                f"    return await _run({spec['name']!r}, dict(locals()))\n")
-        ns = {"_run": _make_runner(mcp_api)}
+        from pydantic import Field
+        from typing import Annotated
+        ns = {"_run": _make_runner(mcp_api), "Annotated": Annotated, "Field": Field}
         exec(src, ns)  # noqa: S102 — джерело будуємо з власного маніфесту
         return ns[spec["name"]]
 
