@@ -22,21 +22,21 @@ Swagger UI: https://api.telezip.net/swagger/index.html
 
 | ендпоінт | що робить | стан | MCP |
 |----------|-----------|------|-----|
-| `POST /v3/Find` | пошук, віддає ВСІ збіги одразу | ✓ (конвеєр) | `tz_ingest`, воркер collect |
+| `POST /v3/Find` | пошук, віддає ВСІ збіги одразу | ✓ (конвеєр) | `run_create`, воркер collect |
 | `POST /v3/FindFast` | те саме, ліміт 10 000 + `sampleOnly` | ✓ | (через v4) |
 | `POST /v3/FindPaged` | посторінково | ✓ | (через v4) |
 | `POST /v3/FindStats` | статистика без викачування | ✓ | (через v4) |
-| `GET /v3/FindRaw` | запит у форматі бота (`text=…; days=1;`) | ✓ | `tz_probe` |
+| `GET /v3/FindRaw` | запит у форматі бота (`text=…; days=1;`) | ✓ | — |
 | `GET /v3/Channels` | канал за `id`/`name`/`title`/`about` | ✓ | — |
-| `GET /v3/Users` | юзернейм → TelegramID | ✓ | `tz_user` |
-| `GET /v3/SearchMacros` | серверні макроси `##ім'я` | ✓ | `tz_macros` |
+| `GET /v3/Users` | юзернейм → TelegramID | ✓ | `tz_users` |
+| `GET /v3/SearchMacros` | серверні макроси `##ім'я` | ✓ | — |
 | `GET /v3/Stats` | розмір індексу + лаг | ✓ | `tz_status` |
-| `POST /v4/messages` | пошук: ліміт АБО сторінки, семпл, групування | ✓ | `tz_search`, `tz_channel_posts` |
-| `POST /v4/messages/stats` | лічильники + розкладка по годинах | ✓ | `tz_stats`, `tz_calibrate` |
-| `GET /v4/messages/context` | N повідомлень до/після якоря | ✓ | `tz_context` |
-| `GET /v4/channels` | пошук каналів (term/title/about, сторінки) | ✓ | `tz_channels`, `tz_channel` |
-| `GET /v4/users` | профілі: `userIds`/`usernames`/`userTerm`/`isBot`/`isActive` | ✓ | `tz_user` |
-| `GET /v4/users/by-username` | юзернейми → id (масово) | ✓ | `tz_user` |
+| `POST /v4/messages` | пошук: ліміт АБО сторінки, семпл, групування | ✓ | `tz_find` |
+| `POST /v4/messages/stats` | лічильники + розкладка по годинах (БЕЗ `unique`) | ✓ | `tz_find(stats=true)` |
+| `GET /v4/messages/context` | N повідомлень до/після якоря | ✓ | — |
+| `GET /v4/channels` | пошук каналів (term/title/about, сторінки) | ✓ | `tz_channels`, `tz_channels` |
+| `GET /v4/users` | профілі: `userIds`/`usernames`/`userTerm`/`isBot`/`isActive` | ✓ | `tz_users` |
+| `GET /v4/users/by-username` | юзернейми → id (масово) | ✓ | `tz_users` |
 | `GET /v4/stats` | індекс + **глибина пошуку** | ✓ | `tz_status` |
 | `GET /v4/phones`, `/v4/phones/limit` | телефон → профіль | ✗ 403: ключ без права phone lookup | — |
 
@@ -67,7 +67,7 @@ Swagger UI: https://api.telezip.net/swagger/index.html
 
 Найдорожча пастка всього контракту: v3 і v4 розуміють пробіл ПО-РІЗНОМУ.
 
-| | v3 (`/Find`, `/FindRaw`) — конвеєр, `task.telezip_query` | v4 (`/v4/messages`) — `tz_search`, `tz_stats` |
+| | v3 (`/Find`, `/FindRaw`) — конвеєр, `task.telezip_query` | v4 (`/v4/messages`) — `tz_find`, `tz_find(stats=true)` |
 |---|---|---|
 | пробіл між словами | **АБО** | **І** |
 | АБО | пробіл | **`\|`** |
@@ -86,7 +86,7 @@ Swagger UI: https://api.telezip.net/swagger/index.html
 тобто І трьох рідкісних слів) → 0. Діагностика цього нуля коштувала 7 запитів
 ≈ $0.70.
 
-Практичний наслідок: **не копіюй `task.telezip_query` у `tz_search` без
+Практичний наслідок: **не копіюй `task.telezip_query` у `tz_find` без
 перекладу** — задачі зберігають v3-форму. Те, що задача #1 `(ETHNIC)
 +(CONFLICT) -(ШУМ)` зібрала 354 365 постів, доводить, що в v3 пробіл справді
 АБО; у v4 той самий текст дав би порожньо.
@@ -98,23 +98,28 @@ Swagger UI: https://api.telezip.net/swagger/index.html
 
 | дія | викликів | ≈ ціна |
 |-----|----------|--------|
-| `tz_stats` — скільки цього є | 1 | $0.10 |
-| `tz_search` — сторінка результатів | 1 на сторінку | $0.10 × сторінок |
-| `tz_calibrate` — обсяг + репости | 2 (unique on/off) | $0.20 |
+| `tz_find(stats=true)` — скільки цього є | 1 | $0.10 |
+| `tz_find` — сторінка результатів | 1 на сторінку | $0.10 × сторінок |
 | важке вікно, що поділилось навпіл двічі | 4 | $0.40 |
 | збір 30 днів чанками по дню | 30 | $3.00 |
 | збір 30 днів чанками по 3 дні | 10 | $1.00 |
 
 Практичні наслідки:
 
-* **обсяг питай статистикою, а не пошуком** — `tz_stats` дає messageCount,
+* **статистика не знає `unique`.** `/v4/messages/stats` приймає ті самі
+  критерії, що й пошук, КРІМ `unique` — тож порівняти «з репостами / без»
+  лічильниками неможливо (обидва виклики дадуть те саме число). Через це
+  2026-09-19 видалено інструмент `tz_calibrate`: його «частка репостів»
+  завжди виходила ×1.0 і вводила в оману. Потрібне співвідношення — рахуй по
+  вибірці `tz_find` із `unique=true/false`;
+* **обсяг питай статистикою, а не пошуком** — `tz_find(stats=true)` дає messageCount,
   канали, авторів і погодинну динаміку за один виклик;
 * **`find_posts_range` ділить важке вікно навпіл** і рекурсивно — кожен шматок
   це окремий оплачений запит. Тому «зберу місяць одним махом» дорожчає саме
   тоді, коли вікно важке;
 * **розмір чанка — це прямий множник ціни** (`task.collect_chunk_days`,
   `run_create` показує оцінку до запуску). Більший чанк дешевший, але ближчий
-  до відлупу — баланс шукають `tz_calibrate`;
+  до відлупу — баланс перевіряють `tz_find(stats=true)` на короткій пробі;
 * **не роби другий виклик заради репостів**: `unique=false` віддає їх тим самим
   запитом;
 * перезбір уже зібраного періоду — це повна ціна ще раз; сирі пости в БД
@@ -160,8 +165,8 @@ Swagger UI: https://api.telezip.net/swagger/index.html
 Збір задач (`collect`/`mon_collect`) ходить ТІЛЬКИ у `POST /v3/Find` — перевірений
 шлях із чанками, ретраями й глобальним семафором (`TelezipSlot`). Решта контракту
 доступна операторові через MCP-інструменти групи `telezip` (див.
-`docs/mcp-server.md`), які нічого не пишуть у БД, крім явного `tz_ingest`.
+`docs/mcp-server.md`), які нічого не пишуть у БД, крім явного `run_create`.
 
-Типовий маршрут: `tz_stats` (скільки цього є) → `tz_calibrate` (дублі й ризик
-відлупу) → `tz_search` (подивитись тексти) → `task_update` (зафіксувати запит у
-задачі) → `run_create` (плановий збір чанками).
+Типовий маршрут: `tz_find(stats=true)` (скільки цього є й чи потягне конвеєр) →
+`tz_find` (подивитись тексти) → `task_update` (зафіксувати запит у задачі) →
+`run_create` (плановий збір чанками).

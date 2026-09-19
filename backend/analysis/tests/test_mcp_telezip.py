@@ -136,24 +136,15 @@ def test_window_rejects_half_range_and_too_long():
 
 # --- пошук і статистика -----------------------------------------------------
 
-def test_tz_search_renders_volume_channels_and_samples(fake):
+def test_tz_find_returns_messages_with_links(fake):
     fake(search={"total": 2, "next_page_token": "TOK", "messages": [MSG, dict(MSG, mid=2)]})
-    out = mcp_api.call("tz_search", {"query": "Якутия", "channels": "@sakhaday",
-                                     "days": 3, "samples": 1})
+    out = mcp_api.call("tz_find", {"text": "Якутия", "channel": "@sakhaday",
+                                   "days": 3, "samples": 1})
     assert "@sakhaday" in out and "t.me/sakhaday/228790" in out
-    assert "page_token=TOK" in out          # видно, що є наступна сторінка
-    assert "09-17:2" in out                 # розкладка по днях
+    assert "page_token=TOK" in out and "09-17:2" in out
 
 
-def test_tz_search_warns_about_negation_and_star(fake):
-    fake(search={"total": 0, "next_page_token": None, "messages": []})
-    out = mcp_api.call("tz_search", {"query": "дрон -(всу фронт)"})
-    assert "негація" in out
-    out = mcp_api.call("tz_search", {"query": "*"})
-    assert "весь індекс" in out
-
-
-def test_tz_stats_summarises_without_downloading(fake):
+def test_tz_find_stats_mode_counts_without_downloading(fake):
     client = fake(search_stats={
         "messageCount": 50, "userCount": 7, "channelCount": 2,
         "channels": [{"id": 1, "name": "sakhaday", "messageCount": 40},
@@ -161,122 +152,27 @@ def test_tz_stats_summarises_without_downloading(fake):
         "firstMessageDate": "2026-09-16T00:00:47+03:00",
         "lastMessageDate": "2026-09-17T05:58:44+03:00",
         "messagesPerHour": {"2026-09-16T00:00:00Z": 20, "2026-09-17T01:00:00Z": 30}})
-    out = mcp_api.call("tz_stats", {"query": "Якутия", "days": 2})
-    assert "повідомлень" in out and "50" in out
-    assert "@sakhaday" in out and "80%" in out      # частка каналу
+    out = mcp_api.call("tz_find", {"text": "Якутия", "days": 2, "stats": True})
+    assert "50" in out and "@sakhaday" in out and "80%" in out
     assert "09-16:20" in out and "09-17:30" in out
-    # статистика рахується на боці TeleZip — повідомлення не викачуються
+    # лічильники рахує TeleZip — повідомлення не викачуються
     assert [c[0] for c in client.calls] == ["search_stats"]
-    assert "1 запит" in out and "$0.10" in out      # ціна виклику перед очима
 
 
-def test_tz_calibrate_projects_volume_and_repost_ratio(fake):
-    stats = {"messageCount": 100, "userCount": 10, "channelCount": 5, "channels": [],
-             "messagesPerHour": {}}
-    client = FakeClient()
-    calls = {"n": 0}
+def test_stats_mode_does_not_send_unique(fake):
+    """/FindStats не приймає unique — не шлемо його й не обіцяємо співвідношення."""
+    client = fake(search_stats={"messageCount": 1, "channels": [], "messagesPerHour": {}})
+    mcp_api.call("tz_find", {"text": "x", "stats": True, "unique": True})
+    assert "unique" not in client.calls[0][1]
 
-    async def search_stats(criteria):
-        calls["n"] += 1
-        return dict(stats, messageCount=100 if criteria.get("unique") else 300)
-    client.search_stats = search_stats
-    import analysis.services.mcp_api.telezip as mod
-    mod._client = lambda timeout=180: client
 
-    out = mcp_api.call("tz_calibrate", {"query": "мигрант", "days": 1, "project_days": 30})
-    assert "×3.0" in out                      # репости
-    assert "~3000" in out                     # проєкція 100/добу × 30
-    assert calls["n"] == 2
-    assert "$0.20" in out                     # два виклики по $0.10
+def test_tz_find_warns_about_negation_and_star(fake):
+    fake(search={"total": 0, "next_page_token": None, "messages": []})
+    assert "негація" in mcp_api.call("tz_find", {"text": "дрон -(всу фронт)"})
+    assert "весь індекс" in mcp_api.call("tz_find", {"text": "*"})
 
 
 # --- довідники --------------------------------------------------------------
-
-def test_tz_context_default_anchor_and_friendly_404(fake):
-    fake(message_context={"channelId": 77, "messageId": 228790,
-                          "anchor": {"messageId": 228790, "date": "2026-09-17T08:35",
-                                     "content": "якір"},
-                          "before": [{"messageId": 228789, "date": "2026-09-17T08:17",
-                                      "content": "до"}],
-                          "after": []})
-    out = mcp_api.call("tz_context", {"channel": "77", "message_id": 228790})
-    assert "▶ " in out and "якір" in out
-
-    fake(message_context=ToolError("TeleZip 404: ANCHOR_NOT_FOUND"))
-    with pytest.raises(ToolError, match="anchor_date"):
-        mcp_api.call("tz_context", {"channel": "77", "message_id": 1})
-
-
-def test_tz_user_maps_username_to_id_and_survives_empty_profile(fake):
-    fake(users_by_username={"durov": [1006503122]},
-         search_users=ToolError("TeleZip 404: not found"))
-    out = mcp_api.call("tz_user", {"ref": "@durov"})
-    assert "1006503122" in out
-    assert "немає" in out            # профілю нема, але id знайдено — не падаємо
-
-
-def test_tz_macros_filters(fake):
-    fake(search_macros=[{"name": "##вч_93498", "value": '"93498 часть"~2'},
-                        {"name": "##дрон", "value": "дрон fpv"}])
-    out = mcp_api.call("tz_macros", {"filter": "вч"})
-    assert "##вч_93498" in out and "##дрон" not in out
-
-
-# --- дії --------------------------------------------------------------------
-
-def test_tz_ingest_dry_run_writes_nothing(fake):
-    task = TaskFactory(pipeline=AnalysisTask.PIPELINE_EVENTS, slug="ev-task")
-    fake(find_posts_range=[MSG])
-    out = mcp_api.call("tz_ingest", {"task": "ev-task", "query": "*",
-                                     "channels": "@sakhaday"})
-    assert "нічого не записано" in out
-    assert Post.objects.count() == 0
-
-
-def test_tz_ingest_writes_posts_like_collect_worker(fake):
-    task = TaskFactory(pipeline=AnalysisTask.PIPELINE_EVENTS, slug="ev-task2")
-    fake(find_posts_range=[MSG])
-    mcp_api.call("tz_ingest", {"task": "ev-task2", "query": "*",
-                               "channels": "@sakhaday", "dry_run": False})
-    post = Post.objects.get()
-    assert post.task_id == task.id and post.url == MSG["message_url"]
-    assert post.stage == Post.STAGE_COLLECTED          # далі його бере конвеєр
-    assert post.channel_name == "sakhaday" and post.telezip_mid == 1
-    assert post.classification["_tz_channel_id"] == 77
-    # повторний прогін не дублює (unique task+url)
-    mcp_api.call("tz_ingest", {"task": "ev-task2", "query": "*",
-                               "channels": "@sakhaday", "dry_run": False})
-    assert Post.objects.count() == 1
-
-
-def test_tz_ingest_refuses_monitor_pipeline():
-    TaskFactory(pipeline=AnalysisTask.PIPELINE_MONITOR, slug="mon-task")
-    with pytest.raises(ToolError, match="run_create"):
-        mcp_api.call("tz_ingest", {"task": "mon-task", "query": "*"})
-
-
-def test_tz_slots_set_changes_global_limit():
-    # таблиця слотів спільна для всіх процесів і могла лишитись засіяною
-    TelezipSlot.objects.all().delete()
-    TelezipSlot.objects.bulk_create([TelezipSlot(slot=0), TelezipSlot(slot=1)])
-    mcp_api.call("tz_slots_set", {"count": 1})
-    assert list(TelezipSlot.objects.values_list("slot", flat=True)) == [0]
-    with pytest.raises(ToolError, match="1..8"):
-        mcp_api.call("tz_slots_set", {"count": 99})
-
-
-def test_tz_probe_validates_input():
-    with pytest.raises(ToolError, match="GET і POST"):
-        mcp_api.call("tz_probe", {"endpoint": "/v4/stats", "method": "DELETE"})
-    with pytest.raises(ToolError, match="починатись"):
-        mcp_api.call("tz_probe", {"endpoint": "v4/stats"})
-
-
-def test_tz_syntax_is_offline_and_covers_modes():
-    out = mcp_api.call("tz_syntax")
-    for mode in ("query", "exact", "regex", "channel_term", "users", "source"):
-        assert mode in out
-
 
 # --- контракт описів --------------------------------------------------------
 # Описи — це ІНТЕРФЕЙС для моделі: вона бачить лише їх, а синтаксис TeleZip не
@@ -290,22 +186,28 @@ def test_every_telezip_param_is_documented():
 
 def test_tool_description_carries_the_whole_docstring():
     """У схему має йти ВЕСЬ докстрінг, а не перший абзац: застереження в кінці."""
-    stats = [m for m in mcp_api.manifest() if m["name"] == "tz_stats"][0]
-    assert "ПРОБІЛ" in stats["doc"], "застереження про пробіл=АБО не дійшло до опису"
-    assert stats["summary"] and "\n" not in stats["summary"]
+    find = [m for m in mcp_api.manifest() if m["name"] == "tz_find"][0]
+    assert "ПРОБІЛ = АБО" in find["doc"], "застереження не дійшло до опису"
+    assert find["summary"] and "\n" not in find["summary"]
+
+
+def test_telezip_surface_mirrors_the_api():
+    """Три ендпоінти TeleZip — три інструменти, без вигаданих обгорток."""
+    tz = {m["name"] for m in mcp_api.manifest() if m["group"] == "telezip"}
+    assert {"tz_find", "tz_channels", "tz_users"} <= tz
+    # ці були обгортками над тим самим /FIND і прибрані
+    assert not ({"tz_search", "tz_stats", "tz_calibrate", "tz_channel",
+                 "tz_channel_posts", "tz_user", "tz_context", "tz_macros",
+                 "tz_probe", "tz_syntax", "tz_ingest", "tz_slots_set"} & tz)
+    # лишається рівно три ендпоінти + діагностика
+    assert tz == {"tz_find", "tz_channels", "tz_users", "tz_status"}
 
 
 def test_query_docs_warn_about_the_or_default():
     """Найчастіша помилка: пробіл сприймають як І."""
-    for name in ("tz_stats", "tz_search", "tz_calibrate"):
+    for name in ("tz_find",):
         spec = [m for m in mcp_api.manifest() if m["name"] == name][0]
-        q = [p for p in spec["params"] if p["name"] == "query"][0]
+        q = [p for p in spec["params"] if p["name"] == "text"][0]
         assert "АБО" in q["doc"] and "+" in q["doc"]
 
 
-def test_syntax_reference_covers_all_four_search_modes():
-    out = mcp_api.call("tz_syntax")
-    for mode in ("query", "exact", "regex", "channel_term"):
-        assert mode in out
-    assert "ПРОБІЛ = АБО" in out and "$0.10" in out
-    assert "##" in out            # кластерні макроси

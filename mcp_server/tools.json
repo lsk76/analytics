@@ -3,17 +3,21 @@
   "name": "account_check",
   "group": "accounts",
   "mutates": false,
-  "doc": "Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).",
+  "scope": "mcp:read",
+  "doc": "Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).\n\nref — id/номер/назва, або `all` / `active` / `problem` для групи.\nЖивий акаунт оновлює «востаннє використано».",
+  "summary": "Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "pause",
     "type": "float",
+    "doc": "",
     "default": 2.0,
     "required": false
    }
@@ -23,23 +27,28 @@
   "name": "account_dialogs",
   "group": "accounts",
   "mutates": false,
-  "doc": "Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».",
+  "scope": "mcp:read",
+  "doc": "Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».\n\nkind — фільтр `канал` / `група` / `приват`.",
+  "summary": "Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 40,
     "required": false
    },
    {
     "name": "kind",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -49,23 +58,28 @@
   "name": "account_jobs",
   "group": "accounts",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота).",
+  "summary": "Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота).",
   "params": [
    {
     "name": "kind",
     "type": "str",
+    "doc": "",
     "default": "all",
     "required": false
    },
    {
     "name": "status",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 20,
     "required": false
    }
@@ -75,11 +89,14 @@
   "name": "account_show",
   "group": "accounts",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Картка акаунта: конфіг, проксі, що він обслуговує, останні завдання й боти.",
+  "summary": "Картка акаунта: конфіг, проксі, що він обслуговує, останні завдання й боти.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    }
@@ -89,17 +106,21 @@
   "name": "account_spam_check",
   "group": "accounts",
   "mutates": true,
-  "doc": "Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.",
+  "scope": "mcp:write",
+  "doc": "Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.\n\nСаме обмеження SpamBot-ом, а не мертва проксі, валить резолв юзернеймів.\nref — id/номер/назва, або `all` / `active` / `problem`.",
+  "summary": "Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "pause",
     "type": "float",
+    "doc": "",
     "default": 2.0,
     "required": false
    }
@@ -109,35 +130,42 @@
   "name": "account_update",
   "group": "accounts",
   "mutates": true,
-  "doc": "Змінити акаунт: активність, проксі, теги (теги — через кому).",
+  "scope": "mcp:write",
+  "doc": "Змінити акаунт: активність, проксі, теги (теги — через кому).\n\nproxy: id/частина рядка проксі, або `-` щоб відв'язати.",
+  "summary": "Змінити акаунт: активність, проксі, теги (теги — через кому).",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "is_active",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "proxy",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "add_tags",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "remove_tags",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -147,17 +175,21 @@
   "name": "account_warm_up",
   "group": "accounts",
   "mutates": true,
-  "doc": "Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.",
+  "scope": "mcp:write",
+  "doc": "Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.\n\nНепрогрітий акаунт не резолвить чужі юзернейми. Виконує воркер `warm-up`\n(join кожного каналу — секунди, тому це черга, а не синхронна дія).\nchannels — скільки каналів (0 = випадково 5-10).",
+  "summary": "Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "channels",
     "type": "int",
+    "doc": "",
     "default": 0,
     "required": false
    }
@@ -167,23 +199,28 @@
   "name": "accounts_list",
   "group": "accounts",
   "mutates": false,
-  "doc": "Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.",
+  "scope": "mcp:read",
+  "doc": "Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.\n\nquery — частина назви/номера/тега; problems_only — лише ті, що потребують уваги\n(не авторизовані, обмежені SpamBot-ом, без проксі або з мертвою проксі).\n«чати»/«джерела» — скільки моніторингів читає саме цей акаунт.",
+  "summary": "Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.",
   "params": [
    {
     "name": "query",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "problems_only",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 100,
     "required": false
    }
@@ -193,17 +230,21 @@
   "name": "proxies_list",
   "group": "accounts",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
+  "summary": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
   "params": [
    {
     "name": "problems_only",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 60,
     "required": false
    }
@@ -213,17 +254,21 @@
   "name": "proxy_check",
   "group": "accounts",
   "mutates": true,
-  "doc": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).",
+  "scope": "mcp:write",
+  "doc": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).\n\nref — id/частина рядка, або `all` / `broken`. repair=False — лише діагноз.",
+  "summary": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "repair",
     "type": "bool",
+    "doc": "",
     "default": true,
     "required": false
    }
@@ -233,17 +278,21 @@
   "name": "channels_find",
   "group": "monitoring",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Знайти канал/чат у довіднику (`Channel`) за username/назвою — id для інших дій.",
+  "summary": "Знайти канал/чат у довіднику (`Channel`) за username/назвою — id для інших дій.",
   "params": [
    {
     "name": "query",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 20,
     "required": false
    }
@@ -253,41 +302,49 @@
   "name": "chat_update",
   "group": "monitoring",
   "mutates": true,
-  "doc": "Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.",
+  "scope": "mcp:write",
+  "doc": "Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.\n\nchat — id рядка або @username (якщо однозначний). account — id/назва акаунта\nабо `-` щоб відв'язати.",
+  "summary": "Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.",
   "params": [
    {
     "name": "chat",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "is_active",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "stream_enabled",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "account",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "priority",
     "type": "int",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "forward_media",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    }
@@ -297,35 +354,42 @@
   "name": "chats_list",
   "group": "monitoring",
   "mutates": false,
-  "doc": "Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.",
+  "scope": "mcp:read",
+  "doc": "Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.\n\nproblems_only — без акаунта, або стрім не оновлювався понад добу.",
+  "summary": "Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "active",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "stream_only",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "problems_only",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 60,
     "required": false
    }
@@ -335,41 +399,49 @@
   "name": "events_stats",
   "group": "monitoring",
   "mutates": false,
-  "doc": "Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.",
+  "scope": "mcp:read",
+  "doc": "Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.\n\ngroup_by: day|week|month|region|tag:<категорія>|task.\nРахує через services/metrics.py — ті самі формули, що й графіки адмінки.",
+  "summary": "Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "days",
     "type": "int",
+    "doc": "",
     "default": 14,
     "required": false
    },
    {
     "name": "group_by",
     "type": "str",
+    "doc": "",
     "default": "day",
     "required": false
    },
    {
     "name": "region",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 20,
     "required": false
    },
    {
     "name": "review_status",
     "type": "str",
+    "doc": "",
     "default": "approved",
     "required": false
    }
@@ -379,17 +451,21 @@
   "name": "run_cancel",
   "group": "monitoring",
   "mutates": true,
+  "scope": "mcp:write",
   "doc": "Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки.",
+  "summary": "Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки.",
   "params": [
    {
     "name": "run_id",
     "type": "int",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "drop_pending_chunks",
     "type": "bool",
+    "doc": "",
     "default": true,
     "required": false
    }
@@ -399,35 +475,42 @@
   "name": "run_create",
   "group": "monitoring",
   "mutates": true,
-  "doc": "Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).",
+  "scope": "mcp:write",
+  "doc": "Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).\n\nДалі все ведуть воркери. Ідемпотентно за діапазонами: вже покриті чанки не дублюються.",
+  "summary": "Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "date_from",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "date_to",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "chunk_days",
     "type": "int",
+    "doc": "",
     "default": 0,
     "required": false
    },
    {
     "name": "title",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -437,11 +520,14 @@
   "name": "run_show",
   "group": "monitoring",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»).",
+  "summary": "Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»).",
   "params": [
    {
     "name": "run_id",
     "type": "int",
+    "doc": "",
     "default": null,
     "required": true
    }
@@ -451,23 +537,28 @@
   "name": "runs_list",
   "group": "monitoring",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Збори (ResearchRun): статус, період, прогрес чанків.",
+  "summary": "Збори (ResearchRun): статус, період, прогрес чанків.",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "status",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 15,
     "required": false
    }
@@ -477,41 +568,49 @@
   "name": "source_update",
   "group": "monitoring",
   "mutates": true,
+  "scope": "mcp:write",
   "doc": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
+  "summary": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "is_active",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "poll_interval_sec",
     "type": "int",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "poll_now",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "reset_cursor",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "account",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -521,29 +620,35 @@
   "name": "sources_list",
   "group": "monitoring",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені.",
+  "summary": "Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені.",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "kind",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "problems_only",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 60,
     "required": false
    }
@@ -553,11 +658,14 @@
   "name": "task_show",
   "group": "monitoring",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори.",
+  "summary": "Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    }
@@ -567,53 +675,63 @@
   "name": "task_update",
   "group": "monitoring",
   "mutates": true,
-  "doc": "Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.",
+  "scope": "mcp:write",
+  "doc": "Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.\n\nЗамикає маршрут розвідки: `tz_calibrate` показав, що запит здоровий →\nфіксуємо його в задачі → `run_create` збирає ним period. Старий запит\nдрукується у відповіді — щоб було куди відкотитись.",
+  "summary": "Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "telezip_query",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "languages",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "unique",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "chunk_days",
     "type": "int",
+    "doc": "",
     "default": 0,
     "required": false
    },
    {
     "name": "is_active",
     "type": "bool",
+    "doc": "",
     "default": null,
     "required": false
    },
    {
     "name": "min_subscribers",
     "type": "int",
+    "doc": "",
     "default": -1,
     "required": false
    },
    {
     "name": "llm_model",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -623,17 +741,21 @@
   "name": "tasks_list",
   "group": "monitoring",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено.",
+  "summary": "Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено.",
   "params": [
    {
     "name": "pipeline",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "active_only",
     "type": "bool",
+    "doc": "",
     "default": false,
     "required": false
    }
@@ -643,11 +765,14 @@
   "name": "publish_status",
   "group": "service",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Профілі публікації + останні публікації подій у Telegram.",
+  "summary": "Профілі публікації + останні публікації подій у Telegram.",
   "params": [
    {
     "name": "limit",
     "type": "int",
+    "doc": "",
     "default": 10,
     "required": false
    }
@@ -657,30 +782,37 @@
   "name": "service_health",
   "group": "service",
   "mutates": false,
-  "doc": "Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.",
+  "scope": "mcp:read",
+  "doc": "Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.\n\nПерше, що варто викликати: показує ЩО стоїть і ХТО це розгрібає.",
+  "summary": "Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.",
   "params": []
  },
  {
   "name": "service_queues",
   "group": "service",
   "mutates": false,
-  "doc": "Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.",
+  "scope": "mcp:read",
+  "doc": "Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.\n\ntask — id/slug/назва (порожньо = всі); stage — конкретна стадія;\nerrors — скільки прикладів помилок показати (0 = без них).",
+  "summary": "Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "stage",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    },
    {
     "name": "errors",
     "type": "int",
+    "doc": "",
     "default": 3,
     "required": false
    }
@@ -690,23 +822,28 @@
   "name": "setting_set",
   "group": "service",
   "mutates": true,
+  "scope": "mcp:admin",
   "doc": "Записати налаштування (`Setting`). Порожнє значення = дефолт із коду.",
+  "summary": "Записати налаштування (`Setting`). Порожнє значення = дефолт із коду.",
   "params": [
    {
     "name": "key",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "value",
     "type": "str",
+    "doc": "",
     "default": null,
     "required": true
    },
    {
     "name": "description",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -716,11 +853,14 @@
   "name": "settings_list",
   "group": "service",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
+  "summary": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
   "params": [
    {
     "name": "prefix",
     "type": "str",
+    "doc": "",
     "default": "",
     "required": false
    }
@@ -730,78 +870,93 @@
   "name": "tools_manifest",
   "group": "service",
   "mutates": false,
+  "scope": "mcp:read",
   "doc": "Список інструментів MCP-шару (назва, група, чи змінює стан, параметри).",
+  "summary": "Список інструментів MCP-шару (назва, група, чи змінює стан, параметри).",
   "params": []
  },
  {
   "name": "tz_calibrate",
   "group": "telezip",
   "mutates": false,
-  "doc": "Перевірити запит ПЕРЕД збором: обсяг, частка репостів, ризик відлупу.",
+  "scope": "mcp:read",
+  "doc": "Чи годиться запит для ПЛАНОВОГО збору: обсяг, репости, ризик відлупу.\n\nРобить два виклики статистики на короткій пробі (unique=true і false),\nпоказує скільки унікальних повідомлень на добу, у скількох каналах, яка\nчастка репостів, і проєктує обсяг на `project_days`. Разом — $0.20.\n\nНавіщо окремо від `tz_stats`: відповідає не «скільки цього є», а «що буде,\nякщо це поставити в конвеєр» — чи не потоне задача, чи не відлупить TeleZip\nвікно цілком, і скільки коштуватиме збір.\n\nМаршрут: tz_stats → tz_calibrate → tz_search (глянути тексти) →\ntask_update (зафіксувати запит у задачі) → run_create (плановий збір).",
+  "summary": "Чи годиться запит для ПЛАНОВОГО збору: обсяг, репости, ризик відлупу.",
   "params": [
    {
     "name": "query",
     "type": "str",
+    "doc": "ПОШУК ІЗ ВІДМІНКАМИ. ПРОБІЛ = АБО (не І!): \"мигрант драка\" знайде будь-яке зі слів. Для І став + перед словом/групою: \"мигрант +(драка избил)\". Відмінки самі: \"дрон\" ловить дрона/дрону/дронах — перелічувати не треба. Префікс: \"мобилиз*\" → мобилизация/мобилизовать. Фраза: \"\"сбор денег\"\". Відстань: \"\"снаряд пушка\"~5\" (тильда ЗЛИТНО). Виключення: \"-mavic\" або \"-(всу фронт)\" — мінус ЗЛИТНО, без пробілу. Макроси кластерів лише в дужках: \"+(##бавовна) -(##спам)\". Робоча форма: ТЕМА +(ДІЯ) -(ШУМ).",
     "default": "",
     "required": false
    },
    {
     "name": "days",
     "type": "int",
+    "doc": "Скільки останніх діб узяти, включно з сьогоднішньою. Ігнорується, якщо задані date_from/date_to.",
     "default": 3,
     "required": false
    },
    {
     "name": "exact",
     "type": "str",
+    "doc": "ДОСЛІВНО, без відмінків — для абревіатур, марок, серійних номерів: exact=\"сво\" не зачепить \"свой\"/\"своего\", а query=\"сво\" зачепить. Синтаксис операторів той самий, що й у query. Можна разом із query: тоді умови комбінуються (exact=\"сво\" + query=\"бригада\").",
     "default": "",
     "required": false
    },
    {
     "name": "regex",
     "type": "str",
+    "doc": "Регулярний вираз по тексту повідомлення: картки, IBAN, телефони, крипто-гаманці, координати. Дорогий режим — звужуй вікно й канали.",
     "default": "",
     "required": false
    },
    {
     "name": "channel_term",
     "type": "str",
+    "doc": "Фільтр ПО КАНАЛУ, а не по повідомленню: спершу відбираються канали, у назві/описі яких є ці слова, і лише в них шукається текст. Синтаксис як у query. Приклад: channel_term=\"крым крим АРК\". Не став багато поширених слів — понад 20 000 каналів = відлуп.",
     "default": "",
     "required": false
    },
    {
     "name": "channels",
     "type": "str",
+    "doc": "Обмежити пошук цими каналами: @ім'я або числовий id, через кому. Порожньо = весь індекс (3.5 млн каналів). Щоб узяти ВСЕ з каналу, лишай query=\"*\" і став сюди канал.",
     "default": "",
     "required": false
    },
    {
     "name": "users",
     "type": "str",
+    "doc": "Обмежити пошук дописами цих авторів: @ім'я або числовий TelegramID, через кому. Так дивляться \"усе, що писала ця людина\".",
     "default": "",
     "required": false
    },
    {
     "name": "languages",
     "type": "str",
+    "doc": "Мови повідомлень через кому (ISO 639-3: ru, uk, en…). Порожньо = усі мови, і в вибірку лізе чуже. Для російського Telegram став \"ru\".",
     "default": "ru",
     "required": false
    },
    {
     "name": "tags",
     "type": "str",
+    "doc": "Шукати лише в каналах із цими тегами (теги каналів TeleZip, через кому).",
     "default": "",
     "required": false
    },
    {
     "name": "project_days",
     "type": "int",
+    "doc": "На скільки днів проєктувати обсяг проби (типово місяць).",
     "default": 30,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 180,
     "required": false
    }
@@ -811,17 +966,21 @@
   "name": "tz_channel",
   "group": "telezip",
   "mutates": false,
-  "doc": "Картка одного каналу (підписники, мова, активність) + чи він є в нас.",
+  "scope": "mcp:read",
+  "doc": "Картка ОДНОГО каналу за точним @ім'ям або id: підписники, мова, активність.\n\nТочний збіг — якщо імені не знаєш, шукай за описом через `tz_channels`.\n«У моніторингу TeleZip» = чи його читають далі; якщо ні, доступна лише\nзбережена історія. Також показує, чи канал уже є в нашому довіднику.",
+  "summary": "Картка ОДНОГО каналу за точним @ім'ям або id: підписники, мова, активність.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "Канал: @ім'я (точний збіг) або числовий id. Шукати за описом — tz_channels.",
     "default": null,
     "required": true
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 120,
     "required": false
    }
@@ -831,77 +990,91 @@
   "name": "tz_channel_posts",
   "group": "telezip",
   "mutates": false,
-  "doc": "Усе з ОДНОГО каналу/чату за період (канон: `*` + фільтр каналу).",
+  "scope": "mcp:read",
+  "doc": "Стрічка ОДНОГО каналу чи чату за період — усе підряд, без пошуку по словах.\n\nКанонічний прийом: `query=\"*\"` плюс фільтр каналу. Саме так збирають\nматеріал по конкретному джерелу, не ганяючи широкий запит по всьому індексу.\n\nЯкщо потрібні не всі повідомлення, а лише зі словом — постав своє `query`.\nДля однієї гілки коментарів під постом — `thread` (id top-повідомлення).",
+  "summary": "Стрічка ОДНОГО каналу чи чату за період — усе підряд, без пошуку по словах.",
   "params": [
    {
     "name": "channel",
     "type": "str",
+    "doc": "Канал або чат: @ім'я чи числовий id. Обов'язковий.",
     "default": null,
     "required": true
    },
    {
     "name": "days",
     "type": "int",
+    "doc": "Скільки останніх діб узяти, включно з сьогоднішньою. Ігнорується, якщо задані date_from/date_to.",
     "default": 1,
     "required": false
    },
    {
     "name": "date_from",
     "type": "str",
+    "doc": "Початок періоду YYYY-MM-DD. Треба разом із date_to.",
     "default": "",
     "required": false
    },
    {
     "name": "date_to",
     "type": "str",
+    "doc": "Кінець періоду YYYY-MM-DD (включно). Треба разом із date_from.",
     "default": "",
     "required": false
    },
    {
     "name": "query",
     "type": "str",
+    "doc": "ПОШУК ІЗ ВІДМІНКАМИ. ПРОБІЛ = АБО (не І!): \"мигрант драка\" знайде будь-яке зі слів. Для І став + перед словом/групою: \"мигрант +(драка избил)\". Відмінки самі: \"дрон\" ловить дрона/дрону/дронах — перелічувати не треба. Префікс: \"мобилиз*\" → мобилизация/мобилизовать. Фраза: \"\"сбор денег\"\". Відстань: \"\"снаряд пушка\"~5\" (тильда ЗЛИТНО). Виключення: \"-mavic\" або \"-(всу фронт)\" — мінус ЗЛИТНО, без пробілу. Макроси кластерів лише в дужках: \"+(##бавовна) -(##спам)\". Робоча форма: ТЕМА +(ДІЯ) -(ШУМ).",
     "default": "*",
     "required": false
    },
    {
     "name": "users",
     "type": "str",
+    "doc": "Обмежити пошук дописами цих авторів: @ім'я або числовий TelegramID, через кому. Так дивляться \"усе, що писала ця людина\".",
     "default": "",
     "required": false
    },
    {
     "name": "thread",
     "type": "int",
+    "doc": "id top-повідомлення: звузити до ОДНІЄЇ гілки коментарів під постом.",
     "default": 0,
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "Скільки повідомлень витягти (стеля 10000).",
     "default": 300,
     "required": false
    },
    {
     "name": "samples",
     "type": "int",
+    "doc": "Скільки показати текстом.",
     "default": 10,
     "required": false
    },
    {
     "name": "chars",
     "type": "int",
+    "doc": "Обрізати текст до N символів.",
     "default": 220,
     "required": false
    },
    {
     "name": "unique",
     "type": "bool",
+    "doc": "true згортає репости (лишає одну копію): менше даних, але ЗАНИЖЕНЕ охоплення. false віддає все, включно з репостами — тим самим запитом, другого виклику для цього не треба.",
     "default": true,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 180,
     "required": false
    }
@@ -911,53 +1084,63 @@
   "name": "tz_channels",
   "group": "telezip",
   "mutates": false,
-  "doc": "Пошук КАНАЛІВ у базі TeleZip за назвою/описом — «хто взагалі пише про X».",
+  "scope": "mcp:read",
+  "doc": "Знайти КАНАЛИ (не повідомлення) за назвою чи описом — «хто взагалі пише про X».\n\nШукає в довіднику TeleZip (3.5 млн каналів), а не в Телеграмі загалом.\nТак набирають whitelist для моніторингу: регіональні новинники, чати міста.\nУ відповіді видно підписників, мову, тип (канал/чат), чи він у нас уже є.\n\nНе плутай із `channel_term` у пошуку повідомлень: там канали відбираються\nтак само, але результат — повідомлення. Тут результат — самі канали.\nПонад 10 000 збігів = відлуп, звужуй критерій.",
+  "summary": "Знайти КАНАЛИ (не повідомлення) за назвою чи описом — «хто взагалі пише про X».",
   "params": [
    {
     "name": "term",
     "type": "str",
+    "doc": "Вільний пошук по назві, опису й юзернейму каналу. Синтаксис як у query: пробіл = АБО, + = І. Приклад: \"Якутия +(новости чат)\".",
     "default": "",
     "required": false
    },
    {
     "name": "title",
     "type": "str",
+    "doc": "Шукати лише в НАЗВІ каналу.",
     "default": "",
     "required": false
    },
    {
     "name": "about",
     "type": "str",
+    "doc": "Шукати лише в ОПИСІ каналу.",
     "default": "",
     "required": false
    },
    {
     "name": "names",
     "type": "str",
+    "doc": "Конкретні канали: @ім'я або id через кому (точний збіг).",
     "default": "",
     "required": false
    },
    {
     "name": "source",
     "type": "str",
+    "doc": "Тип даних: telegram-канали (telezip, дефолт), зливи баз (darkzip) або обидва (all).",
     "default": "",
     "required": false
    },
    {
     "name": "page_size",
     "type": "int",
+    "doc": "Скільки каналів на сторінку.",
     "default": 30,
     "required": false
    },
    {
     "name": "page_token",
     "type": "str",
+    "doc": "Токен наступної сторінки з попередньої відповіді.",
     "default": "",
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 120,
     "required": false
    }
@@ -967,47 +1150,56 @@
   "name": "tz_context",
   "group": "telezip",
   "mutates": false,
-  "doc": "Що було НАВКОЛО повідомлення: N сусідніх до і після (аудит знахідки).",
+  "scope": "mcp:read",
+  "doc": "Сусідні повідомлення навколо знайденого — контекст, а не вирваний рядок.\n\nБери після `tz_search`, коли треба зрозуміти, про що взагалі йшлося:\nномер повідомлення з посилання t.me/<канал>/<НОМЕР>, а `anchor_date` —\nдату з того ж рядка прикладу. Без правильної дати якір не знайдеться\n(шукається поруч із нею, сусідній день прощається, далекий — ні).",
+  "summary": "Сусідні повідомлення навколо знайденого — контекст, а не вирваний рядок.",
   "params": [
    {
     "name": "channel",
     "type": "str",
+    "doc": "Канал повідомлення: @ім'я або id.",
     "default": null,
     "required": true
    },
    {
     "name": "message_id",
     "type": "int",
+    "doc": "Номер повідомлення з посилання t.me/<канал>/<НОМЕР>.",
     "default": null,
     "required": true
    },
    {
     "name": "before",
     "type": "int",
+    "doc": "Скільки повідомлень ДО якоря (0-100).",
     "default": 10,
     "required": false
    },
    {
     "name": "after",
     "type": "int",
+    "doc": "Скільки повідомлень ПІСЛЯ якоря (0-100).",
     "default": 10,
     "required": false
    },
    {
     "name": "anchor_date",
     "type": "str",
+    "doc": "Дата самого повідомлення (YYYY-MM-DD) — її показує tz_search у рядку прикладу. Без неї береться сьогодні, і для старого повідомлення якір не знайдеться.",
     "default": "",
     "required": false
    },
    {
     "name": "chars",
     "type": "int",
+    "doc": "Обрізати текст кожного повідомлення до N символів.",
     "default": 200,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 120,
     "required": false
    }
@@ -1017,65 +1209,77 @@
   "name": "tz_ingest",
   "group": "telezip",
   "mutates": true,
-  "doc": "Записати результат разового пошуку в задачу як Post-и (ad-hoc збір).",
+  "scope": "mcp:write",
+  "doc": "Записати результат разового пошуку в задачу як Post-и (ad-hoc збір).\n\ndry_run=true (дефолт) лише показує, що потрапило б у базу. Порожній query =\nзапит самої задачі. Пости лягають так само, як їх кладе воркер collect.\n\nДля monitor/infospace/tgsearch НЕ працює: там вставка своя (whitelist чатів,\nрегіон на вставці, свої стадії) — користуйся `run_create`.",
+  "summary": "Записати результат разового пошуку в задачу як Post-и (ad-hoc збір).",
   "params": [
    {
     "name": "task",
     "type": "str",
+    "doc": "Задача, у яку писати пости (id або slug). Лише конвеєри events/research.",
     "default": null,
     "required": true
    },
    {
     "name": "query",
     "type": "str",
+    "doc": "ПОШУК ІЗ ВІДМІНКАМИ. ПРОБІЛ = АБО (не І!): \"мигрант драка\" знайде будь-яке зі слів. Для І став + перед словом/групою: \"мигрант +(драка избил)\". Відмінки самі: \"дрон\" ловить дрона/дрону/дронах — перелічувати не треба. Префікс: \"мобилиз*\" → мобилизация/мобилизовать. Фраза: \"\"сбор денег\"\". Відстань: \"\"снаряд пушка\"~5\" (тильда ЗЛИТНО). Виключення: \"-mavic\" або \"-(всу фронт)\" — мінус ЗЛИТНО, без пробілу. Макроси кластерів лише в дужках: \"+(##бавовна) -(##спам)\". Робоча форма: ТЕМА +(ДІЯ) -(ШУМ).",
     "default": "",
     "required": false
    },
    {
     "name": "days",
     "type": "int",
+    "doc": "Скільки останніх діб узяти, включно з сьогоднішньою. Ігнорується, якщо задані date_from/date_to.",
     "default": 1,
     "required": false
    },
    {
     "name": "date_from",
     "type": "str",
+    "doc": "Початок періоду YYYY-MM-DD. Треба разом із date_to.",
     "default": "",
     "required": false
    },
    {
     "name": "date_to",
     "type": "str",
+    "doc": "Кінець періоду YYYY-MM-DD (включно). Треба разом із date_from.",
     "default": "",
     "required": false
    },
    {
     "name": "channels",
     "type": "str",
+    "doc": "Обмежити пошук цими каналами: @ім'я або числовий id, через кому. Порожньо = весь індекс (3.5 млн каналів). Щоб узяти ВСЕ з каналу, лишай query=\"*\" і став сюди канал.",
     "default": "",
     "required": false
    },
    {
     "name": "languages",
     "type": "str",
+    "doc": "Мови повідомлень через кому (ISO 639-3: ru, uk, en…). Порожньо = усі мови, і в вибірку лізе чуже. Для російського Telegram став \"ru\".",
     "default": "",
     "required": false
    },
    {
     "name": "unique",
     "type": "bool",
+    "doc": "true згортає репости (лишає одну копію): менше даних, але ЗАНИЖЕНЕ охоплення. false віддає все, включно з репостами — тим самим запитом, другого виклику для цього не треба.",
     "default": null,
     "required": false
    },
    {
     "name": "dry_run",
     "type": "bool",
+    "doc": "true (типово) — лише показати, що потрапило б у базу, нічого не записуючи.",
     "default": true,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 180,
     "required": false
    }
@@ -1085,23 +1289,28 @@
   "name": "tz_macros",
   "group": "telezip",
   "mutates": false,
-  "doc": "Серверні макроси пошуку (`##ім'я` → готовий підзапит) — готові набори термінів.",
+  "scope": "mcp:read",
+  "doc": "Готові набори термінів від TeleZip: `##ім'я` → розгорнутий підзапит.\n\nКластерні теги — це чужа робота, яку не треба переписувати: `##бавовна`\nвже містить усі синоніми. Вживаються ЛИШЕ в дужках усередині query:\n`\"Макеевка +(##бавовна) -(##спам ##аренда)\"`. Тег із помилкою мовчки дає\nнуль збігів, тому назву звіряй за цим списком.",
+  "summary": "Готові набори термінів від TeleZip: `##ім'я` → розгорнутий підзапит.",
   "params": [
    {
     "name": "filter",
     "type": "str",
+    "doc": "Показати лише макроси, що містять цей текст у назві або розкритті.",
     "default": "",
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "Скільки рядків показати.",
     "default": 40,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 60,
     "required": false
    }
@@ -1111,41 +1320,49 @@
   "name": "tz_probe",
   "group": "telezip",
   "mutates": true,
-  "doc": "Сирий виклик будь-якого ендпоінта TeleZip (v3 і `/v4/...`) — розвідка API.",
+  "scope": "mcp:admin",
+  "doc": "Сирий виклик будь-якого ендпоінта TeleZip (v3 і `/v4/...`) — розвідка API.\n\nІнструменти покривають перевірений контракт; якщо в API з'явиться нове поле\nчи ендпоінт — спитай сервер напряму, а що спрацювало, вживай через `extra`\nу `tz_search`/`tz_stats`, не чекаючи правок коду.",
+  "summary": "Сирий виклик будь-якого ендпоінта TeleZip (v3 і `/v4/...`) — розвідка API.",
   "params": [
    {
     "name": "endpoint",
     "type": "str",
+    "doc": "Шлях ендпоінта від кореня: /v4/stats, /v3/SearchMacros, /v4/channels.",
     "default": null,
     "required": true
    },
    {
     "name": "method",
     "type": "str",
+    "doc": "GET або POST.",
     "default": "GET",
     "required": false
    },
    {
     "name": "params",
     "type": "str",
+    "doc": "JSON-обʼєкт query-параметрів для GET.",
     "default": "",
     "required": false
    },
    {
     "name": "body",
     "type": "str",
+    "doc": "JSON-обʼєкт тіла для POST.",
     "default": "",
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 60,
     "required": false
    },
    {
     "name": "chars",
     "type": "int",
+    "doc": "Обрізати сирий JSON до N символів.",
     "default": 1500,
     "required": false
    }
@@ -1155,155 +1372,182 @@
   "name": "tz_search",
   "group": "telezip",
   "mutates": false,
-  "doc": "Разовий пошук у TeleZip — НІЧОГО не пише в БД. Усі режими й фільтри.",
+  "scope": "mcp:read",
+  "doc": "Самі повідомлення: тексти, автори, посилання t.me. У БД нічого не пише.\n\nЦе «показати, що там написано». Якщо питання «скільки цього» — бери\n`tz_stats`: він дешевший і не впирається в ліміти видачі.\n\nВіддає: розкладку по днях, топ каналів у вибірці та приклади повідомлень\nіз датою, каналом, автором і посиланням. Дата з прикладу потрібна для\n`tz_context`, якщо захочеш подивитись, що було навколо.\n\nПастки:\n* ПРОБІЛ у query = АБО. Для І — `+`: `\"мигрант +(драка избил)\"`.\n* `limit` і `page_size` взаємовиключні; кожна сторінка — окремі $0.10.\n* лічильник «віддано» — це розмір ВИБІРКИ, а не скільки всього збігів;\n  справжній обсяг питай у `tz_stats`.\n* фільтр лише по каналу чи автору без тексту API не приймає — інструмент\n  сам підставить query=\"*\".",
+  "summary": "Самі повідомлення: тексти, автори, посилання t.me. У БД нічого не пише.",
   "params": [
    {
     "name": "query",
     "type": "str",
+    "doc": "ПОШУК ІЗ ВІДМІНКАМИ. ПРОБІЛ = АБО (не І!): \"мигрант драка\" знайде будь-яке зі слів. Для І став + перед словом/групою: \"мигрант +(драка избил)\". Відмінки самі: \"дрон\" ловить дрона/дрону/дронах — перелічувати не треба. Префікс: \"мобилиз*\" → мобилизация/мобилизовать. Фраза: \"\"сбор денег\"\". Відстань: \"\"снаряд пушка\"~5\" (тильда ЗЛИТНО). Виключення: \"-mavic\" або \"-(всу фронт)\" — мінус ЗЛИТНО, без пробілу. Макроси кластерів лише в дужках: \"+(##бавовна) -(##спам)\". Робоча форма: ТЕМА +(ДІЯ) -(ШУМ).",
     "default": "",
     "required": false
    },
    {
     "name": "days",
     "type": "int",
+    "doc": "Скільки останніх діб узяти, включно з сьогоднішньою. Ігнорується, якщо задані date_from/date_to.",
     "default": 1,
     "required": false
    },
    {
     "name": "date_from",
     "type": "str",
+    "doc": "Початок періоду YYYY-MM-DD. Треба разом із date_to.",
     "default": "",
     "required": false
    },
    {
     "name": "date_to",
     "type": "str",
+    "doc": "Кінець періоду YYYY-MM-DD (включно). Треба разом із date_from.",
     "default": "",
     "required": false
    },
    {
     "name": "exact",
     "type": "str",
+    "doc": "ДОСЛІВНО, без відмінків — для абревіатур, марок, серійних номерів: exact=\"сво\" не зачепить \"свой\"/\"своего\", а query=\"сво\" зачепить. Синтаксис операторів той самий, що й у query. Можна разом із query: тоді умови комбінуються (exact=\"сво\" + query=\"бригада\").",
     "default": "",
     "required": false
    },
    {
     "name": "regex",
     "type": "str",
+    "doc": "Регулярний вираз по тексту повідомлення: картки, IBAN, телефони, крипто-гаманці, координати. Дорогий режим — звужуй вікно й канали.",
     "default": "",
     "required": false
    },
    {
     "name": "channel_term",
     "type": "str",
+    "doc": "Фільтр ПО КАНАЛУ, а не по повідомленню: спершу відбираються канали, у назві/описі яких є ці слова, і лише в них шукається текст. Синтаксис як у query. Приклад: channel_term=\"крым крим АРК\". Не став багато поширених слів — понад 20 000 каналів = відлуп.",
     "default": "",
     "required": false
    },
    {
     "name": "channels",
     "type": "str",
+    "doc": "Обмежити пошук цими каналами: @ім'я або числовий id, через кому. Порожньо = весь індекс (3.5 млн каналів). Щоб узяти ВСЕ з каналу, лишай query=\"*\" і став сюди канал.",
     "default": "",
     "required": false
    },
    {
     "name": "users",
     "type": "str",
+    "doc": "Обмежити пошук дописами цих авторів: @ім'я або числовий TelegramID, через кому. Так дивляться \"усе, що писала ця людина\".",
     "default": "",
     "required": false
    },
    {
     "name": "languages",
     "type": "str",
+    "doc": "Мови повідомлень через кому (ISO 639-3: ru, uk, en…). Порожньо = усі мови, і в вибірку лізе чуже. Для російського Telegram став \"ru\".",
     "default": "",
     "required": false
    },
    {
     "name": "tags",
     "type": "str",
+    "doc": "Шукати лише в каналах із цими тегами (теги каналів TeleZip, через кому).",
     "default": "",
     "required": false
    },
    {
     "name": "exclude_tags",
     "type": "str",
+    "doc": "Виключити канали з цими тегами. Працює лише разом із tags.",
     "default": "",
     "required": false
    },
    {
     "name": "has_media",
     "type": "bool",
+    "doc": "true — лише повідомлення з фото/відео/документом; false — лише без медіа.",
     "default": null,
     "required": false
    },
    {
     "name": "unique",
     "type": "bool",
+    "doc": "true згортає репости (лишає одну копію): менше даних, але ЗАНИЖЕНЕ охоплення. false віддає все, включно з репостами — тим самим запитом, другого виклику для цього не треба.",
     "default": true,
     "required": false
    },
    {
     "name": "source",
     "type": "str",
+    "doc": "Тип даних: telegram-канали (telezip, дефолт), зливи баз (darkzip) або обидва (all).",
     "default": "",
     "required": false
    },
    {
     "name": "thread",
     "type": "int",
+    "doc": "id top-повідомлення: звузити до ОДНІЄЇ гілки коментарів під постом.",
     "default": 0,
     "required": false
    },
    {
     "name": "extra",
     "type": "str",
+    "doc": "JSON із додатковими полями тіла запиту — для того, що з'явилось в API і ще не має власного параметра. Спершу перевір через tz_probe.",
     "default": "",
     "required": false
    },
    {
     "name": "limit",
     "type": "int",
+    "doc": "Стеля викачування, до 10000. Кожна сторінка/виклик — окремі $0.10.",
     "default": 200,
     "required": false
    },
    {
     "name": "sample",
     "type": "bool",
+    "doc": "true — випадкова вибірка до limit замість перших N. Швидше на важких запитах; результат НЕ відтворюваний.",
     "default": false,
     "required": false
    },
    {
     "name": "page_size",
     "type": "int",
+    "doc": "Посторінково замість limit (взаємовиключні). Наступну сторінку бери з page_token у відповіді.",
     "default": 0,
     "required": false
    },
    {
     "name": "page_token",
     "type": "str",
+    "doc": "Токен наступної сторінки з попередньої відповіді.",
     "default": "",
     "required": false
    },
    {
     "name": "samples",
     "type": "int",
+    "doc": "Скільки прикладів повідомлень показати текстом (0 — лише цифри).",
     "default": 5,
     "required": false
    },
    {
     "name": "chars",
     "type": "int",
+    "doc": "Обрізати текст кожного прикладу до N символів.",
     "default": 220,
     "required": false
    },
    {
     "name": "top",
     "type": "int",
+    "doc": "Скільки каналів показати в топі вибірки.",
     "default": 15,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 180,
     "required": false
    }
@@ -1313,11 +1557,14 @@
   "name": "tz_slots_set",
   "group": "telezip",
   "mutates": true,
-  "doc": "Змінити глобальний ліміт паралельних запитів до TeleZip (таблиця слотів).",
+  "scope": "mcp:admin",
+  "doc": "Змінити глобальний ліміт паралельних запитів до TeleZip (таблиця слотів).\n\nТаблиця — джерело правди для УСІХ воркерів; міняється наживо (напр. 1 на час\nтротлінгу 429). Поточний стан — у `tz_status`.",
+  "summary": "Змінити глобальний ліміт паралельних запитів до TeleZip (таблиця слотів).",
   "params": [
    {
     "name": "count",
     "type": "int",
+    "doc": "Скільки паралельних запитів до TeleZip дозволити (1-8) для ВСІХ воркерів.",
     "default": null,
     "required": true
    }
@@ -1327,119 +1574,140 @@
   "name": "tz_stats",
   "group": "telezip",
   "mutates": false,
-  "doc": "Скільки цього є: повідомлення/автори/канали + динаміка — БЕЗ викачування.",
+  "scope": "mcp:read",
+  "doc": "СКІЛЬКИ повідомлень підходить під запит — без самих повідомлень.\n\nРахує на боці TeleZip і віддає лічильники: скільки повідомлень, у скількох\nканалах, від скількох авторів, динаміка по днях/годинах, топ каналів.\nТекстів НЕ повертає — для них `tz_search`.\n\nВИКЛИКАЙ ЦЕ ПЕРШИМ, коли не знаєш обсягу: один запит ($0.10) замість\nпошуку навмання, і працює на довгих вікнах, де пошук відлупило б\n(>300 000 збігів або >10 000 каналів = порожня відповідь).\n\nПастка синтаксису: ПРОБІЛ у query — це АБО, а не І. `\"мигрант драка\"`\nдасть усе про мігрантів ПЛЮС усе про бійки. Потрібне І — пиши\n`\"мигрант +(драка избил напал)\"`.",
+  "summary": "СКІЛЬКИ повідомлень підходить під запит — без самих повідомлень.",
   "params": [
    {
     "name": "query",
     "type": "str",
+    "doc": "ПОШУК ІЗ ВІДМІНКАМИ. ПРОБІЛ = АБО (не І!): \"мигрант драка\" знайде будь-яке зі слів. Для І став + перед словом/групою: \"мигрант +(драка избил)\". Відмінки самі: \"дрон\" ловить дрона/дрону/дронах — перелічувати не треба. Префікс: \"мобилиз*\" → мобилизация/мобилизовать. Фраза: \"\"сбор денег\"\". Відстань: \"\"снаряд пушка\"~5\" (тильда ЗЛИТНО). Виключення: \"-mavic\" або \"-(всу фронт)\" — мінус ЗЛИТНО, без пробілу. Макроси кластерів лише в дужках: \"+(##бавовна) -(##спам)\". Робоча форма: ТЕМА +(ДІЯ) -(ШУМ).",
     "default": "",
     "required": false
    },
    {
     "name": "days",
     "type": "int",
+    "doc": "Скільки останніх діб узяти, включно з сьогоднішньою. Ігнорується, якщо задані date_from/date_to.",
     "default": 7,
     "required": false
    },
    {
     "name": "date_from",
     "type": "str",
+    "doc": "Початок періоду YYYY-MM-DD. Треба разом із date_to.",
     "default": "",
     "required": false
    },
    {
     "name": "date_to",
     "type": "str",
+    "doc": "Кінець періоду YYYY-MM-DD (включно). Треба разом із date_from.",
     "default": "",
     "required": false
    },
    {
     "name": "exact",
     "type": "str",
+    "doc": "ДОСЛІВНО, без відмінків — для абревіатур, марок, серійних номерів: exact=\"сво\" не зачепить \"свой\"/\"своего\", а query=\"сво\" зачепить. Синтаксис операторів той самий, що й у query. Можна разом із query: тоді умови комбінуються (exact=\"сво\" + query=\"бригада\").",
     "default": "",
     "required": false
    },
    {
     "name": "regex",
     "type": "str",
+    "doc": "Регулярний вираз по тексту повідомлення: картки, IBAN, телефони, крипто-гаманці, координати. Дорогий режим — звужуй вікно й канали.",
     "default": "",
     "required": false
    },
    {
     "name": "channel_term",
     "type": "str",
+    "doc": "Фільтр ПО КАНАЛУ, а не по повідомленню: спершу відбираються канали, у назві/описі яких є ці слова, і лише в них шукається текст. Синтаксис як у query. Приклад: channel_term=\"крым крим АРК\". Не став багато поширених слів — понад 20 000 каналів = відлуп.",
     "default": "",
     "required": false
    },
    {
     "name": "channels",
     "type": "str",
+    "doc": "Обмежити пошук цими каналами: @ім'я або числовий id, через кому. Порожньо = весь індекс (3.5 млн каналів). Щоб узяти ВСЕ з каналу, лишай query=\"*\" і став сюди канал.",
     "default": "",
     "required": false
    },
    {
     "name": "users",
     "type": "str",
+    "doc": "Обмежити пошук дописами цих авторів: @ім'я або числовий TelegramID, через кому. Так дивляться \"усе, що писала ця людина\".",
     "default": "",
     "required": false
    },
    {
     "name": "languages",
     "type": "str",
+    "doc": "Мови повідомлень через кому (ISO 639-3: ru, uk, en…). Порожньо = усі мови, і в вибірку лізе чуже. Для російського Telegram став \"ru\".",
     "default": "",
     "required": false
    },
    {
     "name": "tags",
     "type": "str",
+    "doc": "Шукати лише в каналах із цими тегами (теги каналів TeleZip, через кому).",
     "default": "",
     "required": false
    },
    {
     "name": "exclude_tags",
     "type": "str",
+    "doc": "Виключити канали з цими тегами. Працює лише разом із tags.",
     "default": "",
     "required": false
    },
    {
     "name": "has_media",
     "type": "bool",
+    "doc": "true — лише повідомлення з фото/відео/документом; false — лише без медіа.",
     "default": null,
     "required": false
    },
    {
     "name": "source",
     "type": "str",
+    "doc": "Тип даних: telegram-канали (telezip, дефолт), зливи баз (darkzip) або обидва (all).",
     "default": "",
     "required": false
    },
    {
     "name": "thread",
     "type": "int",
+    "doc": "id top-повідомлення: звузити до ОДНІЄЇ гілки коментарів під постом.",
     "default": 0,
     "required": false
    },
    {
     "name": "extra",
     "type": "str",
+    "doc": "JSON із додатковими полями тіла запиту — для того, що з'явилось в API і ще не має власного параметра. Спершу перевір через tz_probe.",
     "default": "",
     "required": false
    },
    {
     "name": "top",
     "type": "int",
+    "doc": "Скільки каналів показати в топі.",
     "default": 15,
     "required": false
    },
    {
     "name": "by",
     "type": "str",
+    "doc": "Гранулярність динаміки: day (по днях) або hour (по годинах).",
     "default": "day",
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 180,
     "required": false
    }
@@ -1449,11 +1717,14 @@
   "name": "tz_status",
   "group": "telezip",
   "mutates": false,
-  "doc": "Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.",
+  "scope": "mcp:read",
+  "doc": "Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.\n\n«Глибина» — найдавніша дата, яку взагалі можна шукати (searchDateLimit):\nглибше неї збір поверне порожньо не через помилку, а бо даних немає.",
+  "summary": "Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.",
   "params": [
    {
     "name": "deep",
     "type": "bool",
+    "doc": "true — додатково сходити в API по статистику індексу (глибина, лаг). Один безкоштовний службовий виклик.",
     "default": true,
     "required": false
    }
@@ -1463,66 +1734,79 @@
   "name": "tz_syntax",
   "group": "telezip",
   "mutates": false,
-  "doc": "Шпаргалка TeleZip: режими запиту, фільтри, оператори, ліміти, граблі.",
+  "scope": "mcp:read",
+  "doc": "Шпаргалка TeleZip: режими запиту, фільтри, оператори, ліміти, граблі.\n\nВикликай ПЕРЕД складанням запиту: діалект свій (`/find text=`), і половина\n«очевидних» звичок (негація, перелік відмінків) тут шкідлива.",
+  "summary": "Шпаргалка TeleZip: режими запиту, фільтри, оператори, ліміти, граблі.",
   "params": []
  },
  {
   "name": "tz_user",
   "group": "telezip",
   "mutates": false,
-  "doc": "Хто це написав: профіль автора за @ім'ям/id або вільний пошук по імені.",
+  "scope": "mcp:read",
+  "doc": "Хто автор: профіль людини за @ім'ям/id або вільний пошук по імені.\n\nДві різні дії: `ref` — точний збіг (@юзернейм або TelegramID, дає id навіть\nколи профілю в базі немає), `term` — вільний пошук по імені/прізвищу.\n\n`posts_days>0` додає останні дописи цієї людини — так з'ясовують, хто\nстоїть за коментарем у моніторингу критики (`Post.author_tg_id`).\nЦе ще один запит до API.",
+  "summary": "Хто автор: профіль людини за @ім'ям/id або вільний пошук по імені.",
   "params": [
    {
     "name": "ref",
     "type": "str",
+    "doc": "@юзернейм або числовий TelegramID (кілька через кому). Точний збіг.",
     "default": "",
     "required": false
    },
    {
     "name": "term",
     "type": "str",
+    "doc": "Вільний пошук по UserName/FirstName/LastName (дослівно, без відмінків).",
     "default": "",
     "required": false
    },
    {
     "name": "is_bot",
     "type": "bool",
+    "doc": "Фільтр: лише боти (true) чи лише люди (false).",
     "default": null,
     "required": false
    },
    {
     "name": "is_active",
     "type": "bool",
+    "doc": "Фільтр за ознакою активності профілю.",
     "default": null,
     "required": false
    },
    {
     "name": "posts_days",
     "type": "int",
+    "doc": "Якщо >0 — додати останні дописи автора за стільки діб (це ще один запит, ще $0.10).",
     "default": 0,
     "required": false
    },
    {
     "name": "posts_limit",
     "type": "int",
+    "doc": "Скільки дописів показати.",
     "default": 20,
     "required": false
    },
    {
     "name": "chars",
     "type": "int",
+    "doc": "Обрізати текст до N символів.",
     "default": 200,
     "required": false
    },
    {
     "name": "page_size",
     "type": "int",
+    "doc": "Скільки профілів на сторінку.",
     "default": 20,
     "required": false
    },
    {
     "name": "timeout",
     "type": "int",
+    "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 120,
     "required": false
    }

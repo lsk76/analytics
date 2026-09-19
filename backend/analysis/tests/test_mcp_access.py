@@ -49,11 +49,9 @@ def test_operator_can_write_but_not_touch_global_config(alice):
     TaskFactory(slug="t2", owner=alice.user)
     out = mcp_api.call("task_update", {"ref": "t2", "chunk_days": 5}, who=alice)
     assert "чанк=5 дн" in out
-    for tool, payload in [("setting_set", {"key": "k", "value": "v"}),
-                          ("tz_slots_set", {"count": 2}),
-                          ("tz_probe", {"endpoint": "/v4/stats"})]:
-        with pytest.raises(ToolError, match="mcp:admin"):
-            mcp_api.call(tool, payload, who=alice)
+    # глобальні налаштування — лише адмін
+    with pytest.raises(ToolError, match="mcp:admin"):
+        mcp_api.call("setting_set", {"key": "k", "value": "v"}, who=alice)
 
 
 def test_admin_role_passes_admin_gate():

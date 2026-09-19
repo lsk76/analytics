@@ -101,12 +101,18 @@ _EXTRA = ('JSON із додатковими полями тіла запиту �
           'і ще не має власного параметра. Спершу перевір через tz_probe.')
 _TIMEOUT = 'Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).'
 
+# Ключі — під ОБИДВА іменування: діалект бота (`text=`, `channeltext=`, …), яким
+# названі параметри інструментів, і внутрішні імена, що лишились у tz_ingest.
 CRITERIA_DOCS = {
-    "query": _Q, "exact": _EXACT, "regex": _REGEX, "channel_term": _CHTERM,
-    "channels": _CHANNELS, "users": _USERS, "languages": _LANGS, "days": _DAYS,
-    "date_from": _FROM, "date_to": _TO, "tags": _TAGS, "exclude_tags": _XTAGS,
-    "has_media": _MEDIA, "source": _SOURCE, "thread": _THREAD, "extra": _EXTRA,
-    "timeout": _TIMEOUT, "unique": _UNIQUE,
+    "text": _Q, "query": _Q, "exact": _EXACT, "regex": _REGEX,
+    "channeltext": _CHTERM, "channel_term": _CHTERM,
+    "channel": _CHANNELS, "channels": _CHANNELS,
+    "user": _USERS, "users": _USERS,
+    "lang": _LANGS, "languages": _LANGS,
+    "hasmedia": _MEDIA, "has_media": _MEDIA,
+    "days": _DAYS, "date_from": _FROM, "date_to": _TO, "tags": _TAGS,
+    "exclude_tags": _XTAGS, "source": _SOURCE, "thread": _THREAD,
+    "extra": _EXTRA, "timeout": _TIMEOUT, "unique": _UNIQUE,
 }
 
 
@@ -130,7 +136,7 @@ def _run(coro):
             raise ToolError(f"TeleZip не відповідає: {fmt.trunc(text, 200)}\n{UNREACHABLE_HINT}")
         if "429" in text:
             raise ToolError("TeleZip 429 (ліміт запитів) — зменш вікно або слоти "
-                            "(`tz_status` → `tz_slots_set`).")
+                            "(`tz_status` → `tz_slots`).")
         if "403" in text:
             raise ToolError(f"TeleZip 403: ключ не має прав на цей виклик. {fmt.trunc(text, 200)}")
         raise ToolError(f"TeleZip: {fmt.trunc(text, 400)}")
@@ -355,195 +361,87 @@ async def _index_stats():
         return await tz.index_stats()
 
 
-@tool("tz_syntax", group="telezip")
-def tz_syntax():
-    """Довідник синтаксису TeleZip: оператори, режими, ліміти, ціна.
-
-    Читай ПЕРЕД складанням першого запиту в сесії. Синтаксис не гугловий:
-    пробіл тут означає АБО, і це найчастіша причина сміттєвих результатів.
-    """
-    return """## Головне: ПРОБІЛ = АБО
-
-Пошук на Elasticsearch, оператор за замовчуванням — «або містить».
-
-    мигрант драка          → мигрант АБО драка        (майже весь індекс)
-    мигрант +драка         → мигрант І драка
-    мигрант +(драка избил) → мигрант І (драка АБО избил)
-
-| хочу | пишу | приклад |
-|------|------|---------|
-| АБО | пробіл або `\|` | `дрон беспилотник` |
-| І | `+` перед словом/групою | `дрон +FPV` |
-| НЕ | `-` ЗЛИТНО | `дрон -mavic`, `дрон -"сектор газа"` |
-| група | `( … )` | `дрон +(тасс -риа)` |
-| фраза | `"…"` | `"сбор денег"` |
-| відстань | `"a b"~N` (тильда злитно) | `"снаряд пушка"~5` |
-| префікс | `слово*` | `мобилиз*` → мобилизация/мобилизовать |
-
-Відмінки застосовуються САМІ: `дрон` ловить дрона/дрону/дронах, `депутат` —
-депутата/депутатов. Перелічувати форми руками не треба. Регістр не важливий.
-
-## Чотири режими пошуку (можна комбінувати)
-
-| режим | що робить | коли |
-|-------|-----------|------|
-| `query` | з відмінками | звичайний тематичний пошук |
-| `exact` | ДОСЛІВНО, без відмінків | абревіатури, марки: `exact="сво"` |
-| `regex` | регулярка по тексту | картки, IBAN, телефони, координати |
-| `channel_term` | фільтр по назві/опису КАНАЛУ | «усі кримські канали про X» |
-
-`exact="сво"` не зачепить «свой», а `query="сво"` — зачепить. Комбінація
-`exact="сво"` + `query="бригада"` шукає СВО дослівно разом із будь-якою формою
-«бригада».
-
-## Готові набори термінів (макроси)
-
-Кластерні теги TeleZip вживаються ЛИШЕ в дужках:
-
-    Макеевка +(##бавовна) -(##спам ##аренда ##крипта)
-
-Тег із помилкою мовчки дає нуль — звіряй назви через `tz_macros`.
-
-## Фільтри
-
-`channels` / `users` — лише ці канали чи автори (фільтр без тексту API не
-приймає, інструменти самі підставлять `query="*"`).
-`languages=ru` — інакше в вибірку лізуть інші мови.
-`has_media`, `tags`/`exclude_tags`, `source` (telezip | darkzip | all),
-`thread` — одна гілка коментарів.
-`unique=true` згортає репости (охоплення занижується); `false` віддає все ТИМ
-САМИМ запитом — другий виклик заради репостів не потрібен.
-
-## Межі (за ними — «відлуп»: порожньо / 500 / таймаут)
-
-пошук > 3 хв · збіг > 300 000 повідомлень · > 10 000 каналів ·
-`channel_term`, що зачепив > 20 000 каналів · глибина індексу — лише в межах
-`searchDateLimit` (зараз ~з 2025-10, див. `tz_status`); глибше не помилка, а
-просто порожньо.
-
-## ЦІНА: один виклик ≈ $0.10
-
-Платиться за ВИКЛИК, не за обсяг: порожня відповідь коштує стільки ж, скільки
-мільйон повідомлень.
-* обсяг питай `tz_stats` (1 виклик), а не пошуком навмання;
-* `tz_calibrate` — 2 виклики ($0.20), бо міряє ще й репости;
-* кожна сторінка (`page_token`) і кожен розділений важкий діапазон — окремий запит;
-* збір = 1 запит на чанк: 30 днів по дню — $3.00, по 3 дні — $1.00.
-
-## Маршрут
-
-    tz_stats (скільки цього є) → tz_calibrate (дублі, ризик, ціна)
-    → tz_search (тексти) → task_update (зафіксувати запит) → run_create (збір)
-
-Розвідка: `tz_channels` (хто пише про тему), `tz_channel_posts` (стрічка
-одного каналу), `tz_user` (хто автор), `tz_context` (що було навколо),
-`tz_macros` (готові підзапити), `tz_probe` (сире API)."""
+# --------------------------------------------------------------------------- API
+# Три ендпоінти TeleZip — три інструменти, один до одного. Імена параметрів
+# повторюють діалект бота (`text=`, `exact=`, `channeltext=`, `channel=`,
+# `user=`, `lang=`), щоб те, що написано в гайді, працювало тут без перекладу.
 
 
-# --------------------------------------------------------------------------- пошук
-
-@tool("tz_stats", group="telezip", params={**CRITERIA_DOCS,
-      "by": "Гранулярність динаміки: day (по днях) або hour (по годинах).",
-      "top": "Скільки каналів показати в топі."})
-def tz_stats(query: str = "", days: int = 7, date_from: str = "", date_to: str = "",
-             exact: str = "", regex: str = "", channel_term: str = "", channels: str = "",
-             users: str = "", languages: str = "", tags: str = "", exclude_tags: str = "",
-             has_media: bool = None, source: str = "", thread: int = 0,
-             extra: str = "", top: int = 15, by: str = "day", timeout: int = 180):
-    """СКІЛЬКИ повідомлень підходить під запит — без самих повідомлень.
-
-    Рахує на боці TeleZip і віддає лічильники: скільки повідомлень, у скількох
-    каналах, від скількох авторів, динаміка по днях/годинах, топ каналів.
-    Текстів НЕ повертає — для них `tz_search`.
-
-    ВИКЛИКАЙ ЦЕ ПЕРШИМ, коли не знаєш обсягу: один запит ($0.10) замість
-    пошуку навмання, і працює на довгих вікнах, де пошук відлупило б
-    (>300 000 збігів або >10 000 каналів = порожня відповідь).
-
-    Пастка синтаксису: ПРОБІЛ у query — це АБО, а не І. `"мигрант драка"`
-    дасть усе про мігрантів ПЛЮС усе про бійки. Потрібне І — пиши
-    `"мигрант +(драка избил напал)"`.
-    """
-    d_from, d_to, span = _window(days, date_from, date_to, allow_long=True)
-    crit = _criteria(query=query, exact=exact, regex=regex, channel_term=channel_term,
-                     channels=channels, users=users, languages=languages, tags=tags,
-                     exclude_tags=exclude_tags, has_media=has_media, source=source,
-                     thread=thread, extra=extra, d_from=d_from, d_to=d_to)
-
-    async def go():
-        async with _client(timeout) as tz:
-            return await tz.search_stats(crit)
-    st = _run(go())
-
-    per_hour = st.get("messagesPerHour") or {}
-    buckets = {}
-    for ts, n in per_hour.items():
-        key = ts[:10] if by == "day" else ts[:13].replace("T", " ")
-        buckets[key] = buckets.get(key, 0) + n
-    dyn = "  ".join(f"{k[5:] if by == 'day' else k[8:]}:{v}"
-                    for k, v in sorted(buckets.items()))
-    chans = sorted(st.get("channels") or [], key=lambda c: -c.get("messageCount", 0))[:top]
-    total = st.get("messageCount", 0)
-    parts = [fmt.section("Статистика запиту", fmt.kv([
-        ("критерії", _crit_line(crit)),
-        ("вікно", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)"),
-        ("повідомлень", f"{total} ({total / span:.0f}/добу)" if span else total),
-        ("каналів", st.get("channelCount", 0)),
-        ("авторів", st.get("userCount", 0)),
-        ("перше/останнє", f"{(st.get('firstMessageDate') or '—')[:16]} … "
-                          f"{(st.get('lastMessageDate') or '—')[:16]}"),
-        ("ціна", _cost(1, "найдешевший спосіб зрозуміти обсяг")),
-    ]))]
-    if dyn:
-        parts.append(fmt.section(f"Динаміка (по {'днях' if by == 'day' else 'годинах'})", dyn))
-    if chans:
-        parts.append(fmt.section("Топ каналів", fmt.table(
-            ["канал", "повідомлень", "частка"],
-            [[f"@{c.get('name') or c.get('id')}", c.get("messageCount", 0),
-              fmt.pct(c.get("messageCount", 0), total)] for c in chans])))
-    warn = _warnings(crit, span)
-    if warn:
-        parts.append("⚠ " + "\n⚠ ".join(warn))
-    return fmt.joinsec(*parts)
-
-
-@tool("tz_search", group="telezip", params={**CRITERIA_DOCS,
-      "limit": "Стеля викачування, до 10000. Кожна сторінка/виклик — окремі $0.10.",
-      "sample": "true — випадкова вибірка до limit замість перших N. Швидше на важких запитах; результат НЕ відтворюваний.",
-      "page_size": "Посторінково замість limit (взаємовиключні). Наступну сторінку бери з page_token у відповіді.",
+@tool("tz_find", group="telezip", params={**CRITERIA_DOCS,
+      "stats": "true — повернути ЛІЧИЛЬНИКИ (скільки повідомлень, каналів, авторів + динаміка) замість самих повідомлень. Ендпоінт /FindStats: працює там, де звичайний пошук відлупило б за обсягом, і не тягне тексти. УВАГА: у цьому режимі `unique` не діє — API його не приймає.",
+      "by": "Для stats=true: гранулярність динаміки — day або hour.",
+      "limit": "Стеля викачування повідомлень, до 10000.",
+      "sample": "true — випадкова вибірка до limit замість перших N (швидше на важких запитах, результат не відтворюваний).",
+      "page_size": "Посторінково замість limit (взаємовиключні); наступну сторінку бери з page_token у відповіді.",
       "page_token": "Токен наступної сторінки з попередньої відповіді.",
-      "samples": "Скільки прикладів повідомлень показати текстом (0 — лише цифри).",
+      "samples": "Скільки повідомлень показати текстом.",
       "chars": "Обрізати текст кожного прикладу до N символів.",
-      "top": "Скільки каналів показати в топі вибірки."})
-def tz_search(query: str = "", days: int = 1, date_from: str = "", date_to: str = "",
-              exact: str = "", regex: str = "", channel_term: str = "", channels: str = "",
-              users: str = "", languages: str = "", tags: str = "", exclude_tags: str = "",
-              has_media: bool = None, unique: bool = True, source: str = "",
-              thread: int = 0, extra: str = "", limit: int = 200, sample: bool = False,
-              page_size: int = 0, page_token: str = "", samples: int = 5,
-              chars: int = 220, top: int = 15, timeout: int = 180):
-    """Самі повідомлення: тексти, автори, посилання t.me. У БД нічого не пише.
+      "top": "Скільки каналів показати в топі."})
+def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "",
+            exact: str = "", regex: str = "", channeltext: str = "", channel: str = "",
+            user: str = "", lang: str = "ru", hasmedia: bool = None, unique: bool = True,
+            source: str = "", thread: int = 0, extra: str = "", stats: bool = False,
+            by: str = "day", limit: int = 200, sample: bool = False, page_size: int = 0,
+            page_token: str = "", samples: int = 5, chars: int = 220, top: int = 15,
+            timeout: int = 180):
+    """/FIND — пошук у текстах повідомлень Telegram (217 млрд повідомлень, 3.5 млн каналів).
 
-    Це «показати, що там написано». Якщо питання «скільки цього» — бери
-    `tz_stats`: він дешевший і не впирається в ліміти видачі.
+    Потрібен хоча б один критерій: text, exact, regex, channel або user.
 
-    Віддає: розкладку по днях, топ каналів у вибірці та приклади повідомлень
-    із датою, каналом, автором і посиланням. Дата з прикладу потрібна для
-    `tz_context`, якщо захочеш подивитись, що було навколо.
+    ПРОБІЛ = АБО, не І. `text="мигрант драка"` дасть усе про мігрантів ПЛЮС усе
+    про бійки. Потрібне І — `text="мигрант +(драка избил)"`. Мінус ЗЛИТНО:
+    `-mavic`. Відмінки застосовуються самі, перелічувати не треба.
 
-    Пастки:
-    * ПРОБІЛ у query = АБО. Для І — `+`: `"мигрант +(драка избил)"`.
-    * `limit` і `page_size` взаємовиключні; кожна сторінка — окремі $0.10.
-    * лічильник «віддано» — це розмір ВИБІРКИ, а не скільки всього збігів;
-      справжній обсяг питай у `tz_stats`.
-    * фільтр лише по каналу чи автору без тексту API не приймає — інструмент
-      сам підставить query="*".
+    Два режими виводу:
+      * `stats=false` (типово) — самі повідомлення: тексти, автори, посилання.
+        Лічильник «віддано» = розмір ВИБІРКИ, а не скільки всього збігів;
+      * `stats=true` — лише цифри: скільки повідомлень, каналів, авторів,
+        динаміка по днях/годинах, топ каналів. Питай так обсяг ПЕРЕД тим, як
+        качати: працює на довгих вікнах, де видача відлупилась би.
+
+    Кожен виклик ≈ $0.10 (платиться за виклик, не за обсяг).
     """
-    d_from, d_to, span = _window(days, date_from, date_to)
-    crit = _criteria(query=query, exact=exact, regex=regex, channel_term=channel_term,
-                     channels=channels, users=users, languages=languages, tags=tags,
-                     exclude_tags=exclude_tags, has_media=has_media, unique=unique,
-                     source=source, thread=thread, extra=extra, d_from=d_from, d_to=d_to)
+    d_from, d_to, span = _window(days, date_from, date_to, allow_long=bool(stats))
+    crit = _criteria(query=text, exact=exact, regex=regex, channel_term=channeltext,
+                     channels=channel, users=user, languages=lang, has_media=hasmedia,
+                     unique=None if stats else unique, source=source, thread=thread,
+                     extra=extra, d_from=d_from, d_to=d_to)
+    head_common = [("критерії", _crit_line(crit)),
+                   ("вікно", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)")]
+    warn = _warnings(crit, span)
+
+    if stats:
+        async def go_stats():
+            async with _client(timeout) as tz:
+                return await tz.search_stats(crit)
+        st = _run(go_stats())
+        total = st.get("messageCount", 0)
+        buckets = {}
+        for ts, n in (st.get("messagesPerHour") or {}).items():
+            key = ts[:10] if by == "day" else ts[:13].replace("T", " ")
+            buckets[key] = buckets.get(key, 0) + n
+        chans = sorted(st.get("channels") or [],
+                       key=lambda c: -c.get("messageCount", 0))[:top]
+        parts = [fmt.section("/FIND — статистика", fmt.kv(head_common + [
+            ("повідомлень", f"{total} ({total / span:.0f}/добу)" if span else total),
+            ("каналів", st.get("channelCount", 0)),
+            ("авторів", st.get("userCount", 0)),
+            ("перше/останнє", f"{(st.get('firstMessageDate') or '—')[:16]} … "
+                              f"{(st.get('lastMessageDate') or '—')[:16]}"),
+            ("ціна", _cost(1)),
+        ]))]
+        if buckets:
+            parts.append(fmt.section(f"Динаміка (по {'днях' if by == 'day' else 'годинах'})",
+                                     "  ".join(f"{k[5:] if by == 'day' else k[8:]}:{v}"
+                                               for k, v in sorted(buckets.items()))))
+        if chans:
+            parts.append(fmt.section("Топ каналів", fmt.table(
+                ["канал", "повідомлень", "частка"],
+                [[f"@{c.get('name') or c.get('id')}", c.get("messageCount", 0),
+                  fmt.pct(c.get("messageCount", 0), total)] for c in chans])))
+        if warn:
+            parts.append("⚠ " + "\n⚠ ".join(warn))
+        return fmt.joinsec(*parts)
 
     async def go():
         async with _client(timeout) as tz:
@@ -552,23 +450,19 @@ def tz_search(query: str = "", days: int = 1, date_from: str = "", date_to: str 
                                    sample_only=bool(sample))
     res = _run(go())
     rows = res["messages"]
-    parts = [fmt.section("Пошук", fmt.kv([
-        ("критерії", _crit_line(crit)),
-        ("вікно", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)"),
-        ("віддано", f"{len(rows)}"
-                    + (f" (стеля {limit}{', випадкова вибірка' if sample else ''})"
-                       if not page_size else f" (сторінка {page_size})")),
+    parts = [fmt.section("/FIND — повідомлення", fmt.kv(head_common + [
+        ("віддано", f"{len(rows)}" + (f" (стеля {limit}{', випадкова вибірка' if sample else ''})"
+                                      if not page_size else f" (сторінка {page_size})")),
         ("каналів у вибірці", len({r.get("channel_id") for r in rows})),
         ("ще є сторінка", f"page_token={res['next_page_token']}"
          if res.get("next_page_token") else "—"),
-        ("ціна", _cost(1, "кожна наступна сторінка — ще один")),
+        ("ціна", _cost(1, "обсяг за період — той самий виклик зі stats=true")),
     ]))]
-    warn = _warnings(crit, span)
     if warn:
         parts.append("⚠ " + "\n⚠ ".join(warn))
     if not rows:
-        parts.append("Порожньо. Або справді нема збігів, або запит відлупило "
-                     "(ліміти — `tz_syntax`), або період глибший за індекс (`tz_status`).")
+        parts.append("Порожньо: або справді нема збігів, або запит відлупило за "
+                     "лімітами, або період глибший за індекс (`tz_status`).")
         return fmt.joinsec(*parts)
     parts.append(fmt.section("По днях", "  ".join(f"{d[5:]}:{n}" for d, n in _by_day(rows))))
     parts.append(fmt.section("Топ каналів у вибірці", fmt.table(
@@ -580,221 +474,101 @@ def tz_search(query: str = "", days: int = 1, date_from: str = "", date_to: str 
     return fmt.joinsec(*parts)
 
 
-@tool("tz_calibrate", group="telezip", params={**CRITERIA_DOCS,
-      "project_days": "На скільки днів проєктувати обсяг проби (типово місяць)."})
-def tz_calibrate(query: str = "", days: int = 3, exact: str = "", regex: str = "",
-                 channel_term: str = "", channels: str = "", users: str = "",
-                 languages: str = "ru", tags: str = "", project_days: int = 30,
-                 timeout: int = 180):
-    """Чи годиться запит для ПЛАНОВОГО збору: обсяг, репости, ризик відлупу.
-
-    Робить два виклики статистики на короткій пробі (unique=true і false),
-    показує скільки унікальних повідомлень на добу, у скількох каналах, яка
-    частка репостів, і проєктує обсяг на `project_days`. Разом — $0.20.
-
-    Навіщо окремо від `tz_stats`: відповідає не «скільки цього є», а «що буде,
-    якщо це поставити в конвеєр» — чи не потоне задача, чи не відлупить TeleZip
-    вікно цілком, і скільки коштуватиме збір.
-
-    Маршрут: tz_stats → tz_calibrate → tz_search (глянути тексти) →
-    task_update (зафіксувати запит у задачі) → run_create (плановий збір).
-    """
-    d_from, d_to, span = _window(days, "", "")
-    base = dict(query=query, exact=exact, regex=regex, channel_term=channel_term,
-                channels=channels, users=users, languages=languages, tags=tags,
-                d_from=d_from, d_to=d_to)
-
-    async def go():
-        async with _client(timeout) as tz:
-            uniq = await tz.search_stats(_criteria(**base, unique=True))
-            allm = await tz.search_stats(_criteria(**base, unique=False))
-            return uniq, allm
-    uniq, allm = _run(go())
-
-    n_uniq, n_all = uniq.get("messageCount", 0), allm.get("messageCount", 0)
-    per_day = n_uniq / span if span else 0
-    projected = int(per_day * max(1, int(project_days)))
-    risk = []
-    if projected > 300_000:
-        risk.append(f"проєкція {projected} > 300k — TeleZip відлупить вікно; збирай "
-                    "по днях (`run_create` так і робить) і звужуй запит")
-    elif projected > 50_000:
-        risk.append(f"проєкція {projected} — важко для одного вікна, конвеєр має різати по днях")
-    if uniq.get("channelCount", 0) > 3000:
-        risk.append(f"{uniq['channelCount']} каналів уже за {span} дн — межа 10k близько")
-    risk += _warnings(_criteria(**base), span)
-    chans = sorted(uniq.get("channels") or [], key=lambda c: -c.get("messageCount", 0))[:10]
-    return fmt.joinsec(
-        fmt.section("Калібрування", fmt.kv([
-            ("критерії", _crit_line(_criteria(**base))),
-            ("проба", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)"),
-            ("unique=true", f"{n_uniq} ({per_day:.0f}/добу, {uniq.get('channelCount', 0)} каналів, "
-                            f"{uniq.get('userCount', 0)} авторів)"),
-            ("unique=false", f"{n_all} — репости ×{(n_all / n_uniq) if n_uniq else 0:.1f}"),
-            (f"проєкція на {project_days} дн", f"~{projected} (unique)"),
-            ("ціна", _cost(2, "unique on/off — два виклики статистики")),
-        ])),
-        fmt.section("Топ каналів проби", fmt.table(
-            ["канал", "повідомлень"],
-            [[f"@{c.get('name') or c.get('id')}", c.get("messageCount", 0)] for c in chans])),
-        ("⚠ " + "\n⚠ ".join(risk)) if risk else "✓ ризиків відлупу не видно",
-        "Далі: tz_search (тексти) → task_update (зафіксувати запит) → run_create (збір).")
-
-
-@tool("tz_channel_posts", group="telezip", params={**CRITERIA_DOCS,
-      "channel": "Канал або чат: @ім'я чи числовий id. Обов'язковий.",
-      "limit": "Скільки повідомлень витягти (стеля 10000).",
-      "samples": "Скільки показати текстом.", "chars": "Обрізати текст до N символів."})
-def tz_channel_posts(channel: str, days: int = 1, date_from: str = "", date_to: str = "",
-                     query: str = "*", users: str = "", thread: int = 0,
-                     limit: int = 300, samples: int = 10, chars: int = 220,
-                     unique: bool = True, timeout: int = 180):
-    """Стрічка ОДНОГО каналу чи чату за період — усе підряд, без пошуку по словах.
-
-    Канонічний прийом: `query="*"` плюс фільтр каналу. Саме так збирають
-    матеріал по конкретному джерелу, не ганяючи широкий запит по всьому індексу.
-
-    Якщо потрібні не всі повідомлення, а лише зі словом — постав своє `query`.
-    Для однієї гілки коментарів під постом — `thread` (id top-повідомлення).
-    """
-    if not channel.strip():
-        raise ToolError("вкажи канал: @ім'я або числовий id")
-    return tz_search(query=query, days=days, date_from=date_from, date_to=date_to,
-                     channels=channel, users=users, thread=thread, limit=limit,
-                     samples=samples, chars=chars, unique=unique, timeout=timeout)
-
-
-# --------------------------------------------------------------------------- довідники
-
 @tool("tz_channels", group="telezip", params={
-      "term": "Вільний пошук по назві, опису й юзернейму каналу. Синтаксис як у query: пробіл = АБО, + = І. Приклад: \"Якутия +(новости чат)\".",
-      "title": "Шукати лише в НАЗВІ каналу.", "about": "Шукати лише в ОПИСІ каналу.",
-      "names": "Конкретні канали: @ім'я або id через кому (точний збіг).",
-      "source": _SOURCE, "page_size": "Скільки каналів на сторінку.",
+      "term": "Вільний пошук по назві, опису й юзернейму разом. Синтаксис як у tz_find: пробіл = АБО, + = І. Приклад: \"Якутия +(новости чат)\".",
+      "name": "Юзернейм каналу, точний збіг, без @ (напр. sakhaday).",
+      "title": "Пошук лише по НАЗВІ каналу (з відмінками, оператори працюють).",
+      "about": "Пошук лише по ОПИСУ каналу.",
+      "id": "Числові TelegramID каналів через кому.",
+      "source": _SOURCE,
+      "page_size": "Скільки каналів на сторінку.",
       "page_token": "Токен наступної сторінки з попередньої відповіді.",
       "timeout": _TIMEOUT})
-def tz_channels(term: str = "", title: str = "", about: str = "", names: str = "",
-                source: str = "", page_size: int = 30, page_token: str = "",
-                timeout: int = 120):
-    """Знайти КАНАЛИ (не повідомлення) за назвою чи описом — «хто взагалі пише про X».
+def tz_channels(term: str = "", name: str = "", title: str = "", about: str = "",
+                id: str = "", source: str = "", page_size: int = 30,
+                page_token: str = "", timeout: int = 120):
+    """/CHANNELS — пошук каналів і чатів у базі TeleZip (не в Телеграмі загалом).
 
-    Шукає в довіднику TeleZip (3.5 млн каналів), а не в Телеграмі загалом.
-    Так набирають whitelist для моніторингу: регіональні новинники, чати міста.
-    У відповіді видно підписників, мову, тип (канал/чат), чи він у нас уже є.
+    Канали, яких TeleZip не вантажить, тут не знайдуться. Понад 10 000 збігів —
+    відлуп, треба звужувати.
 
-    Не плутай із `channel_term` у пошуку повідомлень: там канали відбираються
-    так само, але результат — повідомлення. Тут результат — самі канали.
-    Понад 10 000 збігів = відлуп, звужуй критерій.
+    Віддає: id, юзернейм, назву, опис, підписників, скільки повідомлень
+    збережено, мову, канал це чи чат, і чи він ЗАРАЗ у моніторингу (якщо ні —
+    доступна лише збережена історія). Плюс позначку, чи є він у нашому довіднику.
+
+    Звідси беруть `id`/`name` для `tz_find(channel=...)`.
     """
-    if not any([term, title, about, names]):
-        raise ToolError("дай критерій: term / title / about / names")
-    ch_names, ch_ids = _split_refs(names)
+    if not any([term, name, title, about, id]):
+        raise ToolError("дай критерій: term / name / title / about / id")
+    names, ids = _split_refs(", ".join(x for x in (name, id) if x))
 
     async def go():
         async with _client(timeout) as tz:
             return await tz.search_channels(
-                channel_ids=ch_ids, channel_names=ch_names, title=title, about=about,
+                channel_ids=ids, channel_names=names, title=title, about=about,
                 channel_term=term, source=source, page_size=int(page_size),
                 page_token=page_token)
     data = _run(go())
     rows = data.get("channels") or []
     known = {c.tg_id: c for c in Channel.objects.filter(
         tg_id__in=[r.get("id") for r in rows if r.get("id")])}
-    table = fmt.table(
-        ["id", "username", "назва", "підп.", "повідом.", "мова", "тип", "актив", "у нас"],
-        [[r.get("id"), f"@{r.get('name')}" if r.get("name") else "—",
-          fmt.trunc(r.get("title"), 32), r.get("userCount") or 0,
-          r.get("messageCount") or 0, r.get("language") or "—",
-          "канал" if r.get("isChannel") else "чат",
-          fmt.flag(bool(r.get("isActive"))),
-          f"#{known[r['id']].id}" if r.get("id") in known else "—"]
-         for r in rows])
+    if not rows:
+        return "За цим критерієм каналів немає. Точний збіг — у `name`; за описом — `term`/`about`."
     return fmt.joinsec(
-        fmt.section("Канали TeleZip", fmt.kv([
-            ("критерій", term or title or about or names),
-            ("показано", f"{len(rows)}"
-             + (" (є наступна сторінка)" if data.get("nextPageToken") else "")),
+        fmt.section("/CHANNELS", fmt.kv([
+            ("критерій", term or name or title or about or id),
+            ("показано", f"{len(rows)}" + (" (є наступна сторінка)"
+                                           if data.get("nextPageToken") else "")),
             ("ще є сторінка", f"page_token={data['nextPageToken']}"
              if data.get("nextPageToken") else "—"),
+            ("ціна", _cost(1)),
         ])),
-        table,
-        "«у нас» — рядок у довіднику Channel; додати в моніторинг: chats_list/chat_update.")
+        fmt.table(["id", "username", "назва", "підп.", "повідом.", "мова", "тип",
+                   "у моніторингу", "у нас"],
+                  [[r.get("id"), f"@{r.get('name')}" if r.get("name") else "—",
+                    fmt.trunc(r.get("title"), 30), r.get("userCount") or 0,
+                    r.get("messageCount") or 0, r.get("language") or "—",
+                    "канал" if r.get("isChannel") else "чат",
+                    fmt.flag(bool(r.get("isActive"))),
+                    f"#{known[r['id']].id}" if r.get("id") in known else "—"]
+                   for r in rows]),
+        "«у нас» — рядок у довіднику Channel; підключити до моніторингу: chats_list/chat_update.")
 
 
-@tool("tz_channel", group="telezip", params={
-      "ref": "Канал: @ім'я (точний збіг) або числовий id. Шукати за описом — tz_channels.",
-      "timeout": _TIMEOUT})
-def tz_channel(ref: str, timeout: int = 120):
-    """Картка ОДНОГО каналу за точним @ім'ям або id: підписники, мова, активність.
-
-    Точний збіг — якщо імені не знаєш, шукай за описом через `tz_channels`.
-    «У моніторингу TeleZip» = чи його читають далі; якщо ні, доступна лише
-    збережена історія. Також показує, чи канал уже є в нашому довіднику.
-    """
-    names, ids = _split_refs(ref)
-
-    async def go():
-        async with _client(timeout) as tz:
-            return await tz.search_channels(channel_ids=ids, channel_names=names,
-                                            page_size=5)
-    rows = (_run(go()) or {}).get("channels") or []
-    if not rows:
-        raise ToolError(f"TeleZip не знає каналу «{ref}» (перевір написання; "
-                        "пошук по імені — дослівний, по опису — `tz_channels`)")
-    c = rows[0]
-    local = Channel.objects.filter(tg_id=c.get("id")).first()
-    return fmt.section(f"TeleZip: {ref}", fmt.kv([
-        ("id", c.get("id")),
-        ("username", f"@{c.get('name')}" if c.get("name") else "—"),
-        ("назва", c.get("title")),
-        ("підписників", c.get("userCount")),
-        ("повідомлень у базі", c.get("messageCount")),
-        ("мова", c.get("language") or "—"),
-        ("тип", "канал" if c.get("isChannel") else "чат"),
-        ("у моніторингу TeleZip", fmt.flag(bool(c.get("isActive")))
-         + ("" if c.get("isActive") else " — лише збережена історія")),
-        ("опис", fmt.trunc(c.get("about"), 300)),
-        ("у нашому довіднику", f"Channel #{local.id}, регіон "
-                               f"{local.region_subject.name if local.region_subject_id else '—'}, "
-                               f"моніторингів: {local.enrolled_in.count()}" if local else "НЕМА"),
-    ]))
-
-
-@tool("tz_user", group="telezip", params={
-      "ref": "@юзернейм або числовий TelegramID (кілька через кому). Точний збіг.",
-      "term": "Вільний пошук по UserName/FirstName/LastName (дослівно, без відмінків).",
-      "is_bot": "Фільтр: лише боти (true) чи лише люди (false).",
+@tool("tz_users", group="telezip", params={
+      "username": "Юзернейми через кому, без @ — точний збіг. Віддає TelegramID навіть тоді, коли профілю в базі немає.",
+      "id": "Числові TelegramID через кому.",
+      "term": "Вільний пошук по UserName / FirstName / LastName (дослівно, без відмінків).",
+      "is_bot": "Лише боти (true) чи лише люди (false).",
       "is_active": "Фільтр за ознакою активності профілю.",
-      "posts_days": "Якщо >0 — додати останні дописи автора за стільки діб (це ще один запит, ще $0.10).",
-      "posts_limit": "Скільки дописів показати.", "chars": "Обрізати текст до N символів.",
-      "page_size": "Скільки профілів на сторінку.", "timeout": _TIMEOUT})
-def tz_user(ref: str = "", term: str = "", is_bot: bool = None, is_active: bool = None,
-            posts_days: int = 0, posts_limit: int = 20, chars: int = 200,
-            page_size: int = 20, timeout: int = 120):
-    """Хто автор: профіль людини за @ім'ям/id або вільний пошук по імені.
+      "page_size": "Скільки профілів на сторінку.",
+      "timeout": _TIMEOUT})
+def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = None,
+             is_active: bool = None, page_size: int = 20, timeout: int = 120):
+    """/USERS — пошук людей за профілем: юзернейм, ім'я, прізвище, TelegramID.
 
-    Дві різні дії: `ref` — точний збіг (@юзернейм або TelegramID, дає id навіть
-    коли профілю в базі немає), `term` — вільний пошук по імені/прізвищу.
+    Два різні питання:
+      * `username` / `id` — точний збіг («хто такий @X», «чий це id»);
+      * `term` — вільний пошук по імені й прізвищу («усі Durov»).
 
-    `posts_days>0` додає останні дописи цієї людини — так з'ясовують, хто
-    стоїть за коментарем у моніторингу критики (`Post.author_tg_id`).
-    Це ще один запит до API.
+    Щоб побачити, ЩО людина писала, візьми знайдений id у
+    `tz_find(user="<id>", text="*")`.
     """
-    if not (ref or term):
-        raise ToolError("дай ref (@ім'я/id) або term (вільний пошук по імені)")
-    names, ids = _split_refs(ref)
+    if not any([username, id, term]):
+        raise ToolError("дай критерій: username / id / term")
+    names = _csv(username)
+    ids = [int(x) for x in _csv(id) if x.lstrip("-").isdigit()]
     parts = []
 
     if names:
-        # окремий ендпоінт: юзернейм → TelegramID (масово, дослівно)
         async def by_name():
             async with _client(timeout) as tz:
-                return await tz.users_by_username(names)
+                return await tz_users_by_username(names)
         found = _run_soft(by_name()) or {}
-        rows = [[name, ", ".join(str(i) for i in (found.get(name) or [])) or "не знайдено"]
-                for name in names]
-        parts.append(fmt.section("Юзернейм → TelegramID",
-                                 fmt.table(["username", "id"], rows)))
+        parts.append(fmt.section("Юзернейм → TelegramID", fmt.table(
+            ["username", "id"],
+            [[n, ", ".join(str(i) for i in (found.get(n) or [])) or "не знайдено"]
+             for n in names])))
         ids += [i for v in found.values() for i in v]
 
     async def profiles():
@@ -814,213 +588,5 @@ def tz_user(ref: str = "", term: str = "", is_bot: bool = None, is_active: bool 
                   (u.get("lastBasicProfileUpdate") or "")[:10]] for u in users])))
     elif ids or term:
         parts.append("Профілів за цим критерієм немає (404 від TeleZip = порожньо).")
-
-    if posts_days and (ids or names):
-        who = ",".join(str(i) for i in ids) or ",".join(names)
-        parts.append(fmt.section(f"Дописи автора за {posts_days} дн", tz_search(
-            query="*", users=who, days=int(posts_days), limit=int(posts_limit),
-            samples=int(posts_limit), chars=chars, unique=False, timeout=timeout)))
+    parts.append("Що ця людина писала: tz_find(user=\"<id>\", text=\"*\").")
     return fmt.joinsec(*parts)
-
-
-@tool("tz_context", group="telezip", params={
-      "channel": "Канал повідомлення: @ім'я або id.",
-      "message_id": "Номер повідомлення з посилання t.me/<канал>/<НОМЕР>.",
-      "before": "Скільки повідомлень ДО якоря (0-100).",
-      "after": "Скільки повідомлень ПІСЛЯ якоря (0-100).",
-      "anchor_date": "Дата самого повідомлення (YYYY-MM-DD) — її показує tz_search у рядку прикладу. Без неї береться сьогодні, і для старого повідомлення якір не знайдеться.",
-      "chars": "Обрізати текст кожного повідомлення до N символів.", "timeout": _TIMEOUT})
-def tz_context(channel: str, message_id: int, before: int = 10, after: int = 10,
-               anchor_date: str = "", chars: int = 200, timeout: int = 120):
-    """Сусідні повідомлення навколо знайденого — контекст, а не вирваний рядок.
-
-    Бери після `tz_search`, коли треба зрозуміти, про що взагалі йшлося:
-    номер повідомлення з посилання t.me/<канал>/<НОМЕР>, а `anchor_date` —
-    дату з того ж рядка прикладу. Без правильної дати якір не знайдеться
-    (шукається поруч із нею, сусідній день прощається, далекий — ні).
-    """
-    names, ids = _split_refs(channel)
-    cid = ids[0] if ids else None
-    if cid is None:
-        async def resolve():
-            async with _client(timeout) as tz:
-                data = await tz.search_channels(channel_names=names, page_size=1)
-                rows = (data or {}).get("channels") or []
-                return rows[0]["id"] if rows else None
-        cid = _run(resolve())
-        if not cid:
-            raise ToolError(f"не вдалось визначити id каналу «{channel}»")
-
-    # anchorDate API вимагає завжди (без неї 400) і шукає якір поруч із цією
-    # датою: сусідній день прощається, далекий — ANCHOR_NOT_FOUND. Тож дефолт —
-    # сьогодні, а для старого повідомлення дату беруть із хіта tz_search.
-    anchor = anchor_date or timezone.now().date().isoformat()
-
-    async def go():
-        async with _client(timeout) as tz:
-            return await tz.message_context(cid, int(message_id), anchor,
-                                            int(before), int(after))
-    try:
-        data = _run(go())
-    except ToolError as e:
-        if "404" in str(e) or "ANCHOR_NOT_FOUND" in str(e):
-            raise ToolError(
-                f"якір не знайдено біля дати {anchor}. Передай anchor_date = дату "
-                "самого повідомлення (її показує tz_search у рядку прикладу), "
-                "напр. anchor_date=2026-09-17.")
-        raise
-
-    def line(m, mark=""):
-        who = f" ← {m.get('fromUserName')}" if m.get("fromUserName") else ""
-        return (f"{mark}{(m.get('date') or '')[:16]} #{m.get('messageId')}{who}: "
-                f"{fmt.trunc(m.get('content'), chars)}")
-    anchor = data.get("anchor") or {}
-    body = "\n".join(
-        [line(m) for m in (data.get("before") or [])]
-        + [line(anchor, "▶ ")]
-        + [line(m) for m in (data.get("after") or [])])
-    return fmt.section(f"Контекст {channel}/{message_id}", body or "порожньо")
-
-
-@tool("tz_macros", group="telezip", params={
-      "filter": "Показати лише макроси, що містять цей текст у назві або розкритті.",
-      "limit": "Скільки рядків показати.", "timeout": _TIMEOUT})
-def tz_macros(filter: str = "", limit: int = 40, timeout: int = 60):
-    """Готові набори термінів від TeleZip: `##ім'я` → розгорнутий підзапит.
-
-    Кластерні теги — це чужа робота, яку не треба переписувати: `##бавовна`
-    вже містить усі синоніми. Вживаються ЛИШЕ в дужках усередині query:
-    `"Макеевка +(##бавовна) -(##спам ##аренда)"`. Тег із помилкою мовчки дає
-    нуль збігів, тому назву звіряй за цим списком.
-    """
-    async def go():
-        async with _client(timeout) as tz:
-            return await tz.search_macros()
-    rows = _run(go()) or []
-    if filter:
-        f = filter.lower()
-        rows = [r for r in rows if f in (r.get("name", "") + r.get("value", "")).lower()]
-    return fmt.joinsec(
-        f"макросів: {len(rows)}" + (f" (фільтр «{filter}»)" if filter else ""),
-        fmt.table(["макрос", "розкривається в"],
-                  [[r.get("name"), fmt.trunc(r.get("value"), 110)] for r in rows[:limit]]),
-        "Вживати просто в запиті: query=\"##ім'я +(додатковий термін)\".")
-
-
-# --------------------------------------------------------------------------- дії
-
-@tool("tz_ingest", group="telezip", mutates=True, params={**CRITERIA_DOCS,
-      "task": "Задача, у яку писати пости (id або slug). Лише конвеєри events/research.",
-      "dry_run": "true (типово) — лише показати, що потрапило б у базу, нічого не записуючи."})
-def tz_ingest(task: str, query: str = "", days: int = 1, date_from: str = "",
-              date_to: str = "", channels: str = "", languages: str = "",
-              unique: bool = None, dry_run: bool = True, timeout: int = 180):
-    """Записати результат разового пошуку в задачу як Post-и (ad-hoc збір).
-
-    dry_run=true (дефолт) лише показує, що потрапило б у базу. Порожній query =
-    запит самої задачі. Пости лягають так само, як їх кладе воркер collect.
-
-    Для monitor/infospace/tgsearch НЕ працює: там вставка своя (whitelist чатів,
-    регіон на вставці, свої стадії) — користуйся `run_create`.
-    """
-    from analysis.services import stages
-    t = common.resolve_task(task)
-    if t.pipeline not in (AnalysisTask.PIPELINE_EVENTS, AnalysisTask.PIPELINE_RESEARCH):
-        raise ToolError(f"задача #{t.id} — конвеєр «{t.pipeline}»: ad-hoc вставка зіпсує "
-                        "його інваріанти. Збирай через run_create.")
-    query = query or t.telezip_query
-    if not query:
-        raise ToolError("порожній запит і в задачі теж порожньо")
-    d_from, d_to, span = _window(days, date_from, date_to)
-    ch_names, ch_ids = _split_refs(channels)
-    langs = _csv(languages) or (t.languages or [])
-    uniq = t.telezip_unique if unique is None else bool(unique)
-
-    async def go():
-        async with _client(timeout) as tz:
-            return await tz.find_posts_range(query, d_from, d_to, languages=langs or None,
-                                             unique=uniq, channel_ids=ch_ids or None,
-                                             channel_names=ch_names or None)
-    rows = _run(go())
-    urls = [r.get("message_url") for r in rows if r.get("message_url")]
-    known = set(Post.objects.filter(task=t, url__in=urls).values_list("url", flat=True))
-    fresh = [r for r in rows if r.get("message_url") and r["message_url"] not in known]
-    head = fmt.kv([
-        ("задача", f"#{t.id} {t.slug} ({t.pipeline})"),
-        ("запит", fmt.trunc(query, 200) + (" (запит задачі)" if query == t.telezip_query else "")),
-        ("вікно", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)"),
-        ("знайдено", f"{len(rows)}; нових для задачі {len(fresh)}, вже є {len(rows) - len(fresh)}"),
-        ("ціна", _cost(1, "важке вікно ділиться навпіл — тоді 2, 4, 8…")),
-    ])
-    if dry_run:
-        return fmt.joinsec(
-            fmt.section("Пробний прогін (нічого не записано)", head),
-            fmt.section("Топ каналів", fmt.table(
-                ["канал", "постів"], [[f"@{n}", c] for n, c in _by_channel(fresh, 10)])),
-            fmt.section("Приклади", _samples(fresh, 3, 200)),
-            "Записати насправді: той самий виклик із dry_run=false.")
-    n = stages.ingest_rows(t, rows)
-    return fmt.joinsec(
-        fmt.section("Записано", head),
-        f"✓ у задачу лягло {n} постів (стадія «{Post.STAGE_COLLECTED}») — далі їх веде "
-        f"конвеєр. Прогрес: service_queues task={t.slug}")
-
-
-@tool("tz_slots_set", group="telezip", mutates=True, scope=SCOPE_ADMIN, params={
-      "count": "Скільки паралельних запитів до TeleZip дозволити (1-8) для ВСІХ воркерів."})
-def tz_slots_set(count: int):
-    """Змінити глобальний ліміт паралельних запитів до TeleZip (таблиця слотів).
-
-    Таблиця — джерело правди для УСІХ воркерів; міняється наживо (напр. 1 на час
-    тротлінгу 429). Поточний стан — у `tz_status`.
-    """
-    count = int(count)
-    if not 1 <= count <= 8:
-        raise ToolError("розумний діапазон 1..8 (TeleZip швидко віддає 429)")
-    had = TelezipSlot.objects.count()
-    for i in range(count):
-        TelezipSlot.objects.get_or_create(slot=i)
-    removed = TelezipSlot.objects.filter(slot__gte=count).delete()[0]
-    return (f"слотів було {had} → стало {count} (прибрано {removed}). Діє одразу для "
-            "всіх воркерів; TELEZIP_MAX_CONCURRENCY у .env лише засіває таблицю вперше.")
-
-
-async def _probe_call(method, endpoint, params, body, timeout):
-    async with _client(timeout) as tz:
-        return await tz.raw(method, endpoint, params=params, json_data=body)
-
-
-@tool("tz_probe", group="telezip", mutates=True, scope=SCOPE_ADMIN, params={
-      "endpoint": "Шлях ендпоінта від кореня: /v4/stats, /v3/SearchMacros, /v4/channels.",
-      "method": "GET або POST.",
-      "params": "JSON-обʼєкт query-параметрів для GET.",
-      "body": "JSON-обʼєкт тіла для POST.",
-      "timeout": _TIMEOUT, "chars": "Обрізати сирий JSON до N символів."})
-def tz_probe(endpoint: str, method: str = "GET", params: str = "", body: str = "",
-             timeout: int = 60, chars: int = 1500):
-    """Сирий виклик будь-якого ендпоінта TeleZip (v3 і `/v4/...`) — розвідка API.
-
-    Інструменти покривають перевірений контракт; якщо в API з'явиться нове поле
-    чи ендпоінт — спитай сервер напряму, а що спрацювало, вживай через `extra`
-    у `tz_search`/`tz_stats`, не чекаючи правок коду.
-    """
-    method = method.upper()
-    if method not in ("GET", "POST"):
-        raise ToolError("дозволені лише GET і POST")
-    if not endpoint.startswith("/"):
-        raise ToolError("endpoint має починатись зі «/», напр. /v4/stats")
-    data = _run(_probe_call(method, endpoint, _json_arg(params, "params"),
-                            _json_arg(body, "body"), int(timeout)))
-    if isinstance(data, list):
-        keys = sorted({k for item in data[:5] if isinstance(item, dict) for k in item})
-        shape = f"list[{len(data)}]" + (f" ключі: {', '.join(keys)}" if keys else "")
-    elif isinstance(data, dict):
-        shape = f"dict ключі: {', '.join(sorted(data))}"
-    else:
-        shape = type(data).__name__
-    return fmt.joinsec(
-        fmt.section(f"{method} {endpoint}", fmt.kv([
-            ("params", params or "—"), ("body", fmt.trunc(body, 200) or "—"),
-            ("відповідь", shape)])),
-        fmt.section("Сирий JSON (обрізано)",
-                    fmt.trunc(json.dumps(data, ensure_ascii=False, indent=1), chars)))

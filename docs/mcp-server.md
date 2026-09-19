@@ -147,7 +147,7 @@ Telegram-акаунти (`visible_to`), джерела — ті, що живля
 
 **Роль `reader` — це не «лише перегляд свого»:** видимість ріже задачі (`owner`)
 й акаунти (`visible_to`), але TeleZip не скоупиться взагалі — читач має весь
-пошуковий API (`tz_search`, `tz_stats`, `tz_calibrate`…), тобто може витрачати
+пошуковий API (`tz_search`, `tz_stats`…), тобто може витрачати
 твої ~$0.10 за виклик. І акаунти **без власника вважаються спільними**, тож
 видні будь-кому з роллю: якщо цього не треба — постав їм `user` у
 `/admin/accounts/telegramaccount/`.
@@ -234,24 +234,26 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 `ref` розуміє `7`, `#7`, номер телефону, частину назви, а для групових —
 `all` / `active` / `problem` (для проксі — `all` / `broken`).
 
-### TeleZip (повний пошуковий API — `docs/telezip-api.md`)
+### TeleZip — три ендпоінти, три інструменти (`docs/telezip-api.md`)
 
-| інструмент | що робить | параметри |
-|------------|-----------|-----------|
-| `tz_status` | мережа, ключ, **глибина індексу й лаг**, слоти, свіжість збору | deep=True |
-| `tz_syntax` | шпаргалка: режими запиту, фільтри, оператори, ліміти | — |
-| `tz_stats` | скільки цього є + динаміка, БЕЗ викачування повідомлень | query, exact, regex, channel_term, channels, users, days/дати, languages, tags, has_media, source, thread, by=day\|hour |
-| `tz_search` | разовий пошук: усі режими й фільтри, ліміт/семпл/сторінки | ті самі + unique, limit, sample, page_size, page_token, samples, chars |
-| `tz_calibrate` | обсяг, частка репостів, ризик відлупу ПЕРЕД збором | query…, days=3, project_days=30 |
-| `tz_channel_posts` | усе з одного каналу за період (`*` + фільтр каналу) | channel, days/дати, query='*', thread, limit |
-| `tz_channels` | пошук КАНАЛІВ за назвою/описом — «хто пише про X» | term, title, about, names, source, page_size, page_token |
-| `tz_channel` | картка каналу + чи він є в нашому довіднику | ref |
-| `tz_user` | автор: @ім'я/id → профіль, за бажанням його дописи | ref, term, is_bot, is_active, posts_days |
-| `tz_context` | N повідомлень до/після знайденого (аудит контексту) | channel, message_id, before, after, anchor_date |
-| `tz_macros` | серверні макроси `##ім'я` → готові підзапити | filter, limit |
-| `tz_ingest` **[пише]** | записати результат пошуку в задачу (dry_run=true за замовчуванням) | task, query, days/дати, channels, languages, unique, dry_run |
-| `tz_slots_set` **[пише]** | глобальний ліміт паралельних запитів (наживо) | count 1..8 |
-| `tz_probe` **[пише]** | сирий виклик будь-якого ендпоінта — розвідка API | endpoint, method, params, body |
+Поверхня повторює API як є: `/FIND`, `/CHANNELS`, `/USERS`. Імена параметрів —
+з діалекту бота (`text=`, `exact=`, `channeltext=`, `channel=`, `user=`,
+`lang=`), щоб запит із гайда працював тут без перекладу.
+
+| інструмент | ендпоінт | що робить | ключові параметри |
+|------------|----------|-----------|-------------------|
+| `tz_find` | `/FIND` | пошук у текстах повідомлень; `stats=true` віддає лічильники замість повідомлень (`/FindStats`) | text, exact, regex, channeltext, channel, user, lang, hasmedia, unique, source, thread, days/дати, stats, limit, page_size |
+| `tz_channels` | `/CHANNELS` | пошук каналів і чатів у базі TeleZip | term, name, title, about, id, source, page_size |
+| `tz_users` | `/USERS` | профілі людей: юзернейм → id, вільний пошук по імені | username, id, term, is_bot, is_active |
+| `tz_status` | — | діагностика: маршрут до API, ключ, глибина індексу й лаг, слоти, свіжість збору | deep |
+
+`tz_status` — єдиний, що не є обгорткою ендпоінта: він відповідає на «чому
+нічого не працює» (найчастіше — впав VPN до api.telezip.net).
+
+**Головна пастка синтаксису:** пробіл у запиті — це АБО, не І.
+`text="мигрант драка"` дасть усе про мігрантів ПЛЮС усе про бійки; потрібне І —
+`text="мигрант +(драка избил)"`. Решта операторів і межі — в описі `tz_find`
+та в `docs/telezip-api.md`.
 
 ### Моніторинги
 
@@ -280,10 +282,10 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 «джерело не оновлюється»    sources_list(problems_only) → source_update(poll_now) → worker_once(info_collect)
 «зібрати період»            run_create → run_show → (ready) events_stats
 «поміняти промпт»           settings_list → setting_set → service_restart(worker-…)
-«новий запит до TeleZip»    tz_syntax → tz_stats → tz_calibrate → tz_search
+«новий запит до TeleZip»    tz_find(stats=true) → tz_find (тексти)
                             → task_update → run_create
-«хто пише про тему»         tz_channels(term=…) → tz_channel → chats_list/chat_update
-«хто автор коментаря»       tz_user(ref=@…) / tz_context(channel, message_id)
+«хто пише про тему»         tz_channels(term=…) → chats_list/chat_update
+«хто автор коментаря»       tz_users(username=…) → tz_find(user=<id>, text="*")
 «TeleZip мовчить»           tz_status (мережа/глибина/лаг) → tz_slots_set
 ```
 
@@ -304,7 +306,7 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
   чекала EOF на відкритому stdin — у фоновій оболонці це зависання назавжди
   (ловили на 11.5 годин).
 - **Кожен запит до TeleZip ≈ $0.10** (за виклик, не за обсяг). `tz_stats` — 1
-  виклик, `tz_calibrate` — 2, кожна сторінка пошуку — ще один; збір = 1 запит на
+  виклик, кожна сторінка пошуку — ще один; збір = 1 запит на
   чанк, тому `run_create` показує оцінку ціни до запуску. Деталі —
   `docs/telezip-api.md` §4.
 - **TeleZip має ГЛИБИНУ пошуку** (`tz_status` → `searchDateLimit`): старіше за
