@@ -170,29 +170,48 @@ def _media_of(event):
     if chat.isdigit():         # t.me/c/<internal>/<id> — приватний чат
         chat = f"-100{chat}"
     out = {"kind": None, "chat": chat, "mid": int(m.group(2))}
-    out["peer"] = _peer_of(post, chat)
+    out["peer"] = None          # підставляє _send_via_account під свій акаунт
     return out
 
 
-def _peer_of(post, chat: str):
-    """(tg_id, access_hash) джерела з нашої бази, щоб НЕ резолвити юзернейм.
+def _peer_of(chat: str, account_id: int):
+    """access_hash джерела, здобутий САМЕ ЦИМ акаунтом, або None.
 
-    Telethon на рядок-юзернейм робить ResolveUsernameRequest, а він має власний
-    добовий ліміт: акаунт публікації виїдав його за день і далі ловив FloodWait
-    на 19 годин — текст ішов, медіа губилось. access_hash у нас уже зібраний
-    збирачем, тож беремо пару з Channel і будуємо peer напряму.
+    Хеш у Telegram персональний: чужий дає ChannelInvalidError (зловили 19.09 —
+    брали хеш збирача для акаунта публікації). Тому мапа
+    raw_meta["access_hash_by_acc"] і ключ = id акаунта, який шле.
     """
-    ch = getattr(post, "channel", None)
-    if ch is None or not ch.tg_id:
-        from analysis.models import Channel
-        ch = (Channel.objects.filter(username__iexact=chat).only("tg_id", "raw_meta").first()
-              if not chat.lstrip("-").isdigit() else
-              Channel.objects.filter(tg_id=int(str(chat).replace("-100", ""))).only("tg_id", "raw_meta").first())
+    from analysis.models import Channel
+    if not chat or not account_id:
+        return None
+    if str(chat).lstrip("-").isdigit():
+        ch = Channel.objects.filter(tg_id=int(str(chat).replace("-100", ""))).only(
+            "tg_id", "raw_meta").first()
+    else:
+        ch = Channel.objects.filter(username__iexact=chat).only("tg_id", "raw_meta").first()
     if ch is None or not ch.tg_id:
         return None
-    meta = ch.raw_meta or {}
-    ah = (meta.get("tg_flags", {}) or {}).get("access_hash") or meta.get("access_hash")
+    ah = ((ch.raw_meta or {}).get("access_hash_by_acc") or {}).get(str(account_id))
     return {"id": int(ch.tg_id), "access_hash": int(ah)} if ah else None
+
+
+def _save_peer(chat: str, account_id: int, peer: dict) -> None:
+    """Запамʼятати хеш, який цей акаунт щойно здобув резолвом — щоб наступні
+    відправки з цього ж джерела вже не платили ResolveUsernameRequest."""
+    from analysis.models import Channel
+    if not peer or not peer.get("access_hash") or not chat or not account_id:
+        return
+    ch = Channel.objects.filter(username__iexact=chat).only("id", "raw_meta").first()
+    if ch is None:
+        return
+    meta = ch.raw_meta or {}
+    by_acc = dict(meta.get("access_hash_by_acc") or {})
+    if by_acc.get(str(account_id)) == peer["access_hash"]:
+        return
+    by_acc[str(account_id)] = peer["access_hash"]
+    meta["access_hash_by_acc"] = by_acc
+    ch.raw_meta = meta
+    ch.save(update_fields=["raw_meta"])
 
 
 def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> str:
@@ -413,12 +432,18 @@ def _send_via_account(config, media, post_text):
     Без цього облік показував «None» і частка постів із медіа була невідома.
     """
     from accounts.services.telegram_client import TelegramUserClient
+    acc_id = config.forward_account_id
+    src_chat = (media or {}).get("chat")
     res = TelegramUserClient.send_post_sync(
         config.forward_account, config.chat_id, post_text,
-        src_chat=(media or {}).get("chat"), src_msg_id=(media or {}).get("mid") or 0,
-        src_peer=(media or {}).get("peer"))
+        src_chat=src_chat, src_msg_id=(media or {}).get("mid") or 0,
+        src_peer=_peer_of(src_chat, acc_id))
     if not res.get("ok"):
         raise telegram.TelegramError(f"акаунт #{config.forward_account_id}: {res.get('error')}")
+    # хеш, здобутий цією відправкою, лишаємо собі: наступне медіа з цього
+    # джерела піде вже без резолву юзернейма (його добовий ліміт і був причиною
+    # 19-годинних FloodWait і постів без фото)
+    _save_peer(src_chat, acc_id, res.get("src_peer") or {})
     return res.get("message_id"), bool(res.get("with_media"))
 
 

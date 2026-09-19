@@ -34,30 +34,36 @@ def _fetch_history(account, handle, min_id, limit, reverse, peer_sink=None):
         raise RateLimited(getattr(e, "seconds", 60))
 
 
-def _remember_peer(handle: str, peer: dict) -> None:
-    """Зберегти (id, access_hash) каналу в Channel.raw_meta — одноразово.
+def _remember_peer(handle: str, peer: dict, account_id: int) -> None:
+    """Зберегти access_hash каналу ДЛЯ ЦЬОГО АКАУНТА.
 
-    Публікація бере peer звідси й шле медіа без резолву юзернейма. Пишемо лише
-    коли значення змінилось, щоб не смикати БД на кожному полінгу.
+    access_hash у Telegram видається під конкретного користувача: хеш, здобутий
+    одним акаунтом, для іншого недійсний і дає ChannelInvalidError. Раніше ми
+    клали його одним полем на канал — і чат, перевʼязаний на інший акаунт,
+    ставав «Invalid channel object» (21 чат стріму саме так і замовк). Тому
+    мапа {id акаунта: хеш}, а читач бере ЛИШЕ свій.
     """
-    if not peer or not handle:
+    if not peer or not handle or not account_id:
         return
     from django.db import IntegrityError, transaction
 
     from analysis.models import Channel
-    ch = Channel.objects.filter(username__iexact=handle).only("id", "raw_meta", "tg_id").first()
+    ch = Channel.objects.filter(username__iexact=handle).only(
+        "id", "raw_meta", "tg_id").first()
     if ch is None:
         return
     meta = ch.raw_meta or {}
-    if meta.get("access_hash") == peer["access_hash"]:
+    by_acc = dict(meta.get("access_hash_by_acc") or {})
+    key = str(account_id)
+    if by_acc.get(key) == peer["access_hash"]:
         return
-    meta["access_hash"] = peer["access_hash"]
+    by_acc[key] = peer["access_hash"]
+    meta["access_hash_by_acc"] = by_acc
     ch.raw_meta = meta
     fields = ["raw_meta"]
     # tg_id пишемо ЛИШЕ якщо він вільний: у довіднику той самий канал буває
     # двічі (під різними юзернеймами), і запис ламав uniq_channel_tgid — а
-    # виняток летів з-під збору й гасив УВЕСЬ полінг цього джерела на цикл
-    # (зловили 19.09: 6 каналів втратили прохід через це).
+    # виняток летів з-під збору й гасив УВЕСЬ полінг цього джерела на цикл.
     if not ch.tg_id and not (Channel.objects.filter(tg_id=peer["id"])
                              .exclude(pk=ch.pk).exists()):
         ch.tg_id = peer["id"]
@@ -68,8 +74,6 @@ def _remember_peer(handle: str, peer: dict) -> None:
         with transaction.atomic():
             ch.save(update_fields=fields)
     except IntegrityError:
-        # кеш peer — оптимізація, а не дані: гонка двох реплік збору не має
-        # валити полінг
         logger.debug("_remember_peer: %s — конфлікт унікальності, пропускаю", handle)
 
 
@@ -108,7 +112,7 @@ class TelegramAdapter(BaseSourceAdapter):
 
         peer: dict = {}
         msgs = _fetch_history(acc, handle, min_id, limit, reverse, peer)  # FloodWait → RateLimited
-        _remember_peer(handle, peer)
+        _remember_peer(handle, peer, acc.id)
 
         items, max_id = [], min_id
         for m in msgs:

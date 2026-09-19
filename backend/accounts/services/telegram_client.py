@@ -340,6 +340,7 @@ class TelegramUserClient:
                     return {"ok": False, "error": "акаунт не авторизований"}
                 dst = int(to_chat) if str(to_chat).lstrip("-").isdigit() else to_chat
                 media = None
+                out_peer: dict = {}
                 if src_chat and src_msg_id:
                     # peer із бази — щоб НЕ витрачати добовий ліміт резолву
                     # юзернеймів: на ньому акаунт ловив FloodWait по 19 годин
@@ -353,6 +354,15 @@ class TelegramUserClient:
                                else src_chat)
                     try:
                         orig = await client.get_messages(src, ids=int(src_msg_id))
+                        # хеш, який САМ цей акаунт щойно отримав резолвом —
+                        # віддаємо викликачу, щоб закешував під себе
+                        try:
+                            ip = await client.get_input_entity(src)
+                            if getattr(ip, "access_hash", None):
+                                out_peer.update({"id": int(ip.channel_id),
+                                                 "access_hash": int(ip.access_hash)})
+                        except Exception:  # noqa: BLE001
+                            pass
                         # ЛИШЕ справжні вкладення. Перевіряти msg.photo не
                         # годиться: Telethon віддає в ньому і картинку ПРЕВ'Ю
                         # посилання, тож webpage проскакував і send_file падав
@@ -373,7 +383,8 @@ class TelegramUserClient:
                     res = await client.send_message(dst, text, parse_mode="html",
                                                     link_preview=False)
                 return {"ok": True, "message_id": getattr(res, "id", None),
-                        "with_media": media is not None}
+                        "with_media": media is not None,
+                        "src_peer": out_peer or None}
             except Exception as e:  # noqa: BLE001
                 return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
             finally:
