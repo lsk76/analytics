@@ -278,13 +278,16 @@ def tools_manifest():
     rows = []
     for m in manifest():
         mode = "змінює" if m["mutates"] else "читає"
-        if m["scope"] == "mcp:admin":
-            mode += " (адмін)"
+        # scope поруч із режимом, бо в мережевому режимі це не те саме питання:
+        # «режим» каже, що інструмент робить, а scope — чи вистачить ТВОЄЇ ролі
+        # (reader=mcp:read, operator=+mcp:write, admin=+mcp:admin). Інструкція
+        # сервера відсилає саме сюди, тож вона має тут щось знаходити.
+        mode = f'{mode} · {m["scope"]}'
         rows.append([m["name"], m["group"], mode,
                      "$0.10" if m["name"] in paid else "",
                      ", ".join(p["name"] for p in m["params"]) or "—",
                      fmt.trunc(m.get("summary") or m["doc"], 90)])
-    return (fmt.table(["інструмент", "група", "режим", "ціна виклику",
+    return (fmt.table(["інструмент", "група", "режим · scope", "ціна виклику",
                        "параметри", "що робить"], rows)
             + "\n\nПовний опис інструмента з усіма застереженнями — у його схемі "
               "(поле description), тут лише перший рядок.")
