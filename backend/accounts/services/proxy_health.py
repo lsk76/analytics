@@ -13,9 +13,6 @@ it for as long as possible» — з їхньої документації), то
 """
 import asyncio
 import logging
-import random
-import re
-import string
 from datetime import timedelta
 
 import socks
@@ -34,31 +31,7 @@ from .telegram_client import run_async
 HEALTHCHECK_INTERVAL = timedelta(hours=4)  # не частіше цього — не спамити провайдера
 REGEN_ATTEMPTS = 3
 
-_MARS_RE = re.compile(
-    r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<secret>.+?)"
-    r"_country-(?P<country>[a-z]+)(?P<city>_city-[a-z0-9]+)?"
-    r"_session-(?P<session>[a-z0-9]+)_lifetime-(?P<hours>\d+)h$"
-)
-
-
-def _random_session_id(n: int = 8) -> str:
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
-
-
-def generate_new_session(proxy_string: str) -> str | None:
-    """Новий рядок з тим самим host/port/акаунтом/країною, але свіжим session-id.
-
-    None — якщо proxy_string не в форматі marsproxies sticky-session
-    (наприклад плоский host:port:user:pass без country/session/lifetime).
-    """
-    m = _MARS_RE.match(proxy_string)
-    if not m:
-        return None
-    g = m.groupdict()
-    hours = min(int(g["hours"]), 168)
-    return (f"{g['host']}:{g['port']}:{g['user']}:{g['secret']}"
-           f"_country-{g['country']}{g['city'] or ''}"
-           f"_session-{_random_session_id()}_lifetime-{hours}h")
+from accounts.gateway.proxies import generate_new_session  # noqa: E402,F401 — перенесено в gateway
 
 
 def _parse_socks5(proxy_string: str):
