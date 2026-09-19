@@ -65,6 +65,18 @@ def _raise_for(err: dict):
     raise TelegramOpError(msg, kind or "internal")
 
 
+def gw_result(call, **empty) -> dict:
+    """Для адмінки/воркерів, що очікують словник {ok, error, …}, а не виняток:
+    будь-яка помилка gateway/акаунта → {"ok": False, "error": текст, **empty}."""
+    try:
+        res = call()
+    except (RateLimited, AccountUnavailable, TelegramOpError) as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}", **empty}
+    if isinstance(res, dict):
+        return {**empty, **res} if "ok" in res else {"ok": True, **empty, **res}
+    return {"ok": True, "result": res, **empty}
+
+
 def _dt(value):
     return datetime.fromisoformat(value) if isinstance(value, str) and value else None
 

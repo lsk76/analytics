@@ -444,19 +444,24 @@ def _send_via_account(config, media, post_text):
     ми бачимо лише адресу оригіналу, а чи було там фото, знає лише відправка.
     Без цього облік показував «None» і частка постів із медіа була невідома.
     """
-    from accounts.services.telegram_client import (TelegramUserClient,
-                                                    account_exclusive)
+    from accounts.services import registry
+    from accounts.services.managed import (AccountUnavailable, RateLimited,
+                                           TelegramOpError)
     acc_id = config.forward_account_id
     src_chat = (media or {}).get("chat")
-    # акаунт публікації тримаємо винятково: паралельний конект убиває ключ,
-    # а це наш єдиний канал у стрічку
-    with account_exclusive(config.forward_account):
-        res = TelegramUserClient.send_post_sync(
-            config.forward_account, config.chat_id, post_text,
+    try:
+        res = registry.get(acc_id).send_post(
+            config.chat_id, post_text,
             src_chat=src_chat, src_msg_id=(media or {}).get("mid") or 0,
             src_peer=_peer_of(src_chat, acc_id))
-    if not res.get("ok"):
-        raise telegram.TelegramError(f"акаунт #{config.forward_account_id}: {res.get('error')}")
+    except RateLimited as e:
+        # пауза акаунта / gateway недоступний — відкласти без спроби
+        raise telegram.TelegramError(f"акаунт #{acc_id}: {e}", retry_after=e.retry_after)
+    except AccountUnavailable as e:
+        raise telegram.TelegramError(f"акаунт #{acc_id} недоступний ({e.reason}): {e}",
+                                     retry_after=e.retry_after or 300)
+    except TelegramOpError as e:
+        raise telegram.TelegramError(f"акаунт #{acc_id}: {e}")
     # хеш, здобутий цією відправкою, лишаємо собі: наступне медіа з цього
     # джерела піде вже без резолву юзернейма (його добовий ліміт і був причиною
     # 19-годинних FloodWait і постів без фото)

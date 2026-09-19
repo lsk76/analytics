@@ -1,13 +1,17 @@
-"""Telegram-адаптер: полінг історії каналу акаунтом (Telethon).
+"""Telegram-адаптер: полінг історії каналу через tg-gateway.
 
-Публічні канали читаються БЕЗ вступу (менший бот-слід). Акаунт: source.tg_account
-або round-robin по авторизованих TelegramAccount. Watermark — last_msg_id (min_id
-у Telethon). FloodWait → RateLimited (стадія відсуває полінг без збою).
+Акаунт: привʼязаний `source.tg_account`, інакше `registry.pick("collector",
+key=source.id)` — стабільно за id джерела з ротацією через
+`poll_cursor["acc_shift"]`. Watermark — last_msg_id (min_id у Telethon).
+Помилки акаунта (пауза, проксі, резолв) — не збій джерела: ротуємо акаунт і
+відсуваємо полінг (RateLimited); лише TelegramOpError (приватний/видалений
+канал) рахується як збій джерела.
 """
 from __future__ import annotations
 
 import logging
 import re
+
 from ..utils import canonical_url
 from . import register
 from .base import BaseSourceAdapter, RateLimited, RawItem
@@ -15,35 +19,14 @@ from .base import BaseSourceAdapter, RateLimited, RawItem
 logger = logging.getLogger(__name__)
 
 
-
-def _fetch_history(account, handle, min_id, limit, reverse, peer_sink=None):
-    """Обгортка навколо Telethon (винесена для DI у тестах). FloodWait → RateLimited."""
-    from accounts.services.telegram_client import TelegramUserClient, run_async
-    try:
-        from telethon.errors import FloodWaitError
-    except Exception:  # noqa: BLE001 — telethon має бути, але не валимо імпорт пакета
-        FloodWaitError = ()
-    # account.proxy (FK) треба прогріти ТУТ, у sync-коді: _client читає його вже
-    # всередині корутини, і лінивий SELECT валить SynchronousOnlyOperation
-    TelegramUserClient._prime_proxy(account)
-    try:
-        return run_async(TelegramUserClient.fetch_history(
-            account, handle, min_id=min_id, limit=limit, reverse=reverse,
-            peer_sink=peer_sink))
-    except FloodWaitError as e:  # type: ignore[misc]
-        raise RateLimited(getattr(e, "seconds", 60))
-
-
 def _remember_peer(handle: str, peer: dict, account_id: int) -> None:
     """Зберегти access_hash каналу ДЛЯ ЦЬОГО АКАУНТА.
 
     access_hash у Telegram видається під конкретного користувача: хеш, здобутий
-    одним акаунтом, для іншого недійсний і дає ChannelInvalidError. Раніше ми
-    клали його одним полем на канал — і чат, перевʼязаний на інший акаунт,
-    ставав «Invalid channel object» (21 чат стріму саме так і замовк). Тому
-    мапа {id акаунта: хеш}, а читач бере ЛИШЕ свій.
+    одним акаунтом, для іншого недійсний і дає ChannelInvalidError. Тому мапа
+    {id акаунта: хеш}, а читач (публікація) бере ЛИШЕ свій.
     """
-    if not peer or not handle or not account_id:
+    if not peer or not handle or not account_id or not peer.get("access_hash"):
         return
     from django.db import IntegrityError, transaction
 
@@ -62,19 +45,26 @@ def _remember_peer(handle: str, peer: dict, account_id: int) -> None:
     ch.raw_meta = meta
     fields = ["raw_meta"]
     # tg_id пишемо ЛИШЕ якщо він вільний: у довіднику той самий канал буває
-    # двічі (під різними юзернеймами), і запис ламав uniq_channel_tgid — а
-    # виняток летів з-під збору й гасив УВЕСЬ полінг цього джерела на цикл.
+    # двічі (під різними юзернеймами), і запис ламав uniq_channel_tgid
     if not ch.tg_id and not (Channel.objects.filter(tg_id=peer["id"])
                              .exclude(pk=ch.pk).exists()):
         ch.tg_id = peer["id"]
         fields.append("tg_id")
     try:
-        # savepoint: без нього перехоплений IntegrityError лишає транзакцію
-        # збору «отруєною» і падає вже наступний запит
         with transaction.atomic():
             ch.save(update_fields=fields)
     except IntegrityError:
         logger.debug("_remember_peer: %s — конфлікт унікальності, пропускаю", handle)
+
+
+def _bump_shift(source) -> None:
+    """Наступний прохід візьме інший акаунт із пулу. Пишемо одразу в БД: стадія
+    при RateLimited poll_cursor не зберігає."""
+    from analysis.models import Source
+    cur = dict(source.poll_cursor or {})
+    cur["acc_shift"] = int(cur.get("acc_shift", 0)) + 1
+    source.poll_cursor = cur
+    Source.objects.filter(pk=source.pk).update(poll_cursor=cur)
 
 
 @register
@@ -82,42 +72,16 @@ class TelegramAdapter(BaseSourceAdapter):
     kind = "telegram"
 
     def _account(self, source):
-        """Акаунт джерела, інакше — СТАБІЛЬНИЙ вибір із пулу збирачів.
-
-        Два правила, обидва зі шкоди на проді:
-        1) не беремо акаунти, привʼязані до чатів tgsearch-стріму. Той самий
-           auth key, задіяний двома конвеєрами водночас, Telegram бачить як
-           «used under two different IP addresses» і може вбити сесію — три
-           сесії ми так уже втратили;
-        2) не «перший за id»: раніше ВСІ непривʼязані джерела довбали акаунт
-           #1, і його добовий ліміт резолву юзернеймів вичерпувався за годину
-           (33 джерела висіли на «No user has X as username»). Вибір за
-           лишком від id джерела — стабільний, тож джерело тримається свого
-           акаунта й користається його прогрітою сесією.
-        """
-        acc = source.tg_account
-        if acc and acc.is_authenticated:
+        """Привʼязаний акаунт джерела або стабільний вибір із пулу збирачів."""
+        from accounts.services import registry
+        acc = registry.pinned_for(source)
+        if acc is not None:
             return acc
-        from analysis.models import MonitorChat, PublishConfig
-        from accounts.models import TelegramAccount
-        busy = set(MonitorChat.objects.exclude(tg_account=None)
-                   .values_list("tg_account_id", flat=True))
-        # акаунт, яким ПУБЛІКУЄМО, збирачу не давати: паралельний конект убиває
-        # ключ, і канал онімів би (#160 мав 3 джерела й лежав у пулі)
-        busy |= set(PublishConfig.objects.exclude(forward_account=None)
-                    .values_list("forward_account_id", flat=True))
-        pool = list(TelegramAccount.objects.filter(is_authenticated=True)
-                    .exclude(id__in=busy).order_by("id"))
-        if not pool:      # усі зайняті — краще працювати, ніж стояти
-            pool = list(TelegramAccount.objects.filter(is_authenticated=True)
-                        .order_by("id"))
-        if not pool:
-            return None
-        # зсув дає РОТАЦІЮ: без нього лишок від id завжди повертав той самий
-        # акаунт, і джерело з вичерпаним лімітом резолву не мало шансу
-        # перескочити на інший (33 джерела так і стояли)
         shift = int((source.poll_cursor or {}).get("acc_shift", 0))
-        return pool[((source.id or 0) + shift) % len(pool)]
+        try:
+            return registry.pick("collector", key=source.id or 0, shift=shift)
+        except registry.NoAccountAvailable:
+            return None
 
     @staticmethod
     def _handle(source) -> str:
@@ -126,31 +90,34 @@ class TelegramAdapter(BaseSourceAdapter):
         return m.group(1) if m else u.lstrip("@")
 
     def fetch(self, source) -> list[RawItem]:
+        from accounts.services.managed import AccountUnavailable
+        from accounts.services.managed import RateLimited as GwRateLimited
         acc = self._account(source)
         if acc is None:
-            raise RuntimeError("немає авторизованого TelegramAccount для полінгу")
-        # яким акаунтом читали — щоб на транспортному збої стадія знала, чию
-        # проксі відправити на перевірку (transient, у БД не пишеться)
-        source._tg_account_used = acc
+            raise RateLimited(120)     # пул порожній: не збій джерела, зачекати
         handle = self._handle(source)
         poll_cursor = dict(source.poll_cursor or {})
         first_poll = "last_msg_id" not in poll_cursor
         min_id = int(poll_cursor.get("last_msg_id", 0))
         limit = self.backfill_limit(source) if first_poll else self.max_items(source)
         # перший полінг — найновіші N (backfill); далі — найстаріші від watermark
-        # (reverse=True) суцільно, щоб бурст >limit не лишив діру (див. рев'ю)
+        # (reverse=True) суцільно, щоб бурст >limit не лишив діру
         reverse = not first_poll
 
         peer: dict = {}
-        from accounts.services.telegram_client import AccountBusy, account_exclusive
         try:
-            # один акаунт = один клієнт у всій системі; зайнятий іншим процесом
-            # → чекаємо наступного проходу, а не відкриваємо другий конекшн
-            with account_exclusive(acc):
-                msgs = _fetch_history(acc, handle, min_id, limit, reverse, peer)
-        except AccountBusy:
-            raise RateLimited(30)
-        _remember_peer(handle, peer, getattr(acc, "id", None))
+            msgs = acc.fetch_history(handle, min_id=min_id, limit=limit, reverse=reverse,
+                                     peer_sink=peer)
+        except AccountUnavailable as e:
+            # проксі/пауза/резолв цього акаунта — джерело ні до чого: інший акаунт
+            logger.info("info_collect: %s — акаунт #%s недоступний (%s), ротація",
+                        source.name, acc.id, e.reason)
+            if not source.tg_account_id:
+                _bump_shift(source)
+            raise RateLimited(e.retry_after or 60)
+        except GwRateLimited as e:
+            raise RateLimited(e.retry_after)
+        _remember_peer(handle, peer, acc.id)
 
         items, max_id = [], min_id
         for m in msgs:

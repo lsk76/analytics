@@ -318,19 +318,18 @@ class Command(BaseCommand):
                 Tag.objects.get_or_create(name=name, category=key)
 
     def _resolve(self, missing):
-        from accounts.models import TelegramAccount
-        from accounts.services.telegram_client import TelegramUserClient, run_async
+        from accounts.services import registry
 
-        acct = TelegramAccount.objects.filter(is_authenticated=True).order_by("id").first()
-        if not acct:
-            raise CommandError("немає авторизованого TelegramAccount для резолву")
-        self.stdout.write(f"резолв акаунтом: {acct}")
-        TelegramUserClient._prime_proxy(acct)  # FK proxy — до event loop'а
+        ids = registry.candidates("collector", need_resolve=True)
+        if not ids:
+            raise CommandError("немає придатного TelegramAccount для резолву (registry)")
+        acct = registry.get(ids[0])
+        self.stdout.write(f"резолв акаунтом: #{acct.id}")
 
         out = []
         for i, (h, _, row) in enumerate(missing, 1):
             try:
-                meta = run_async(TelegramUserClient.get_channel_meta(acct, h))
+                meta = acct.channel_meta(h)
             except Exception as e:  # noqa: BLE001 — один канал не валить прохід
                 self.stderr.write(f"  [{i}/{len(missing)}] @{h}: {type(e).__name__}")
                 if "flood" in type(e).__name__.lower():

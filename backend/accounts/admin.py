@@ -1,3 +1,4 @@
+import base64
 import uuid
 
 from django.contrib import admin, messages
@@ -15,7 +16,8 @@ from analysis.multiselect_filter import MultiSelectFilter
 
 from .models import AccountTag, Proxy, TelegramAccount, TelegramBot, TestBotJob, WarmUpJob
 from .services.tdata_import import import_tdata_account_from_uploads
-from .services.telegram_client import TelegramUserClient
+from .services import registry
+from .services.managed import gw_result
 from .services.translit import normalize_bot_username, slugify_bot_username
 
 
@@ -164,7 +166,8 @@ class TelegramBotAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
             photo = request.FILES.get("photo")
 
             if new_name and new_name != bot.name:
-                res = TelegramUserClient.set_bot_name_sync(bot.account, bot.username, new_name)
+                res = gw_result(lambda: registry.get(bot.account_id).botfather(
+                    "set_name", username=bot.username, new_name=new_name))
                 if res.get("ok"):
                     bot.name = new_name
                     bot.save(update_fields=["name"])
@@ -174,8 +177,9 @@ class TelegramBotAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
                                    f"{res.get('error')} {res.get('detail', '')[:200]}")
 
             if photo:
-                res = TelegramUserClient.set_bot_photo_sync(bot.account, bot.username,
-                                                            photo.read())
+                res = gw_result(lambda: registry.get(bot.account_id).botfather(
+                    "set_photo", username=bot.username,
+                    photo_b64=base64.b64encode(photo.read()).decode()))
                 if res.get("ok"):
                     messages.success(request, "✓ Аватарку оновлено.")
                 else:
@@ -187,8 +191,8 @@ class TelegramBotAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
 
             return redirect(request.path)
 
-        botfather_log = TelegramUserClient.get_recent_messages_sync(
-            bot.account, "BotFather", limit=15)
+        botfather_log = gw_result(lambda: {"messages": registry.get(bot.account_id)
+                                  .recent_messages("BotFather", limit=15)}, messages=[])
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
@@ -323,6 +327,10 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         if not change and not request.user.is_superuser:
             obj.user = request.user
         super().save_model(request, obj, form, change)
+        # проксі/сесію змінено поза gateway → його живий клієнт більше не той
+        # акаунт: хай перебудує при наступному виклику (без цього два IP)
+        if change and form.changed_data and ({"proxy", "session_string"} & set(form.changed_data)):
+            registry.get(obj.id).invalidate()
 
     # Власника змінює будь-хто з правом change — але лише серед видимих йому акаунтів
     # (свої + спільні, get_queryset): може взяти спільний собі, віддати свій іншому
@@ -352,7 +360,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
 
         accounts = list(queryset.order_by("id"))
         for i, acc in enumerate(accounts):
-            res = TelegramUserClient.sync_bots_via_botfather_sync(acc)
+            res = gw_result(lambda: registry.get(acc.id).botfather("sync"), bots=[])
             if not res.get("ok"):
                 self.message_user(request, f"#{acc.id} {acc.name}: {res.get('error')}",
                                   level=messages.ERROR)
@@ -386,7 +394,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
 
         alive = dead = 0
         for acc in queryset.order_by("id"):
-            res = TelegramUserClient.check_alive_sync(acc)
+            res = registry.get(acc.id).check_alive()
             detail = f" — {res['detail']}" if res.get("detail") else ""
             if res.get("ok"):
                 alive += 1
@@ -415,7 +423,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         from django.utils import timezone as _tz
 
         for acc in queryset.order_by("id"):
-            res = TelegramUserClient.check_spam_status_sync(acc)
+            res = gw_result(lambda: registry.get(acc.id).spam_status(), status="unknown")
             acc.spam_status = res.get("status", "unknown")
             acc.spam_status_detail = (res.get("detail") or "")[:300]
             acc.spam_status_checked_at = _tz.now()
@@ -724,7 +732,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
 
     def channels_view(self, request, account_id):
         account = self._get_account(request, account_id)
-        res = TelegramUserClient.list_dialogs_sync(account)
+        res = gw_result(lambda: {"dialogs": registry.get(account.id).dialogs()}, dialogs=[])
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
@@ -747,7 +755,8 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             peer = int(peer_raw)
         except ValueError:
             peer = peer_raw
-        res = TelegramUserClient.get_recent_messages_sync(account, peer, limit=30)
+        res = gw_result(lambda: {"messages": registry.get(account.id)
+                                  .recent_messages(peer, limit=30)}, messages=[])
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
@@ -771,7 +780,8 @@ class TelegramAccountAdmin(admin.ModelAdmin):
             after_id = int(request.GET.get("after_id", 0))
         except ValueError:
             after_id = 0
-        res = TelegramUserClient.get_recent_messages_sync(account, peer, limit=10)
+        res = gw_result(lambda: {"messages": registry.get(account.id)
+                                  .recent_messages(peer, limit=10)}, messages=[])
         if not res.get("ok"):
             return JsonResponse({"ok": False, "error": res.get("error")})
         new = sorted((m for m in res["messages"] if m["id"] > after_id),
@@ -791,9 +801,9 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                            else slugify_bot_username(name))
                 photo = request.FILES.get("photo")
                 photo_bytes = photo.read() if photo else None
-                result = TelegramUserClient.create_bot_via_botfather_sync(
-                    account, name, username, photo_bytes,
-                )
+                result = gw_result(lambda: registry.get(account.id).botfather(
+                    "create", name=name, username=username,
+                    photo_b64=base64.b64encode(photo_bytes).decode() if photo_bytes else None))
                 if result.get("ok"):
                     TelegramBot.objects.update_or_create(
                         username=result["username"],
@@ -820,7 +830,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         if request.method == "POST":
             act = request.POST.get("action")
             if act == "send_code":
-                res = TelegramUserClient.send_code_sync(account)
+                res = gw_result(lambda: registry.get(account.id).send_code())
                 if res.get("success"):
                     where = {
                         "SentCodeTypeApp": "у ЗАСТОСУНОК Telegram (службовий чат «Telegram» / 777000) на пристрої, де цей номер залогінений — НЕ SMS",
@@ -835,11 +845,9 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                 else:
                     messages.error(request, f"Не вдалося надіслати код: {res}")
             elif act == "verify":
-                res = TelegramUserClient.verify_code_sync(
-                    account,
+                res = gw_result(lambda: registry.get(account.id).verify_code(
                     request.POST.get("code", "").strip(),
-                    (request.POST.get("password", "").strip() or None),
-                )
+                    (request.POST.get("password", "").strip() or None)))
                 if res.get("success"):
                     messages.success(request, "✓ Акаунт авторизовано.")
                     return redirect("admin:accounts_telegramaccount_change", account.pk)

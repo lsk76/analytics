@@ -260,14 +260,15 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 |------------|-----------|-----------|
 | `accounts_list` | акаунти: авторизація, SpamBot, проксі, навантаження | query='', problems_only=False, limit=100 |
 | `account_show` | картка акаунта: конфіг, що обслуговує, завдання, боти | ref |
-| `account_check` | жива перевірка (connect+get_me через проксі) | ref, pause=2.0 |
+| `account_check` | жива перевірка через tg-gateway (get_me сесією акаунта) | ref, pause=2.0 |
+| `account_repair` **[пише]** | ремонт через gateway: живість → новий session-id проксі → стан | ref (`problem` = cooldown/needs_proxy) |
 | `account_spam_check` **[пише]** | статус через @SpamBot | ref, pause=2.0 |
 | `account_update` **[пише]** | активність / проксі / теги | ref, is_active, proxy, add_tags, remove_tags |
 | `account_warm_up` **[пише]** | у чергу прогріву (підписка на канали) | ref, channels=0 |
 | `account_dialogs` | на що акаунт підписаний (наживо) | ref, limit=40, kind='' |
 | `account_jobs` | черги `warm_up` / `test_bot` | kind='all', status='', limit=20 |
 | `proxies_list` | пул проксі | problems_only=False, limit=60 |
-| `proxy_check` **[пише]** | перевірка + авторемонт sticky-сесії | ref, repair=True |
+| `proxy_check` **[пише]** | перевірка проксі РЕАЛЬНОЮ сесією акаунта на ній (= `account_repair`) | ref, repair=True |
 
 `ref` розуміє `7`, `#7`, номер телефону, частину назви, а для групових —
 `all` / `active` / `problem` (для проксі — `all` / `broken`).

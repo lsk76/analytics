@@ -336,38 +336,13 @@ def test_retention_deletes_old_irrelevant_only():
     assert stages.info_retention_once(task) is False
 
 
-def test_collect_transport_error_rotates_account_and_flags_proxy(monkeypatch):
-    """Проксі відмовила → джерело НЕ винне: короткий бекоф, зсув акаунта в пулі,
-    проксі акаунта — у голову черги healthcheck. Джерело сюди ні до чого."""
-    from django.contrib.auth import get_user_model
-
-    from accounts.models import Proxy, TelegramAccount
-    u = get_user_model().objects.create(username="op")
-    proxy = Proxy.objects.create(proxy_string="h:1:u:p", last_tested_at=timezone.now())
-    acc = TelegramAccount.objects.create(user=u, phone_number="+1", is_authenticated=True,
-                                         proxy=proxy)
-    sub = SubscriptionFactory(source__kind=Source.KIND_TELEGRAM,
-                              source__url="https://t.me/x", source__poll_interval_sec=600)
-
-    class _Adapter(_StubAdapter):
-        def fetch(self, source):
-            source._tg_account_used = acc
-            raise ConnectionError("Connection to Telegram failed 5 time(s)")
-    monkeypatch.setattr(stages, "get_adapter", lambda k: _Adapter(None))
-    assert stages.info_collect_once() is True
-    src = sub.source
-    src.refresh_from_db()
-    proxy.refresh_from_db()
-    assert src.consecutive_failures == 1
-    assert src.poll_cursor["acc_shift"] == 1                     # інший акаунт
-    assert src.next_poll_at <= timezone.now() + timedelta(seconds=1200 + 5)  # не 2^n
-    assert proxy.fail_count == 1 and proxy.last_tested_at is None  # позачергово
-
-
-def test_collect_transport_error_ignored_for_rss(monkeypatch):
+def test_collect_any_adapter_exception_is_source_failure(monkeypatch):
+    """Помилки акаунта до стадії не доходять (адаптер → RateLimited); усе, що
+    дійшло, — збій джерела з бекофом."""
     sub = SubscriptionFactory(source__poll_interval_sec=600)
     monkeypatch.setattr(stages, "get_adapter",
                         lambda k: _StubAdapter(None, raises=ConnectionError("refused")))
     stages.info_collect_once()
     sub.source.refresh_from_db()
+    assert sub.source.consecutive_failures == 1
     assert "acc_shift" not in (sub.source.poll_cursor or {})

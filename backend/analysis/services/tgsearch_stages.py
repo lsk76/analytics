@@ -16,17 +16,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone as dj_tz
-from telethon import TelegramClient
-from telethon.errors import FloodWaitError
-from telethon.sessions import StringSession
-from telethon.tl.types import InputPeerChannel
 
 from accounts.models import TelegramAccount
 from analysis.models import MonitorChat, Post
@@ -63,83 +59,95 @@ def _due_chats(task, limit):
                 .order_by("priority", "id")[:limit])
 
 
-def _assign_accounts(chats, skip_ids=()):
+def _account_order(ids: list[int]) -> list[int]:
+    """Спершу акаунти, які @SpamBot підтвердив як ВІЛЬНІ: резолв нового
+    юзернейма обмеженому акаунту не дається («No user has X as username»), і
+    чат виглядає неіснуючим. На проді 18.09 так «зникали» живі чати."""
+    if not ids:
+        return ids
+    free = set(TelegramAccount.objects.filter(id__in=ids, spam_status="free")
+               .values_list("id", flat=True))
+    return sorted(ids, key=lambda i: (i not in free, i))
+
+
+def _assign_accounts(chats):
     """Чат читає ТОЙ акаунт, що вже його читав: резолв кешується в сесії, і читати
     іншим акаунтом означає платити резолв удруге (а він має добовий ліміт).
-
-    skip_ids — акаунти в паузі після FloodWait: їм не даємо НОВИХ чатів, а вже
-    прив'язані читаємо (їхня черга все одно відсунеться самим FloodWait-ом).
-    """
-    pool = list(TelegramAccount.objects.filter(is_authenticated=True, is_active=True)
-                .exclude(session_string="").select_related("proxy").order_by("id"))
-    if not pool:
-        return None, None
-    # Спершу акаунти, які @SpamBot підтвердив як ВІЛЬНІ: резолв нового юзернейма
-    # обмеженому акаунту не дається («No user has X as username»), і чат виглядає
-    # неіснуючим. На проді 18.09 так «зникали» живі чати.
-    free = [a for a in pool if a.id not in skip_ids] or pool
-    free.sort(key=lambda a: (a.spam_status != "free", a.id))
+    Пул і придатність — registry (роль stream); стан акаунтів веде gateway.
+    -> {account_id: [MonitorChat]} або {} якщо нема кому читати."""
+    from accounts.services import registry
+    pool = _account_order(registry.candidates("stream"))
+    pinned_ok = set(TelegramAccount.objects.filter(
+        id__in=[mc.tg_account_id for mc in chats if mc.tg_account_id],
+        is_active=True, is_authenticated=True)
+        .exclude(state__in=[TelegramAccount.STATE_DEAUTHORIZED, TelegramAccount.STATE_BANNED])
+        .values_list("id", flat=True))
     # Той самий чат може читатись в ІНШІЙ задачі вже призначеним акаунтом — у
-    # його сесії резолв юзернейма закешований. Беремо саме його, інакше платимо
-    # резолв удруге (а обмеженому акаунту він просто не дається).
+    # його сесії резолв юзернейма закешований. Беремо саме його.
     ids = [mc.channel_id for mc in chats]
     donor = {}
     for other in (MonitorChat.objects.filter(channel_id__in=ids)
                   .exclude(tg_account=None).exclude(id__in=[mc.id for mc in chats])
-                  .select_related("tg_account", "tg_account__proxy")
+                  .filter(tg_account__is_authenticated=True, tg_account__is_active=True)
                   .order_by("channel_id", "id")):
-        if other.tg_account.is_authenticated and other.tg_account.is_active:
-            donor.setdefault(other.channel_id, other.tg_account)
+        donor.setdefault(other.channel_id, other.tg_account_id)
 
     by_acc: dict[int, list] = {}
     for i, mc in enumerate(chats):
-        acc = mc.tg_account
-        if acc is None or not acc.is_authenticated:
-            acc = donor.get(mc.channel_id) or free[i % len(free)]
-            mc.tg_account = acc
+        acc_id = mc.tg_account_id if mc.tg_account_id in pinned_ok else None
+        if acc_id is None:
+            acc_id = donor.get(mc.channel_id) or (pool[i % len(pool)] if pool else None)
+            if acc_id is None:
+                continue
+            mc.tg_account_id = acc_id
             mc.save(update_fields=["tg_account"])
-        by_acc.setdefault(acc.id, []).append(mc)
-    return {a.id: a for a in pool}, by_acc
+        by_acc.setdefault(acc_id, []).append(mc)
+    return by_acc
 
 
-def _entity(channel):
-    """Публічний чат — за юзернеймом; приватна linked-група — через access_hash.
-    Голий числовий id Telethon приймає за PeerUser і падає."""
+def _entity_spec(channel) -> dict | None:
+    """Специфікація чату для gateway: публічний — за юзернеймом; приватна
+    linked-група — за закешованим access_hash, а вперше — через батьківський
+    канал (gateway резолвить і повертає хеш у `resolved`)."""
     u = (channel.username or "").strip()
     if u and not u.startswith(("linked:", "+")):
-        return u
+        return {"username": u}
     ah = (channel.raw_meta or {}).get("tg_flags", {}).get("access_hash") \
         or (channel.raw_meta or {}).get("access_hash")
     if channel.tg_id and ah:
-        return InputPeerChannel(int(channel.tg_id), int(ah))
+        return {"channel_id": int(channel.tg_id), "access_hash": int(ah)}
+    if u.startswith("linked:") and u.split(":", 1)[1].strip():
+        return {"linked_parent": u.split(":", 1)[1].strip()}
     return None
 
 
-async def _search_chat(client, mc, terms, since, limit):
-    """-> список знайдених повідомлень (dict). Порожньо — не знайшлось."""
-    entity = _entity(mc.channel)
-    if entity is None:
-        return None, "немає юзернейма й access_hash"
-    found = {}
-    for term in terms:
-        try:
-            msgs = await client.get_messages(entity, search=term, limit=limit)
-        except FloodWaitError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            return None, f"{type(e).__name__}: {str(e)[:90]}"
-        for m in msgs:
-            text = (getattr(m, "message", None) or "").strip()
-            if not text or not m.date or m.date < since:
-                continue
-            found[m.id] = {
-                "mid": m.id, "text": text,
-                "date": m.date.astimezone(timezone.utc),
-                "author_id": getattr(getattr(m, "from_id", None), "user_id", None),
-                "term": term,
-            }
-        await asyncio.sleep(PAUSE)
-    return list(found.values()), None
+def _apply_resolved(channel, resolved: dict | None) -> None:
+    """Хеш linked-групи, який gateway щойно здобув, — у raw_meta, щоб наступні
+    проходи не платили резолв удруге."""
+    if not resolved or not resolved.get("access_hash"):
+        return
+    meta = dict(channel.raw_meta or {})
+    if meta.get("access_hash") == resolved["access_hash"] and channel.tg_id == resolved["id"]:
+        return
+    meta["access_hash"] = resolved["access_hash"]
+    type(channel).objects.filter(id=channel.id).update(tg_id=resolved["id"], raw_meta=meta)
+
+
+def _hits_to_msgs(hits: list[dict], channel) -> list[dict]:
+    """Відповідь gateway → формат _store (дата datetime, медіа з назвою чату)."""
+    out = []
+    for h in hits:
+        media = h.get("media")
+        if media:
+            media = {**media, "chat": (channel.username or "").strip()}
+        out.append({"mid": int(h["mid"]), "text": h["text"],
+                    "date": datetime.fromisoformat(h["date"]) if h.get("date") else None,
+                    "author_id": h.get("author_id"), "term": h.get("term"), "media": media})
+    return out
+
+
+def _unbind(chats) -> None:
+    MonitorChat.objects.filter(id__in=[mc.id for mc in chats]).update(tg_account=None)
 
 
 def _url(channel, mid):
@@ -150,40 +158,46 @@ def _url(channel, mid):
     return f"https://t.me/c/{internal}/{mid}"
 
 
-async def _run_account(acc, chats, terms, since, limit, out):
-    client = TelegramClient(
-        StringSession(acc.session_string), int(acc.api_id), acc.api_hash,
-        proxy=acc.proxy.to_telethon_proxy() if acc.proxy else None,
-        connection_retries=2, retry_delay=2, timeout=20, **acc.client_kwargs())
+def _run_search_account(acc_id, chats, terms, since, limit, out):
+    """Один акаунт → один виклик gateway на всі його чати. Помилка АКАУНТА
+    (пауза/проксі/сесія) — чати відвʼязуємо, наступний прохід дасть інший."""
+    from accounts.services import registry
+    from accounts.services.managed import AccountUnavailable, RateLimited, TelegramOpError
+    req = []
+    for mc in chats:
+        spec = _entity_spec(mc.channel)
+        if spec is None:
+            out.append((mc, None, "немає юзернейма й access_hash"))
+            continue
+        req.append({"key": mc.id, "entity": spec})
+    if not req:
+        return
+    by_id = {mc.id: mc for mc in chats}
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            logger.warning("tgs_search: акаунт #%s не авторизований", acc.id)
-            return
-        for mc in chats:
-            try:
-                msgs, err = await _search_chat(client, mc, terms, since, limit)
-            except FloodWaitError as e:
-                logger.warning("tgs_search: акаунт #%s FloodWait %ss — стоп", acc.id, e.seconds)
-                return
-            out.append((mc, msgs, err))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("tgs_search: акаунт #%s впав: %r", acc.id, e)
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        rows = registry.get(acc_id).search(req, terms, since=since, limit=limit, pause=PAUSE)
+    except RateLimited as e:
+        logger.warning("tgs_search: акаунт #%s пауза %ss — пропускаю прохід", acc_id, e.retry_after)
+        return
+    except AccountUnavailable as e:
+        logger.warning("tgs_search: акаунт #%s недоступний (%s) — відвʼязую %d чатів",
+                       acc_id, e.reason, len(chats))
+        _unbind(chats)
+        return
+    except TelegramOpError as e:
+        logger.warning("tgs_search: акаунт #%s: %s", acc_id, e)
+        return
+    for row in rows:
+        mc = by_id.get(row.get("key"))
+        if mc is None:
+            continue
+        out.append((mc, None if row.get("error") else _hits_to_msgs(row["hits"], mc.channel),
+                    row.get("error")))
 
 
-async def _search_all(pool, by_acc, terms, since, limit, out):
-    sem = asyncio.Semaphore(ACCOUNT_CONCURRENCY)
-
-    async def guarded(aid, chats):
-        async with sem:
-            await _run_account(pool[aid], chats, terms, since, limit, out)
-
-    await asyncio.gather(*(guarded(a, ch) for a, ch in by_acc.items()))
+def _search_all_sync(by_acc, terms, since, limit, out):
+    with ThreadPoolExecutor(max_workers=ACCOUNT_CONCURRENCY) as ex:
+        list(ex.map(lambda item: _run_search_account(item[0], item[1], terms, since, limit, out),
+                    by_acc.items()))
 
 
 # ===========================================================================
@@ -197,55 +211,13 @@ async def _search_all(pool, by_acc, terms, since, limit, out):
 # акаунті: тримай 1 чат = 1 акаунт.
 # ===========================================================================
 STREAM_CONCURRENCY = 40     # скільки акаунтів читають одночасно
-# Стеля на акаунт за прохід. Без неї один акаунт із мертвим проксі тримав увесь
-# прохід: connect висів на ретраях, а стрім із інтервалом 3 хв не встигав
-# зробити жодного повного кола за 12 хвилин (ловили на проді).
+# Стеля на акаунт за прохід (таймаут операції scan у gateway). Без неї один
+# акаунт із мертвим проксі тримав увесь прохід (ловили на проді).
 STREAM_ACCOUNT_TIMEOUT = 75
 STREAM_LIMIT = 300          # стеля повідомлень за один полінг чату
 STREAM_BACKFILL = 100       # перший полінг: скільки останніх забрати
 MEDIA_PER_TICK = 30         # стеля пересилань медіа з одного чату за прохід
 MEDIA_PAUSE = 0.5
-
-# Акаунти в паузі після FloodWait: {id: коли звільниться}. Живе в пам'яті
-# воркера — стрім-воркер один, а після рестарту пауза все одно відновиться з
-# першого ж FloodWait (вони приходять миттєво, не після роботи).
-_FLOOD_UNTIL: dict[int, float] = {}
-
-
-def _flooded_ids() -> set:
-    now = time.time()
-    return {aid for aid, until in _FLOOD_UNTIL.items() if until > now}
-
-
-async def _mark_flood(acc_id, seconds, chats):
-    """Акаунт у паузу, його чати — іншим (інакше чат мовчить весь FloodWait)."""
-    _FLOOD_UNTIL[acc_id] = time.time() + max(int(seconds or 60), 60)
-    logger.warning("tgs_stream: акаунт #%s FloodWait %ss — пауза, %d чатів "
-                   "віддаю іншим", acc_id, seconds, len(chats))
-    await sync_to_async(MonitorChat.objects.filter(
-        id__in=[mc.id for mc in chats]).update)(tg_account=None)
-
-
-def _media_meta(m, mc):
-    """Позначка про медіа повідомлення: {kind, chat, mid} або None.
-
-    Файл НЕ качаємо. Публікація перешле оригінал акаунтом — це копія на боці
-    Telegram: нуль трафіку через нас, цілий альбом, збережена атрибуція.
-    Спроба качати сама собою ще й ненадійна: медіа живе в іншому DC, і через
-    проксі акаунта download_media падав на InvalidBufferError(404).
-    """
-    kind = ("photo" if getattr(m, "photo", None)
-            else "video" if getattr(m, "video", None) else None)
-    if not kind:
-        return None
-    return {"kind": kind, "chat": (mc.channel.username or "").strip(),
-            "mid": int(m.id), "group": getattr(m, "grouped_id", None)}
-
-
-def _is_resolve_error(err: str) -> bool:
-    low = (err or "").lower()
-    return ("no user has" in low or "usernameinvalid" in low
-            or "cannot find any entity" in low or "usernamenotoccupied" in low)
 
 
 def _patterns(task):
@@ -272,165 +244,61 @@ def _due_stream_chats(task, limit):
                 .order_by("priority", "id")[:limit])
 
 
-async def _resolve_linked(client, channel):
-    """`linked:<батьківський канал>` -> сутність групи обговорення.
-
-    Такі групи не мають ні юзернейма, ні access_hash, тож за голим tg_id
-    Telethon їх не бере. Але батьківський канал названий у самому полі, і через
-    нього Telegram сам віддає linked_chat — access_hash кешуємо в raw_meta,
-    щоб наступні проходи не платили резолв удруге.
-    """
-    from telethon.tl.functions.channels import GetFullChannelRequest
-    parent = (channel.username or "").split(":", 1)[1].strip()
-    if not parent:
-        return None
-    full = await client(GetFullChannelRequest(parent))
-    linked_id = getattr(full.full_chat, "linked_chat_id", None)
-    chat = next((c for c in full.chats if c.id == linked_id), None)
-    if chat is None:
-        return None
-    meta = dict(channel.raw_meta or {})
-    meta["access_hash"] = chat.access_hash
-    await sync_to_async(type(channel).objects.filter(id=channel.id).update)(
-        tg_id=chat.id, raw_meta=meta)
-    return chat
-
-
-async def _stream_chat(client, mc, patterns, media_peer):
-    """-> (список збігів, новий watermark, скільки медіа переслано, помилка)."""
-    entity = _entity(mc.channel)
-    if entity is None and (mc.channel.username or "").startswith("linked:"):
-        try:
-            entity = await _resolve_linked(client, mc.channel)
-        except FloodWaitError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            return None, mc.stream_last_msg_id, 0, f"linked: {type(e).__name__}: {str(e)[:70]}", 0
-    if entity is None:
-        return None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash", 0
-    first = not mc.stream_last_msg_id
-    # перший полінг — найновіші N; далі — від watermark уперед (reverse), щоб
-    # сплеск, більший за ліміт, не лишив діри в середині
-    kwargs = dict(limit=STREAM_BACKFILL) if first else dict(
-        min_id=mc.stream_last_msg_id, limit=STREAM_LIMIT, reverse=True)
-    found, max_id, n_media, n_seen = [], mc.stream_last_msg_id, 0, 0
+def _stream_account(acc_id, chats, patterns, media_chat_id, out):
+    """Один акаунт → один `scan` у gateway на всі його чати (медіа пересилається
+    там же, поки повідомлення «в руках»). Помилка АКАУНТА — чати відвʼязуємо:
+    інакше вони назавжди лишаться за мертвим акаунтом (тиха німота)."""
+    from accounts.services import registry
+    from accounts.services.managed import AccountUnavailable, RateLimited, TelegramOpError
+    req = []
+    for mc in chats:
+        spec = _entity_spec(mc.channel)
+        if spec is None:
+            out.append((mc, None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash", 0))
+            continue
+        first = not mc.stream_last_msg_id
+        req.append({"key": mc.id, "entity": spec, "forward_media": bool(mc.forward_media),
+                    **({"limit": STREAM_BACKFILL} if first else
+                       {"min_id": mc.stream_last_msg_id, "limit": STREAM_LIMIT, "reverse": True})})
+    if not req:
+        return
+    media = None
+    if media_chat_id and any(mc.forward_media for mc in chats):
+        media = {"forward_to": int(media_chat_id), "per_tick": MEDIA_PER_TICK,
+                 "pause": MEDIA_PAUSE, "which": "all"}
+    by_id = {mc.id: mc for mc in chats}
     try:
-        async for m in client.iter_messages(entity, **kwargs):
-            max_id = max(max_id, int(m.id))
-            if media_peer is not None and n_media < MEDIA_PER_TICK and (
-                    getattr(m, "photo", None) or getattr(m, "video", None)):
-                try:
-                    await client.forward_messages(media_peer, m.id, entity)
-                    n_media += 1
-                    await asyncio.sleep(MEDIA_PAUSE)
-                except FloodWaitError:
-                    raise
-                except Exception as e:  # noqa: BLE001 — медіа не має валити збір тексту
-                    logger.warning("tgs_stream: медіа з @%s не переслалось: %r",
-                                   mc.channel.username, e)
-            text = (getattr(m, "message", None) or "").strip()
-            if not text:
-                continue
-            n_seen += 1
-            hit = next((p.pattern for p in patterns if p.search(text)), None)
-            if not hit:
-                continue
-            # Медіа качаємо ТУТ, поки клієнт відкритий і повідомлення в руках:
-            # на етапі публікації бот до чужого чату доступу не має, а
-            # перевідкривати сесію заради одного файлу дорожче за сам файл.
-            media = _media_meta(m, mc)
-            found.append({
-                "mid": int(m.id), "text": text,
-                "date": m.date.astimezone(timezone.utc) if m.date else None,
-                "author_id": getattr(getattr(m, "from_id", None), "user_id", None),
-                "term": hit[:60], "media": media,
-            })
-    except FloodWaitError:
-        raise
-    except Exception as e:  # noqa: BLE001
-        return None, max_id, n_media, f"{type(e).__name__}: {str(e)[:90]}", n_seen
-    return found, max_id, n_media, None, n_seen
+        rows = registry.get(acc_id).scan(req, patterns=[p.pattern for p in patterns],
+                                         media=media, timeout=STREAM_ACCOUNT_TIMEOUT)
+    except RateLimited as e:
+        # FloodWait/пауза: чати лишаються за акаунтом, gateway сам його тримає в
+        # cooldown; наступний прохід або дочекається, або registry дасть іншого
+        logger.warning("tgs_stream: акаунт #%s пауза %ss (%s) — прохід пропущено",
+                       acc_id, e.retry_after, e.reason)
+        return
+    except AccountUnavailable as e:
+        logger.warning("tgs_stream: акаунт #%s недоступний (%s) — відвʼязую %d чатів",
+                       acc_id, e.reason, len(chats))
+        _unbind(chats)
+        return
+    except TelegramOpError as e:
+        logger.warning("tgs_stream: акаунт #%s: %s", acc_id, e)
+        return
+    for row in rows:
+        mc = by_id.get(row.get("key"))
+        if mc is None:
+            continue
+        _apply_resolved(mc.channel, row.get("resolved"))
+        msgs = None if row.get("error") else _hits_to_msgs(row["hits"], mc.channel)
+        out.append((mc, msgs, int(row.get("max_id") or mc.stream_last_msg_id),
+                    int(row.get("n_media") or 0), row.get("error"), int(row.get("n_seen") or 0)))
 
 
-async def _stream_account(acc, chats, patterns, media_chat_id, out):
-    # Ретраї тут навмисно скупіші за пошукові: стрім ходить кожні 3 хвилини, тож
-    # мертвий акаунт вигідніше пропустити зараз і віддати його чати живому, ніж
-    # чекати на ньому весь бюджет проходу.
-    client = TelegramClient(
-        StringSession(acc.session_string), int(acc.api_id), acc.api_hash,
-        proxy=acc.proxy.to_telethon_proxy() if acc.proxy else None,
-        connection_retries=1, retry_delay=1, timeout=10, **acc.client_kwargs())
-    try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            # Сесія протухла. Якщо просто вийти, чати цього акаунта лишаться
-            # прив'язаними до нього і НІКОЛИ не прочитаються (тиха німота).
-            # Тому відв'язуємо — наступний прохід роздасть їх живим акаунтам.
-            logger.warning("tgs_stream: акаунт #%s не авторизований — відв'язую %d чатів",
-                           acc.id, len(chats))
-            await sync_to_async(MonitorChat.objects.filter(
-                id__in=[mc.id for mc in chats]).update)(tg_account=None)
-            return
-        media_peer = None
-        if media_chat_id and any(mc.forward_media for mc in chats):
-            try:
-                media_peer = await client.get_entity(int(media_chat_id))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("tgs_stream: акаунт #%s не бачить чат медіа %s (%r) — "
-                               "він має бути учасником", acc.id, media_chat_id, e)
-        for mc in chats:
-            try:
-                msgs, max_id, n_media, err, n_seen = await _stream_chat(
-                    client, mc, patterns, media_peer if mc.forward_media else None)
-            except FloodWaitError as e:
-                # FloodWait буває на ГОДИНИ. Без паузи стадія поверталась до
-                # цього ж акаунта кожні кілька секунд: його чати не оновлювали
-                # last_streamed_at, тож лишались «пора читати» — і довбали
-                # флуднутий акаунт замість того, щоб піти до вільного.
-                await _mark_flood(acc.id, e.seconds, chats)
-                return
-            out.append((mc, msgs, max_id, n_media, err, n_seen))
-    except FloodWaitError as e:
-        await _mark_flood(acc.id, getattr(e, "seconds", 60), chats)
-    except Exception as e:  # noqa: BLE001
-        # Мертва сесія / битий проксі: чати відв'язуємо, інакше вони назавжди
-        # лишаться за цим акаунтом і не читатимуться (та сама німота, що й при
-        # протухлій авторизації).
-        logger.warning("tgs_stream: акаунт #%s впав: %r — відв'язую %d чатів",
-                       acc.id, e, len(chats))
-        await sync_to_async(MonitorChat.objects.filter(
-            id__in=[mc.id for mc in chats]).update)(tg_account=None)
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+def _stream_all_sync(by_acc, patterns, media_chat_id, out):
+    with ThreadPoolExecutor(max_workers=STREAM_CONCURRENCY) as ex:
+        list(ex.map(lambda item: _stream_account(item[0], item[1], patterns, media_chat_id, out),
+                    by_acc.items()))
 
-
-async def _stream_all(pool, by_acc, patterns, media_chat_id, out):
-    sem = asyncio.Semaphore(STREAM_CONCURRENCY)
-
-    async def guarded(aid, chats):
-        from accounts.services.telegram_client import (AccountBusy,
-                                                       account_exclusive_async)
-        async with sem:
-            try:
-                # один акаунт = один клієнт: якщо його зараз тримає збирач або
-                # публікація, пропускаємо прохід. Два конекшени з тим самим
-                # auth key Telegram убиває назавжди (AuthKeyDuplicated).
-                async with account_exclusive_async(pool[aid]):
-                    await asyncio.wait_for(
-                        _stream_account(pool[aid], chats, patterns, media_chat_id, out),
-                        timeout=STREAM_ACCOUNT_TIMEOUT)
-            except AccountBusy:
-                logger.debug("tgs_stream: акаунт #%s зайнятий — прохід пропущено", aid)
-            except asyncio.TimeoutError:
-                logger.warning("tgs_stream: акаунт #%s не вклався в %ss — відв'язую "
-                               "%d чатів", aid, STREAM_ACCOUNT_TIMEOUT, len(chats))
-                await sync_to_async(MonitorChat.objects.filter(
-                    id__in=[mc.id for mc in chats]).update)(tg_account=None)
-
-    await asyncio.gather(*(guarded(a, ch) for a, ch in by_acc.items()))
 
 
 def tgs_stream_once(task) -> bool:
@@ -441,13 +309,13 @@ def tgs_stream_once(task) -> bool:
     chats = _due_stream_chats(task, 500)
     if not chats:
         return False
-    pool, by_acc = _assign_accounts(chats, skip_ids=_flooded_ids())
-    if not pool:
-        logger.warning("tgs_stream: немає авторизованих акаунтів")
+    by_acc = _assign_accounts(chats)
+    if not by_acc:
+        logger.warning("tgs_stream: немає придатних акаунтів (registry: stream)")
         return False
 
     out: list = []
-    asyncio.run(_stream_all(pool, by_acc, patterns, task.stream_media_chat_id, out))
+    _stream_all_sync(by_acc, patterns, task.stream_media_chat_id, out)
 
     n_new = n_media = n_rebind = n_seen_total = 0
     for mc, msgs, max_id, media, err, seen in out:
@@ -455,17 +323,11 @@ def tgs_stream_once(task) -> bool:
         n_media += media
         fields = ["last_streamed_at"]
         if err:
+            # помилка ЧАТУ (приватний, видалений, без хешу). Провал резолву
+            # ЦИМ акаунтом («No user has…») сюди не доходить: gateway віддає
+            # його як AccountUnavailable, і _stream_account уже відвʼязав чати
             mc.notes = f"[tgs_stream] {err}"[:500]
             fields.append("notes")
-            # «No user has X as username» — це НЕ мертвий чат, а провал резолву
-            # ЦИМ акаунтом: обмежені (SpamBot) акаунти не резолвлять нові
-            # юзернейми. Тому відв'язуємо акаунт і даємо чату інший шанс —
-            # інакше живий чат назавжди лишається «мертвим» (ловили на проді:
-            # @reduktorny «не існував», хоч уже давав пости).
-            if _is_resolve_error(err):
-                mc.tg_account = None
-                fields.append("tg_account")
-                n_rebind += 1
         elif msgs:
             n_new += _store(task, mc, msgs)
         if max_id > mc.stream_last_msg_id:
@@ -475,8 +337,8 @@ def tgs_stream_once(task) -> bool:
         mc.save(update_fields=fields)
     # n_seen — скільки текстових повідомлень взагалі проглянуто: без нього
     # «збігів 2» не відрізнити від «чати мовчать» і «регулярка вузька».
-    logger.info("tgs_stream: чатів %d, прочитано %d, збігів %d, медіа %d, перепризначено %d",
-                len(out), n_seen_total, n_new, n_media, n_rebind)
+    logger.info("tgs_stream: чатів %d, прочитано %d, збігів %d, медіа %d",
+                len(out), n_seen_total, n_new, n_media)
     return True
 
 
@@ -507,15 +369,14 @@ def tgs_search_once(task) -> bool:
     if not chats:
         return False
 
-    pool, by_acc = _assign_accounts(chats)
-    if not pool:
-        logger.warning("tgs_search: немає авторизованих акаунтів")
+    by_acc = _assign_accounts(chats)
+    if not by_acc:
+        logger.warning("tgs_search: немає придатних акаунтів (registry: stream)")
         return False
 
     since = datetime.now(timezone.utc) - timedelta(days=task.search_days or 7)
     out: list = []
-    asyncio.run(_search_all(pool, by_acc, terms, since,
-                            task.search_limit_per_term or 100, out))
+    _search_all_sync(by_acc, terms, since, task.search_limit_per_term or 100, out)
 
     n_new = 0
     for mc, msgs, err in out:
