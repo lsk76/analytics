@@ -82,14 +82,34 @@ class TelegramAdapter(BaseSourceAdapter):
     kind = "telegram"
 
     def _account(self, source):
-        # Явно призначений акаунт джерела, інакше — перший авторизований із пулу.
-        # (Справжня ротація по акаунтах/шардинг джерел — Phase 4; поки 1 акаунт.)
+        """Акаунт джерела, інакше — СТАБІЛЬНИЙ вибір із пулу збирачів.
+
+        Два правила, обидва зі шкоди на проді:
+        1) не беремо акаунти, привʼязані до чатів tgsearch-стріму. Той самий
+           auth key, задіяний двома конвеєрами водночас, Telegram бачить як
+           «used under two different IP addresses» і може вбити сесію — три
+           сесії ми так уже втратили;
+        2) не «перший за id»: раніше ВСІ непривʼязані джерела довбали акаунт
+           #1, і його добовий ліміт резолву юзернеймів вичерпувався за годину
+           (33 джерела висіли на «No user has X as username»). Вибір за
+           лишком від id джерела — стабільний, тож джерело тримається свого
+           акаунта й користається його прогрітою сесією.
+        """
         acc = source.tg_account
         if acc and acc.is_authenticated:
             return acc
+        from analysis.models import MonitorChat
         from accounts.models import TelegramAccount
-        return (TelegramAccount.objects.filter(is_authenticated=True)
-                .order_by("id").first())
+        stream_ids = set(MonitorChat.objects.exclude(tg_account=None)
+                         .values_list("tg_account_id", flat=True))
+        pool = list(TelegramAccount.objects.filter(is_authenticated=True)
+                    .exclude(id__in=stream_ids).order_by("id"))
+        if not pool:      # усі зайняті стрімом — краще працювати, ніж стояти
+            pool = list(TelegramAccount.objects.filter(is_authenticated=True)
+                        .order_by("id"))
+        if not pool:
+            return None
+        return pool[(source.id or 0) % len(pool)]
 
     @staticmethod
     def _handle(source) -> str:
