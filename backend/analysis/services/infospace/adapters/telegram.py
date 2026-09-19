@@ -112,7 +112,7 @@ class TelegramAdapter(BaseSourceAdapter):
 
         peer: dict = {}
         msgs = _fetch_history(acc, handle, min_id, limit, reverse, peer)  # FloodWait → RateLimited
-        _remember_peer(handle, peer, acc.id)
+        _remember_peer(handle, peer, getattr(acc, "id", None))
 
         items, max_id = [], min_id
         for m in msgs:

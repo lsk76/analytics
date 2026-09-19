@@ -17,6 +17,7 @@ class _Src:
 
 
 class _Acct:
+    id = 1
     is_authenticated = True
     proxy = None
 
