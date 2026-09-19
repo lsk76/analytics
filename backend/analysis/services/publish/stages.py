@@ -339,9 +339,27 @@ def _process(config, pub) -> bool:
     source_url = _source_url(event)
 
     if config.raw_mode:
-        # Без ШІ: відбір уже зробив фільтр профілю (теги/регіони/статус), тож
-        # питати LLM «чи публікувати» нема сенсу — це був би другий фільтр
-        # поверх першого, за гроші і з ризиком мовчазних відмов.
+        # Текст у канал іде ОРИГІНАЛЬНИЙ (рерайту немає свідомо: замовник читає
+        # першоджерело). Але якщо на профілі заповнений ai_prompt — ШІ все одно
+        # питаємо, тільки як ФІЛЬТР: «публікувати чи ні» плюс причина. Так
+        # смислові правила («офіційний піар не потрібен») живуть у промпті
+        # оператора, а не в регулярках: регулярки на живих даних зрізали
+        # 4% кандидатів і серед них справжні збої ДЕГ.
+        if (config.ai_prompt or "").strip():
+            ok, why = _ai_gate(config, event, source_url)
+            if ok is None:          # таймаут/рейт-ліміт — транзієнт, без спроби
+                pub.locked_at = None
+                pub.save(update_fields=["locked_at"])
+                return False
+            if not ok:
+                pub.status = PublishedEvent.STATUS_SKIPPED
+                pub.ai_verdict = False
+                pub.ai_reason = f"AI-фільтр: {why}"[:2000]
+                pub.locked_at = None
+                pub.save(update_fields=["status", "ai_verdict", "ai_reason", "locked_at"])
+                logger.info("publish[%s]: AI-фільтр відсіяв event#%d (%s)",
+                            config.name, event.id, why[:90])
+                return False
         media = _media_of(event)
         # Підпис до медіа вчетверо коротший за пост (ліміт Bot API 1024), тому
         # тіло ріжемо сильніше — повний текст лишається за посиланням.
@@ -422,6 +440,31 @@ def _process(config, pub) -> bool:
         return False
 
     return _send(config, pub, event, post_text)
+
+
+def _ai_gate(config, event, source_url: str):
+    """ШІ як ФІЛЬТР для raw_mode: (True|False|None, причина).
+
+    None = LLM не відповіла (таймаут/ліміт): нічого не вирішуємо, пробуємо
+    наступним проходом. Рерайту тут немає — текст у канал іде оригінальний.
+    """
+    model = (config.ai_model or "").strip() or None
+    system = (config.ai_prompt or "").strip()
+    raw = asyncio.run(llm.query(
+        [{"role": "system", "content": system},
+         {"role": "user", "content": _event_payload(event, source_url)}],
+        model=model, json_mode=True, max_tokens=400,
+        api_key=llm.key_for_user(config.owner)))
+    if not (raw or "").strip():
+        return None, "порожня відповідь LLM"
+    verdict = llm.extract_json(raw)
+    if not isinstance(verdict, dict) or "publish" not in verdict:
+        # битий JSON не має глушити канал: у сумніві ПУБЛІКУЄМО, бо поріг
+        # важливості й гео-ворота вже відпрацювали до цього місця
+        logger.warning("publish[%s]: AI-фільтр віддав не JSON — пропускаю далі",
+                       config.name)
+        return True, "AI-фільтр: битий JSON, пропущено"
+    return bool(verdict.get("publish")), (verdict.get("reason") or "")[:200]
 
 
 def _send_via_account(config, media, post_text):
