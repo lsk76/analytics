@@ -656,13 +656,13 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
             "description": "«Теги» — це АБО (досить одного збігу). Поріг на кшталт "
                            "«важливість 3+» задається через «Теги-виключення».",
             "fields": ("task", "tags", "require_tags", "exclude_tags", "regions", "review_status",
-                       "publish_from", "max_age_days", "allow_null_region_tags",
-                       "stop_patterns")}),
+                       "publish_from", "max_age_days", "allow_null_region_tags")}),
         ("Telegram-канал", {"fields": ("chat_id", "bot_token")}),
-        ("Публікація без ШІ (оригінал + теги)", {
-            "description": "Увімкнено — LLM не викликається зовсім: у канал іде "
-                           "оригінальний текст джерела, теги події й посилання. "
-                           "Поля AI нижче при цьому ігноруються.",
+        ("Публікація без рерайту (оригінал + теги)", {
+            "description": "Увімкнено — у канал іде оригінальний текст джерела, теги "
+                           "події й посилання. AI-промпт нижче при цьому ПРАЦЮЄ як "
+                           "фільтр «публікувати чи ні»; порожній промпт = LLM не "
+                           "викликається зовсім.",
             "fields": ("raw_mode", "raw_header", "post_as_account", "forward_account")}),
         ("AI (фільтр + рерайт)", {"fields": ("ai_model", "ai_prompt")}),
         ("Throttle", {"fields": ("max_per_pass",)}),

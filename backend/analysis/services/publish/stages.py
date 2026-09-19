@@ -243,25 +243,6 @@ def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> 
     ] if x)
 
 
-def _hits_stop_pattern(config, text: str, summary: str = "") -> str:
-    """Перша стоп-регулярка профілю, що збіглася, або "". Битий рядок ігноруємо:
-    профіль редагує оператор, і одна помилка в регулярці не має глушити канал."""
-    raw = (config.stop_patterns or "").strip()
-    if not raw:
-        return ""
-    blob = f"{text}\n{summary}"
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        try:
-            if re.search(line, blob, re.I):
-                return line
-        except re.error:
-            logger.warning("publish[%s]: битa стоп-регулярка %r", config.name, line)
-    return ""
-
-
 def _topic_words(event) -> set:
     """Слова-відбиток сюжету: сигнатура зі скріну, інакше резюме події."""
     if event is None:
@@ -367,17 +348,6 @@ def _process(config, pub) -> bool:
                                 limit=600 if media else 3000)
         if not post_text.strip():
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")
-            return False
-        if (stop := _hits_stop_pattern(config, post_text, event.summary or "")):
-            pub.status = PublishedEvent.STATUS_SKIPPED
-            pub.ai_verdict = False
-            pub.ai_reason = f"стоп-фраза профілю: {stop}"[:2000]
-            pub.post_text = post_text
-            pub.locked_at = None
-            pub.save(update_fields=["status", "ai_verdict", "ai_reason",
-                                    "post_text", "locked_at"])
-            logger.info("publish[%s]: стоп-фраза %r — event#%d пропущено",
-                        config.name, stop, event.id)
             return False
         if _is_recent_duplicate(config, post_text, event):
             pub.status = PublishedEvent.STATUS_SKIPPED
