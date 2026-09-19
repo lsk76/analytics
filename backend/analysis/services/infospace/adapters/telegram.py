@@ -142,13 +142,17 @@ class TelegramAdapter(BaseSourceAdapter):
         acc = source.tg_account
         if acc and acc.is_authenticated:
             return acc
-        from analysis.models import MonitorChat
+        from analysis.models import MonitorChat, PublishConfig
         from accounts.models import TelegramAccount
-        stream_ids = set(MonitorChat.objects.exclude(tg_account=None)
-                         .values_list("tg_account_id", flat=True))
+        busy = set(MonitorChat.objects.exclude(tg_account=None)
+                   .values_list("tg_account_id", flat=True))
+        # акаунт, яким ПУБЛІКУЄМО, збирачу не давати: паралельний конект убиває
+        # ключ, і канал онімів би (#160 мав 3 джерела й лежав у пулі)
+        busy |= set(PublishConfig.objects.exclude(forward_account=None)
+                    .values_list("forward_account_id", flat=True))
         pool = list(TelegramAccount.objects.filter(is_authenticated=True)
-                    .exclude(id__in=stream_ids).order_by("id"))
-        if not pool:      # усі зайняті стрімом — краще працювати, ніж стояти
+                    .exclude(id__in=busy).order_by("id"))
+        if not pool:      # усі зайняті — краще працювати, ніж стояти
             pool = list(TelegramAccount.objects.filter(is_authenticated=True)
                         .order_by("id"))
         if not pool:
