@@ -214,8 +214,8 @@ def _save_peer(chat: str, account_id: int, peer: dict) -> None:
     ch.save(update_fields=["raw_meta"])
 
 
-def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> str:
-    """Пост без ШІ: рубрика + ОРИГІНАЛЬНИЙ текст джерела + теги + посилання.
+def _render_raw(event, source_url: str, limit: int = 3000) -> str:
+    """Пост без рерайту: регіон + ОРИГІНАЛЬНИЙ текст джерела + теги + посилання.
 
     Оригінал беремо з найранішого поста події — для tgsearch це сама репліка
     людини, для infospace — текст новини. Переказу немає свідомо: замовник
@@ -231,7 +231,7 @@ def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> 
     names = list(dict.fromkeys(t.name for t in event.tags.all()))
     hot = any(n in ("важливість_4", "важливість_5") for n in names)
     region = event.region_subject.name if event.region_subject else (event.region or "")
-    head = " ".join(x for x in [(header or "").strip(), _hashtag(region)] if x)
+    head = _hashtag(region)
     return "\n".join(x for x in [
         ("❗ " if hot else "") + head,
         f"#{event.id}",
@@ -344,7 +344,7 @@ def _process(config, pub) -> bool:
         media = _media_of(event)
         # Підпис до медіа вчетверо коротший за пост (ліміт Bot API 1024), тому
         # тіло ріжемо сильніше — повний текст лишається за посиланням.
-        post_text = _render_raw(event, source_url, config.raw_header,
+        post_text = _render_raw(event, source_url,
                                 limit=600 if media else 3000)
         if not post_text.strip():
             _bump_or_fail(pub, "raw_mode: порожній текст джерела")

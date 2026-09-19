@@ -663,7 +663,7 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
                            "події й посилання. AI-промпт нижче при цьому ПРАЦЮЄ як "
                            "фільтр «публікувати чи ні»; порожній промпт = LLM не "
                            "викликається зовсім.",
-            "fields": ("raw_mode", "raw_header", "post_as_account", "forward_account")}),
+            "fields": ("raw_mode", "post_as_account", "forward_account")}),
         ("AI (фільтр + рерайт)", {"fields": ("ai_model", "ai_prompt")}),
         ("Throttle", {"fields": ("max_per_pass",)}),
     )
