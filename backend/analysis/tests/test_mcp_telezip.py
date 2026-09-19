@@ -167,6 +167,7 @@ def test_tz_stats_summarises_without_downloading(fake):
     assert "09-16:20" in out and "09-17:30" in out
     # статистика рахується на боці TeleZip — повідомлення не викачуються
     assert [c[0] for c in client.calls] == ["search_stats"]
+    assert "1 запит" in out and "$0.10" in out      # ціна виклику перед очима
 
 
 def test_tz_calibrate_projects_volume_and_repost_ratio(fake):
@@ -186,6 +187,7 @@ def test_tz_calibrate_projects_volume_and_repost_ratio(fake):
     assert "×3.0" in out                      # репости
     assert "~3000" in out                     # проєкція 100/добу × 30
     assert calls["n"] == 2
+    assert "$0.20" in out                     # два виклики по $0.10
 
 
 # --- довідники --------------------------------------------------------------

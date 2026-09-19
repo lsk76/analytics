@@ -96,6 +96,7 @@ def test_run_create_plans_chunks_and_is_idempotent():
     assert run.status == "collecting" and run.started_at
     assert CollectChunk.objects.filter(job=run).count() == 3
     assert f"run_id={run.id}" in out
+    assert "$0.30" in out          # 3 чанки × $0.10 — ціна видна ДО запуску
 
     # той самий період удруге — нових чанків нема (enqueue_collection ідемпотентний)
     out2 = mcp_api.call("run_create", {"task": "run-task", "date_from": "2026-01-01",

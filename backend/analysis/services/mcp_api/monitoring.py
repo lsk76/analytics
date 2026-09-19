@@ -219,9 +219,15 @@ def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
     made = _stages.enqueue_collection(t, d_from, d_to, chunk_days=run.chunk_days, job=run)
     run.status, run.started_at = "collecting", timezone.now()
     run.save(update_fields=["status", "started_at"])
+    # ціну показуємо ДО того, як воркери почнуть платити: 1 запит TeleZip на
+    # чанк, а важкий чанк ще й ділиться навпіл (див. find_posts_range)
+    from analysis.services.mcp_api.telezip import REQUEST_COST_USD
     return (f"Збір #{run.id} для {t.slug}: {d_from}…{d_to}, заплановано {made} чанків "
             f"(по {run.chunk_days} дн). Воркери підхоплять самі — прогрес: run_show "
-            f"run_id={run.id}."
+            f"run_id={run.id}.\n"
+            f"Ціна: ~${made * REQUEST_COST_USD:.2f} (1 запит TeleZip на чанк; важкий "
+            f"чанк ділиться навпіл — тоді більше). Більший chunk_days = дешевше, "
+            f"але вищий ризик відлупу."
             + ("\n⚠ 0 нових чанків: період уже покрито попередніми зборами." if not made else ""))
 
 

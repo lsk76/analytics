@@ -29,6 +29,14 @@ from analysis.services.mcp_api.registry import ToolError, tool
 from analysis.services.telezip import TelezipClient
 
 MAX_WINDOW_DAYS = 62
+
+# КОЖЕН запит до TeleZip коштує ~$0.10 — незалежно від того, чи він повернув
+# мільйон повідомлень, чи нуль. Тому ціна залежить від КІЛЬКОСТІ викликів, а не
+# від обсягу даних, і головна економія — питати статистику (1 виклик) замість
+# перебору пошуками, а період збирати більшими чанками. Інструменти показують
+# вартість у відповіді, щоб рішення ухвалювалось із нею перед очима.
+REQUEST_COST_USD = 0.10
+
 UNREACHABLE_HINT = (
     "Перевір `tz_status`. Найчастіша причина — впав VPN до api.telezip.net "
     "(77.88.192.66): з контейнера порт 443 просто не відповідає. Після рестарту "
@@ -179,6 +187,13 @@ def _warnings(c, span):
     return out
 
 
+def _cost(n_requests, note: str = "") -> str:
+    """Рядок вартості: скільки викликів пішло і скільки це коштувало."""
+    total = n_requests * REQUEST_COST_USD
+    return (f"{n_requests} запит{'и' if 2 <= n_requests <= 4 else ('' if n_requests == 1 else 'ів')}"
+            f" до TeleZip ≈ ${total:.2f}" + (f" ({note})" if note else ""))
+
+
 def _by_day(rows):
     b = {}
     for r in rows:
@@ -305,6 +320,18 @@ thread         id top-повідомлення — одна гілка коме�
 Робоча форма: ТЕМА ∧ ДІЯ − ШУМ
   (мигрант диаспора) +(драка избил напал) -(всу фронт военкомат)
 
+## ЦІНА: один запит ≈ $0.10
+Платиться за ВИКЛИК, не за обсяг: порожня відповідь коштує стільки ж, скільки
+мільйон повідомлень. Звідси стратегія:
+* обсяг питай `tz_stats` (1 виклик), а не пошуками «на вгад»;
+* `tz_calibrate` — 2 виклики ($0.20), бо міряє ще й репости;
+* кожна СТОРІНКА (`page_token`) і кожен розділений навпіл важкий діапазон —
+  це окремий запит; вікно, що ділилось тричі, коштує вже $0.80;
+* збір періоду = 1 запит на чанк: 30 днів по дню — $3.00, по 3 дні — $1.00
+  (тому `run_create` показує ціну до запуску);
+* `unique=false` тим самим запитом дає і репости — не роби другий виклик,
+  якщо тобі не потрібні саме дублі.
+
 ## Ліміти (за ними — «відлуп»: порожньо/500/таймаут)
 пошук > 3 хв · збіг > 300 000 повідомлень · > 10 000 каналів ·
 channel_term, що зачепив > 20 000 каналів · глибина: лише в межах
@@ -365,6 +392,7 @@ def tz_stats(query: str = "", days: int = 7, date_from: str = "", date_to: str =
         ("авторів", st.get("userCount", 0)),
         ("перше/останнє", f"{(st.get('firstMessageDate') or '—')[:16]} … "
                           f"{(st.get('lastMessageDate') or '—')[:16]}"),
+        ("ціна", _cost(1, "найдешевший спосіб зрозуміти обсяг")),
     ]))]
     if dyn:
         parts.append(fmt.section(f"Динаміка (по {'днях' if by == 'day' else 'годинах'})", dyn))
@@ -415,6 +443,7 @@ def tz_search(query: str = "", days: int = 1, date_from: str = "", date_to: str 
         ("каналів у вибірці", len({r.get("channel_id") for r in rows})),
         ("ще є сторінка", f"page_token={res['next_page_token']}"
          if res.get("next_page_token") else "—"),
+        ("ціна", _cost(1, "кожна наступна сторінка — ще один")),
     ]))]
     warn = _warnings(crit, span)
     if warn:
@@ -476,6 +505,7 @@ def tz_calibrate(query: str = "", days: int = 3, exact: str = "", regex: str = "
                             f"{uniq.get('userCount', 0)} авторів)"),
             ("unique=false", f"{n_all} — репости ×{(n_all / n_uniq) if n_uniq else 0:.1f}"),
             (f"проєкція на {project_days} дн", f"~{projected} (unique)"),
+            ("ціна", _cost(2, "unique on/off — два виклики статистики")),
         ])),
         fmt.section("Топ каналів проби", fmt.table(
             ["канал", "повідомлень"],
@@ -742,6 +772,7 @@ def tz_ingest(task: str, query: str = "", days: int = 1, date_from: str = "",
         ("запит", fmt.trunc(query, 200) + (" (запит задачі)" if query == t.telezip_query else "")),
         ("вікно", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)"),
         ("знайдено", f"{len(rows)}; нових для задачі {len(fresh)}, вже є {len(rows) - len(fresh)}"),
+        ("ціна", _cost(1, "важке вікно ділиться навпіл — тоді 2, 4, 8…")),
     ])
     if dry_run:
         return fmt.joinsec(
