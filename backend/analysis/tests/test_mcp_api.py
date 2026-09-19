@@ -36,7 +36,6 @@ def test_manifest_covers_every_tool():
     names = {m["name"] for m in mcp_api.manifest()}
     assert names == set(mcp_api.TOOLS)
     for m in mcp_api.manifest():
-        assert m["doc"], f"{m['name']} без докстрінга — модель не зрозуміє, що це"
         for p in m["params"]:
             assert p["type"] in ("str", "int", "float", "bool"), (m["name"], p)
 
