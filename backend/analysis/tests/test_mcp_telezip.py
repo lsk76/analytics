@@ -210,10 +210,20 @@ def test_date_params_say_the_format_and_inclusivity():
     assert "ВКЛЮЧНО" in run_create["date_to"]
 
 
+def test_paid_tools_say_so_in_their_description():
+    """Ціна має стояти в описі КОЖНОГО платного інструмента, не лише tz_find."""
+    for name in ("tz_find", "tz_channels", "tz_users"):
+        doc = [m for m in mcp_api.manifest() if m["name"] == name][0]["doc"]
+        assert "$0.10" in doc, f"{name}: в описі не сказано про ціну виклику"
+
+
 def test_descriptions_do_not_mention_removed_tools_or_renamed_params():
     """Найчастіша гниль у доці: імена, які пережили перейменування."""
-    dead = ["tz_probe", "tz_syntax", "tz_calibrate", "tz_stats(", "tz_search(",
-            "channel_term=", "query=\""]
+    dead = ["tz_probe", "tz_syntax", "tz_calibrate", "tz_search", "tz_ingest",
+            "tz_slots", "tz_context", "tz_macros", "channel_term=", 'query="']
+    # `tz_stats` окремо: як самостійного інструмента його немає, лишився лише
+    # режим `tz_find(stats=true)` — згадка без дужок означає застарілий текст
+    dead += ["tz_stats "]
     for m in mcp_api.manifest():
         blob = m["doc"] + " ".join(p["doc"] for p in m["params"])
         for name in dead:

@@ -504,6 +504,9 @@ def tz_channels(term: str = "", name: str = "", title: str = "", about: str = ""
     доступна лише збережена історія). Плюс позначку, чи є він у нашому довіднику.
 
     Звідси беруть `id`/`name` для `tz_find(channel=...)`.
+
+    Кожен виклик ≈ $0.10 (платиться за виклик, не за обсяг); наступна сторінка
+    через `page_token` — це ще один виклик.
     """
     if not any([term, name, title, about, id]):
         raise ToolError("дай критерій: term / name / title / about / id")
@@ -560,6 +563,9 @@ def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = No
 
     Щоб побачити, ЩО людина писала, візьми знайдений id у
     `tz_find(user="<id>", text="*")`.
+
+    Кожен виклик ≈ $0.10. Пошук за `username` і добір профілів — це два різні
+    запити, тож разом вийде $0.20.
     """
     if not any([username, id, term]):
         raise ToolError("дай критерій: username / id / term")
