@@ -113,7 +113,11 @@ class TelegramAdapter(BaseSourceAdapter):
                         .order_by("id"))
         if not pool:
             return None
-        return pool[(source.id or 0) % len(pool)]
+        # зсув дає РОТАЦІЮ: без нього лишок від id завжди повертав той самий
+        # акаунт, і джерело з вичерпаним лімітом резолву не мало шансу
+        # перескочити на інший (33 джерела так і стояли)
+        shift = int((source.poll_cursor or {}).get("acc_shift", 0))
+        return pool[((source.id or 0) + shift) % len(pool)]
 
     @staticmethod
     def _handle(source) -> str:

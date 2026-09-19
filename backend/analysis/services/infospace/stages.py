@@ -123,11 +123,18 @@ def _schedule_fail(source, err):
     source.last_error = str(err)[:2000]
     source.locked_at = None
     fields = ["next_poll_at", "last_error", "consecutive_failures", "locked_at"]
-    if source.tg_account_id and _is_resolve_error(err):
-        logger.info("info_collect: %s — резолв не дався акаунту #%s, відвʼязую",
-                    source.name, source.tg_account_id)
-        source.tg_account = None        # наступний прохід візьме інший акаунт
-        fields.append("tg_account")
+    if _is_resolve_error(err):
+        if source.tg_account_id:
+            logger.info("info_collect: %s — резолв не дався акаунту #%s, відвʼязую",
+                        source.name, source.tg_account_id)
+            source.tg_account = None    # наступний прохід візьме інший із пулу
+            fields.append("tg_account")
+        # зсув у пулі: інакше вибір за лишком від id щоразу давав ТОЙ САМИЙ
+        # акаунт, і джерело з вичерпаним лімітом стояло назавжди
+        cur = dict(source.poll_cursor or {})
+        cur["acc_shift"] = int(cur.get("acc_shift", 0)) + 1
+        source.poll_cursor = cur
+        fields.append("poll_cursor")
     source.save(update_fields=fields)
 
 
