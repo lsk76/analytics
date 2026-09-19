@@ -563,7 +563,7 @@ def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = No
     if names:
         async def by_name():
             async with _client(timeout) as tz:
-                return await tz_users_by_username(names)
+                return await tz.users_by_username(names)
         found = _run_soft(by_name()) or {}
         parts.append(fmt.section("Юзернейм → TelegramID", fmt.table(
             ["username", "id"],
