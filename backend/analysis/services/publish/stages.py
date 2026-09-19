@@ -431,13 +431,17 @@ def _send_via_account(config, media, post_text):
     ми бачимо лише адресу оригіналу, а чи було там фото, знає лише відправка.
     Без цього облік показував «None» і частка постів із медіа була невідома.
     """
-    from accounts.services.telegram_client import TelegramUserClient
+    from accounts.services.telegram_client import (TelegramUserClient,
+                                                    account_exclusive)
     acc_id = config.forward_account_id
     src_chat = (media or {}).get("chat")
-    res = TelegramUserClient.send_post_sync(
-        config.forward_account, config.chat_id, post_text,
-        src_chat=src_chat, src_msg_id=(media or {}).get("mid") or 0,
-        src_peer=_peer_of(src_chat, acc_id))
+    # акаунт публікації тримаємо винятково: паралельний конект убиває ключ,
+    # а це наш єдиний канал у стрічку
+    with account_exclusive(config.forward_account):
+        res = TelegramUserClient.send_post_sync(
+            config.forward_account, config.chat_id, post_text,
+            src_chat=src_chat, src_msg_id=(media or {}).get("mid") or 0,
+            src_peer=_peer_of(src_chat, acc_id))
     if not res.get("ok"):
         raise telegram.TelegramError(f"акаунт #{config.forward_account_id}: {res.get('error')}")
     # хеш, здобутий цією відправкою, лишаємо собі: наступне медіа з цього

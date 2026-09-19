@@ -411,11 +411,19 @@ async def _stream_all(pool, by_acc, patterns, media_chat_id, out):
     sem = asyncio.Semaphore(STREAM_CONCURRENCY)
 
     async def guarded(aid, chats):
+        from accounts.services.telegram_client import (AccountBusy,
+                                                       account_exclusive_async)
         async with sem:
             try:
-                await asyncio.wait_for(
-                    _stream_account(pool[aid], chats, patterns, media_chat_id, out),
-                    timeout=STREAM_ACCOUNT_TIMEOUT)
+                # один акаунт = один клієнт: якщо його зараз тримає збирач або
+                # публікація, пропускаємо прохід. Два конекшени з тим самим
+                # auth key Telegram убиває назавжди (AuthKeyDuplicated).
+                async with account_exclusive_async(pool[aid]):
+                    await asyncio.wait_for(
+                        _stream_account(pool[aid], chats, patterns, media_chat_id, out),
+                        timeout=STREAM_ACCOUNT_TIMEOUT)
+            except AccountBusy:
+                logger.debug("tgs_stream: акаунт #%s зайнятий — прохід пропущено", aid)
             except asyncio.TimeoutError:
                 logger.warning("tgs_stream: акаунт #%s не вклався в %ss — відв'язую "
                                "%d чатів", aid, STREAM_ACCOUNT_TIMEOUT, len(chats))

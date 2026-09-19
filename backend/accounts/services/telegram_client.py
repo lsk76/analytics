@@ -8,8 +8,10 @@ Enrichment used by the pipeline:
 import asyncio
 import logging
 import re
+from contextlib import asynccontextmanager, contextmanager
 from typing import Optional, Tuple
 
+from django.db import connection
 from telethon import TelegramClient
 from telethon.errors import (AuthKeyDuplicatedError, AuthKeyUnregisteredError,
                              PhoneNumberBannedError, SessionRevokedError,
@@ -42,6 +44,83 @@ def run_async(coro):
     except RuntimeError:
         pass
     return asyncio.run(coro)
+
+
+class AccountBusy(RuntimeError):
+    """Акаунт уже має живий клієнт в іншому процесі."""
+
+
+def _lock_acquire(acc_id: int, ns: int = 771) -> bool:
+    with connection.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s, %s)", [ns, int(acc_id)])
+        return bool(cur.fetchone()[0])
+
+
+def _lock_release(acc_id: int, ns: int = 771) -> None:
+    with connection.cursor() as cur:
+        cur.execute("SELECT pg_advisory_unlock(%s, %s)", [ns, int(acc_id)])
+
+
+@asynccontextmanager
+async def account_exclusive_async(account, ns: int = 771):
+    """Async-версія account_exclusive для стріму (там усе всередині корутини)."""
+    from asgiref.sync import sync_to_async
+    acc_id = getattr(account, "pk", None) or getattr(account, "id", None)
+    if not acc_id:
+        yield
+        return
+    try:
+        got = await sync_to_async(_lock_acquire)(acc_id, ns)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("account_exclusive_async: лок #%s недоступний: %r", acc_id, e)
+        yield
+        return
+    if not got:
+        raise AccountBusy(f"акаунт #{acc_id} уже використовується іншим процесом")
+    try:
+        yield
+    finally:
+        try:
+            await sync_to_async(_lock_release)(acc_id, ns)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("account_exclusive_async: не зняв лок #%s: %r", acc_id, e)
+
+
+@contextmanager
+def account_exclusive(account, ns: int = 771):
+    """Один акаунт — ОДИН клієнт у всій системі (advisory-lock у Postgres).
+
+    Telegram кидає AuthKeyDuplicated не за зміну IP, а за ОДНОЧАСНІ конекшени
+    з тим самим auth key — і вбиває ключ назавжди («can no longer be used»).
+    У нас так згоріли сесії: 5 реплік збирача, стрім чатів, публікація й
+    сервісні воркери брали клієнта того самого акаунта незалежно один від
+    одного, кожен через свій вихід проксі.
+
+    Локи БЕРУТЬ лише синхронні входи (usage: `with account_exclusive(acc):`
+    перед run_async). Усередині корутини DB-виклик заборонений, тож лок
+    навмисно не вбудований у _client(): фабрика клієнта викликається і з
+    async-коду, і магія там дала б SynchronousOnlyOperation.
+    """
+    acc_id = getattr(account, "pk", None) or getattr(account, "id", None)
+    if not acc_id:
+        yield
+        return
+    try:
+        got = _lock_acquire(acc_id, ns)
+    except Exception as e:  # noqa: BLE001 — лок страховка, а не умова роботи
+        logger.debug("account_exclusive: лок #%s недоступний: %r", acc_id, e)
+        yield
+        return
+    if not got:
+        raise AccountBusy(f"акаунт #{acc_id} уже використовується іншим процесом")
+    try:
+        yield
+    finally:
+        try:
+            _lock_release(acc_id, ns)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("account_exclusive: не зняв лок #%s: %r", acc_id, e)
+
 
 
 class TelegramUserClient:
