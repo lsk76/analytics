@@ -155,6 +155,12 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", os.getenv("TG_API_HASH", ""))
 # Куди OAuth-провайдер відправляє браузер на логін і згоду: це адреса
 # САМОГО DJANGO (там сесії), а не MCP-процесу.
 MCP_CONSENT_BASE_URL = os.getenv("MCP_CONSENT_BASE_URL", "http://localhost:8001")
+# Сторінка згоди — під @login_required, а форми логіна поза адмінкою в проєкті
+# немає: з дефолтним LOGIN_URL (`/accounts/login/`) анонімний користувач падав
+# у 404 замість входу, і доступ працював лише в того, хто здогадався спершу
+# залогінитись в адмінці. Форма адмінки пускає лише `is_staff` — саме тому
+# новому MCP-користувачеві його й ставлять.
+LOGIN_URL = "/admin/login/"
 # Публічна адреса MCP-сервера (issuer для OAuth-метаданих)
 MCP_PUBLIC_URL = os.getenv("MCP_PUBLIC_URL", "http://localhost:8765")
 
