@@ -245,7 +245,7 @@ class TelegramUserClient:
 
     @classmethod
     async def fetch_history(cls, account, handle, min_id: int = 0, limit: int = 50,
-                            reverse: bool = False) -> list:
+                            reverse: bool = False, peer_sink: dict = None) -> list:
         """Повідомлення каналу після min_id (watermark), до limit штук.
 
         Полінг історії каналу акаунтом (підписуватись не треба для публічних).
@@ -258,6 +258,18 @@ class TelegramUserClient:
 
         async def fn(client):
             entity = int(handle) if str(handle).lstrip("-").isdigit() else handle
+            if peer_sink is not None:
+                # (id, access_hash) джерела — щоб ПУБЛІКАЦІЯ потім не платила
+                # за ResolveUsernameRequest (його добовий ліміт виїдався за
+                # день і медіа зникало на 19 годин). Тут резолв уже зроблено
+                # й закешовано в сесії збирача, тож це безкоштовно.
+                try:
+                    ip = await client.get_input_entity(entity)
+                    cid, ah = getattr(ip, "channel_id", None), getattr(ip, "access_hash", None)
+                    if cid and ah:
+                        peer_sink.update({"id": int(cid), "access_hash": int(ah)})
+                except Exception as e:  # noqa: BLE001 — кеш peer не має валити збір
+                    logger.debug("fetch_history: peer %s не дістали: %r", handle, e)
             out = []
             async for msg in client.iter_messages(
                     entity, min_id=min_id or 0, limit=limit, reverse=reverse):
@@ -309,7 +321,7 @@ class TelegramUserClient:
 
     @classmethod
     def send_post_sync(cls, account, to_chat, text: str,
-                       src_chat=None, src_msg_id: int = 0) -> dict:
+                       src_chat=None, src_msg_id: int = 0, src_peer=None) -> dict:
         """Опублікувати пост ВІД ІМЕНІ АКАУНТА, з медіа першоджерела в ТОМУ Ж
         повідомленні.
 
@@ -329,8 +341,16 @@ class TelegramUserClient:
                 dst = int(to_chat) if str(to_chat).lstrip("-").isdigit() else to_chat
                 media = None
                 if src_chat and src_msg_id:
-                    src = (int(src_chat) if str(src_chat).lstrip("-").isdigit()
-                           else src_chat)
+                    # peer із бази — щоб НЕ витрачати добовий ліміт резолву
+                    # юзернеймів: на ньому акаунт ловив FloodWait по 19 годин
+                    # і пост виходив без медіа.
+                    if src_peer and src_peer.get("id") and src_peer.get("access_hash"):
+                        from telethon.tl.types import InputPeerChannel
+                        src = InputPeerChannel(int(src_peer["id"]),
+                                               int(src_peer["access_hash"]))
+                    else:
+                        src = (int(src_chat) if str(src_chat).lstrip("-").isdigit()
+                               else src_chat)
                     try:
                         orig = await client.get_messages(src, ids=int(src_msg_id))
                         # ЛИШЕ справжні вкладення. Перевіряти msg.photo не

@@ -16,7 +16,7 @@ from .base import BaseSourceAdapter, RateLimited, RawItem
 logger = logging.getLogger(__name__)
 
 
-def _fetch_history(account, handle, min_id, limit, reverse):
+def _fetch_history(account, handle, min_id, limit, reverse, peer_sink=None):
     """Обгортка навколо Telethon (винесена для DI у тестах). FloodWait → RateLimited."""
     from accounts.services.telegram_client import TelegramUserClient, run_async
     try:
@@ -28,9 +28,34 @@ def _fetch_history(account, handle, min_id, limit, reverse):
     TelegramUserClient._prime_proxy(account)
     try:
         return run_async(TelegramUserClient.fetch_history(
-            account, handle, min_id=min_id, limit=limit, reverse=reverse))
+            account, handle, min_id=min_id, limit=limit, reverse=reverse,
+            peer_sink=peer_sink))
     except FloodWaitError as e:  # type: ignore[misc]
         raise RateLimited(getattr(e, "seconds", 60))
+
+
+def _remember_peer(handle: str, peer: dict) -> None:
+    """Зберегти (id, access_hash) каналу в Channel.raw_meta — одноразово.
+
+    Публікація бере peer звідси й шле медіа без резолву юзернейма. Пишемо лише
+    коли значення змінилось, щоб не смикати БД на кожному полінгу.
+    """
+    if not peer or not handle:
+        return
+    from analysis.models import Channel
+    ch = Channel.objects.filter(username__iexact=handle).only("id", "raw_meta").first()
+    if ch is None:
+        return
+    meta = ch.raw_meta or {}
+    if meta.get("access_hash") == peer["access_hash"]:
+        return
+    meta["access_hash"] = peer["access_hash"]
+    ch.raw_meta = meta
+    fields = ["raw_meta"]
+    if not ch.tg_id:
+        ch.tg_id = peer["id"]
+        fields.append("tg_id")
+    ch.save(update_fields=fields)
 
 
 @register
@@ -66,7 +91,9 @@ class TelegramAdapter(BaseSourceAdapter):
         # (reverse=True) суцільно, щоб бурст >limit не лишив діру (див. рев'ю)
         reverse = not first_poll
 
-        msgs = _fetch_history(acc, handle, min_id, limit, reverse)  # FloodWait → RateLimited
+        peer: dict = {}
+        msgs = _fetch_history(acc, handle, min_id, limit, reverse, peer)  # FloodWait → RateLimited
+        _remember_peer(handle, peer)
 
         items, max_id = [], min_id
         for m in msgs:

@@ -29,7 +29,7 @@ def _msgs(ids):
 def _patch(monkeypatch, hist, acct=_Acct()):
     monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: acct)
     monkeypatch.setattr(telegram, "_fetch_history",
-                        lambda account, handle, min_id, limit, reverse: hist)
+                        lambda account, handle, min_id, limit, reverse, peer_sink=None: hist)
 
 
 def test_telegram_registered():
@@ -61,7 +61,7 @@ def test_second_poll_uses_min_id_and_reverse(monkeypatch):
     src = _Src(poll_cursor={"last_msg_id": 28921})
     captured = {}
 
-    def _fh(account, handle, min_id, limit, reverse):
+    def _fh(account, handle, min_id, limit, reverse, peer_sink=None):
         captured.update(min_id=min_id, limit=limit, reverse=reverse)
         return _msgs([28922])
     monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: _Acct())
@@ -77,7 +77,7 @@ def test_first_poll_uses_backfill_limit_and_no_reverse(monkeypatch):
     src = _Src(config={"backfill_limit": 5})          # порожній poll_cursor → перший полінг
     captured = {}
 
-    def _fh(account, handle, min_id, limit, reverse):
+    def _fh(account, handle, min_id, limit, reverse, peer_sink=None):
         captured.update(limit=limit, reverse=reverse, min_id=min_id)
         return _msgs([1, 2])
     monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: _Acct())
@@ -116,7 +116,7 @@ def test_floodwait_propagates_as_ratelimited(monkeypatch):
     src = _Src()
     monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: _Acct())
 
-    def _boom(account, handle, min_id, limit, reverse):
+    def _boom(account, handle, min_id, limit, reverse, peer_sink=None):
         raise RateLimited(42)
     monkeypatch.setattr(telegram, "_fetch_history", _boom)
     with pytest.raises(RateLimited) as ei:

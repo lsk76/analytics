@@ -169,7 +169,30 @@ def _media_of(event):
     chat = m.group(1)
     if chat.isdigit():         # t.me/c/<internal>/<id> — приватний чат
         chat = f"-100{chat}"
-    return {"kind": None, "chat": chat, "mid": int(m.group(2))}
+    out = {"kind": None, "chat": chat, "mid": int(m.group(2))}
+    out["peer"] = _peer_of(post, chat)
+    return out
+
+
+def _peer_of(post, chat: str):
+    """(tg_id, access_hash) джерела з нашої бази, щоб НЕ резолвити юзернейм.
+
+    Telethon на рядок-юзернейм робить ResolveUsernameRequest, а він має власний
+    добовий ліміт: акаунт публікації виїдав його за день і далі ловив FloodWait
+    на 19 годин — текст ішов, медіа губилось. access_hash у нас уже зібраний
+    збирачем, тож беремо пару з Channel і будуємо peer напряму.
+    """
+    ch = getattr(post, "channel", None)
+    if ch is None or not ch.tg_id:
+        from analysis.models import Channel
+        ch = (Channel.objects.filter(username__iexact=chat).only("tg_id", "raw_meta").first()
+              if not chat.lstrip("-").isdigit() else
+              Channel.objects.filter(tg_id=int(str(chat).replace("-100", ""))).only("tg_id", "raw_meta").first())
+    if ch is None or not ch.tg_id:
+        return None
+    meta = ch.raw_meta or {}
+    ah = (meta.get("tg_flags", {}) or {}).get("access_hash") or meta.get("access_hash")
+    return {"id": int(ch.tg_id), "access_hash": int(ah)} if ah else None
 
 
 def _render_raw(event, source_url: str, header: str = "", limit: int = 3000) -> str:
@@ -392,7 +415,8 @@ def _send_via_account(config, media, post_text):
     from accounts.services.telegram_client import TelegramUserClient
     res = TelegramUserClient.send_post_sync(
         config.forward_account, config.chat_id, post_text,
-        src_chat=(media or {}).get("chat"), src_msg_id=(media or {}).get("mid") or 0)
+        src_chat=(media or {}).get("chat"), src_msg_id=(media or {}).get("mid") or 0,
+        src_peer=(media or {}).get("peer"))
     if not res.get("ok"):
         raise telegram.TelegramError(f"акаунт #{config.forward_account_id}: {res.get('error')}")
     return res.get("message_id"), bool(res.get("with_media"))
