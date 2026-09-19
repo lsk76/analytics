@@ -11,9 +11,9 @@ import re
 from typing import Optional, Tuple
 
 from telethon import TelegramClient
-from telethon.errors import (AuthKeyUnregisteredError, PhoneNumberBannedError,
-                             SessionRevokedError, UserDeactivatedBanError,
-                             UserDeactivatedError)
+from telethon.errors import (AuthKeyDuplicatedError, AuthKeyUnregisteredError,
+                             PhoneNumberBannedError, SessionRevokedError,
+                             UserDeactivatedBanError, UserDeactivatedError)
 from telethon.sessions import StringSession
 
 logger = logging.getLogger(__name__)
@@ -228,7 +228,10 @@ class TelegramUserClient:
         try:
             return await fn(client)
         except (AuthKeyUnregisteredError, SessionRevokedError,
-                UserDeactivatedError, UserDeactivatedBanError) as e:
+                UserDeactivatedError, UserDeactivatedBanError,
+                # AuthKeyDuplicated — сесію вже ВБИТО за паралельні конекшени:
+                # ключ «can no longer be used», далі це просто мертвий акаунт
+                AuthKeyDuplicatedError) as e:
             # Сесію вбито (власник розлогінив усі пристрої / Telegram відкликав).
             # Без цього рядка акаунт лишався is_authenticated=True і пул давав
             # його знову й знову: 7 виборчих джерел довбали мертві сесії
