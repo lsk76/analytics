@@ -81,7 +81,8 @@
 class ManagedAccount:
     id: int
     # читання Telegram
-    fetch_history(handle, min_id=0, limit=50, reverse=False) -> list[dict]
+    scan(chats, patterns=(), media=None) -> list[dict]   # єдина операція читання, §10
+    fetch_history(handle, min_id=0, limit=50, reverse=False) -> list[dict]  # = scan одного чату
     resolve(handle) -> dict                     # {id, access_hash}
     dialogs(kind="") -> list[dict]
     recent_messages(peer, limit=20) -> list[dict]
@@ -275,11 +276,25 @@ Cooldown-константи — у `Setting` (`gateway_cooldown_base_sec`, `gate
    (розділ «Telegram-акаунти: тільки через `registry`/`ManagedAccount`»).
 7. Локальна інтеграція §7 → cutover §8.
 
-Відкриті питання (вирішити до кроку 4):
+Вирішено (2026-09-19): **одна операція читання `scan`** замість `fetch_history`
+і batch для стріму.
 
-- Стрім tgsearch зараз читає всі чати акаунта одним підключенням і має свій
-  `STREAM_CONCURRENCY`. Через gateway кожен чат — окремий виклик; чи лишати в
-  gateway batch-операцію `fetch_history_many(chats)`? Пропозиція: так, один
-  ендпоінт, щоб не робити 500 HTTP-викликів на прохід.
-- Медіа-форвард у стрімі (`media_peer`) — потребує `get_entity` в тому самому
-  клієнті; йде в той самий batch-виклик.
+```
+scan(chats=[{entity, min_id, limit, reverse}], patterns=[], media=None)
+  -> [{chat_key, hits: [{mid, text, date, author_id, term, media}], max_id,
+       n_seen, n_media, error}]
+media = None | {"forward_to": peer, "per_tick": 5, "pause": 1.5, "which": "all"|"matched"}
+```
+
+- Один HTTP-виклик на акаунт під одним lock: gateway резолвить `forward_to`
+  раз, читає чати послідовно від watermark, матчить регулярки (порожньо =
+  повертати все), за бажанням пересилає фото/відео тим самим акаунтом
+  (`which="all"` — усе до ліміту за тик, як стрім робить зараз; `"matched"` —
+  лише збіги) і віддає метадані медіа.
+- Gateway не знає про `MonitorChat`/`Source`/задачі: воркер мапить моделі на
+  аргументи і результат назад. Константи конвеєра (`MEDIA_PER_TICK`, паузи)
+  передаються в тілі, не живуть у gateway.
+- infospace-збирач = `scan` з одним чатом, без патернів і медіа. Стрім tgsearch =
+  `scan` з усіма чатами акаунта (~40 викликів на прохід замість 500).
+- `fetch_history` у `ManagedAccount` лишається як зручна обгортка над `scan`
+  для одного чату.
