@@ -42,8 +42,10 @@ def _remember_peer(handle: str, peer: dict) -> None:
     """
     if not peer or not handle:
         return
+    from django.db import IntegrityError, transaction
+
     from analysis.models import Channel
-    ch = Channel.objects.filter(username__iexact=handle).only("id", "raw_meta").first()
+    ch = Channel.objects.filter(username__iexact=handle).only("id", "raw_meta", "tg_id").first()
     if ch is None:
         return
     meta = ch.raw_meta or {}
@@ -52,10 +54,23 @@ def _remember_peer(handle: str, peer: dict) -> None:
     meta["access_hash"] = peer["access_hash"]
     ch.raw_meta = meta
     fields = ["raw_meta"]
-    if not ch.tg_id:
+    # tg_id пишемо ЛИШЕ якщо він вільний: у довіднику той самий канал буває
+    # двічі (під різними юзернеймами), і запис ламав uniq_channel_tgid — а
+    # виняток летів з-під збору й гасив УВЕСЬ полінг цього джерела на цикл
+    # (зловили 19.09: 6 каналів втратили прохід через це).
+    if not ch.tg_id and not (Channel.objects.filter(tg_id=peer["id"])
+                             .exclude(pk=ch.pk).exists()):
         ch.tg_id = peer["id"]
         fields.append("tg_id")
-    ch.save(update_fields=fields)
+    try:
+        # savepoint: без нього перехоплений IntegrityError лишає транзакцію
+        # збору «отруєною» і падає вже наступний запит
+        with transaction.atomic():
+            ch.save(update_fields=fields)
+    except IntegrityError:
+        # кеш peer — оптимізація, а не дані: гонка двох реплік збору не має
+        # валити полінг
+        logger.debug("_remember_peer: %s — конфлікт унікальності, пропускаю", handle)
 
 
 @register
