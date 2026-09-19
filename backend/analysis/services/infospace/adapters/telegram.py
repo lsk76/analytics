@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import logging
 import re
+from contextlib import contextmanager
+
+from django.db import connection
 
 from ..utils import canonical_url
 from . import register
 from .base import BaseSourceAdapter, RateLimited, RawItem
 
 logger = logging.getLogger(__name__)
+
+# простір advisory-локів: 771 = «полінг telegram-акаунта»
+_LOCK_NS = 771
 
 
 def _fetch_history(account, handle, min_id, limit, reverse, peer_sink=None):
@@ -77,6 +83,44 @@ def _remember_peer(handle: str, peer: dict, account_id: int) -> None:
         logger.debug("_remember_peer: %s — конфлікт унікальності, пропускаю", handle)
 
 
+@contextmanager
+def _account_lock(account_id: int):
+    """Один акаунт — один конекшн за раз (advisory-lock на час полінгу).
+
+    Telegram кидає AuthKeyDuplicated не за ЗМІНУ IP (роумінг йому байдужий), а
+    за ОДНОЧАСНІ конекшени з тим самим auth key — і вбиває сесію. Саме це в нас
+    і було: 5 реплік збирача, 108 акаунтів мають по 2-9 джерел, тож дві репліки
+    спокійно брали два джерела ОДНОГО акаунта в один момент. Обидва джерела з
+    помилкою «used under two different IP addresses» сиділи на акаунті 43,
+    у якого рівно 2 джерела — краще й не підтвердиш.
+
+    Не дістали лок = акаунт зайнятий іншою реплікою: джерело лишаємо на
+    наступний прохід (RateLimited), а не рахуємо збій.
+    """
+    if not account_id:
+        yield True
+        return
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(%s, %s)", [_LOCK_NS, int(account_id)])
+            got = cur.fetchone()[0]
+    except Exception as e:  # noqa: BLE001
+        # лок — страховка, а не умова роботи: якщо БД недоступна, читаємо як раніше
+        logger.debug("_account_lock: не взяв лок для #%s: %r", account_id, e)
+        yield True
+        return
+    try:
+        yield got
+    finally:
+        if got:
+            try:
+                with connection.cursor() as cur:
+                    cur.execute("SELECT pg_advisory_unlock(%s, %s)",
+                                [_LOCK_NS, int(account_id)])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("_account_lock: не зняв лок #%s: %r", account_id, e)
+
+
 @register
 class TelegramAdapter(BaseSourceAdapter):
     kind = "telegram"
@@ -131,7 +175,12 @@ class TelegramAdapter(BaseSourceAdapter):
         reverse = not first_poll
 
         peer: dict = {}
-        msgs = _fetch_history(acc, handle, min_id, limit, reverse, peer)  # FloodWait → RateLimited
+        with _account_lock(getattr(acc, "id", None)) as free:
+            if not free:
+                # акаунт зараз використовує інша репліка — пропускаємо прохід,
+                # інакше два конекшени з одним auth key вбивають сесію
+                raise RateLimited(30)
+            msgs = _fetch_history(acc, handle, min_id, limit, reverse, peer)
         _remember_peer(handle, peer, getattr(acc, "id", None))
 
         items, max_id = [], min_id
