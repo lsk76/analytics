@@ -22,6 +22,11 @@
   `chats_list`, `sources_list`, `run_create`, `service_restart`… Нові інструменти
   додавай У DJANGO-ШАР `backend/analysis/services/mcp_api/` — host-сервер бере їх
   із маніфесту сам, дублювати в `mcp_server/server.py` не треба.
+- **Доступ інших людей до MCP — лише через мережевий режим на проді**
+  (`manage.py run_mcp_server`, застосунок `mcpauth`): OAuth + Django-юзери +
+  ролі (reader/operator/admin) + аудит. Видимість даних там ТАКА САМА, як в
+  адмінці (`visible_to`/`owner`) — мережевий MCP не має ставати її обходом.
+  Локальний stdio лишається без обмежень (це машина власника).
 - **Конвеєри НЕ вигадувати** — вони задокументовані: `docs/comments-analysis-pipeline.md`
   (критика), `docs/ethnic-events-pipeline.md` / `docs/econ-events-pipeline.md` (ad-hoc події),
   `docs/ARCHITECTURE.md` (events-воркери). Промпти monitor — `analysis/pilot/prompts.py`.

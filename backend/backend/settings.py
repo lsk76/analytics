@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "rangefilter",
     "accounts",
     "analysis",
+    "mcpauth",          # доступ до MCP-сервера: OAuth, ролі, аудит
 ]
 
 MIDDLEWARE = [
@@ -149,6 +150,13 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG
 # --- External services ---
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", os.getenv("TG_API_ID", ""))
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", os.getenv("TG_API_HASH", ""))
+
+# --- MCP-сервер (мережевий режим, OAuth) ---
+# Куди OAuth-провайдер відправляє браузер на логін і згоду: це адреса
+# САМОГО DJANGO (там сесії), а не MCP-процесу.
+MCP_CONSENT_BASE_URL = os.getenv("MCP_CONSENT_BASE_URL", "http://localhost:8001")
+# Публічна адреса MCP-сервера (issuer для OAuth-метаданих)
+MCP_PUBLIC_URL = os.getenv("MCP_PUBLIC_URL", "http://localhost:8765")
 
 TELEZIP_API_KEY = os.getenv("TELEZIP_API_KEY", "")
 TELEZIP_BASE_URL = os.getenv("TELEZIP_BASE_URL", "https://api.telezip.net/v3")

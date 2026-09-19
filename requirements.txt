@@ -22,6 +22,11 @@ selectolax>=0.3        # швидкий CSS-парсер (discovery/селект
 httpx>=0.27            # sync http в адаптерах (транзитивний через openai — фіксуємо явно)
 python-docx>=1.1       # дайджест-звіт по подіях (адмін-дія Event.make_digest_report)
 
+# --- MCP-сервер (мережевий режим на проді: OAuth + streamable-http) ---
+# Потрібен ЛИШЕ процесу mcp-сервера; Django-веб і воркери працюють без нього
+# (сторінка згоди й адмінка навмисне не імпортують SDK — див. mcpauth/policy.py).
+mcp>=2.2,<3
+
 # --- тести (docker compose exec web pytest) ---
 pytest>=8.0
 pytest-django>=4.8

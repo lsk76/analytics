@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from analysis.models import AnalysisTask, Channel, CollectChunk, Post, TelezipSlot
 from analysis.services.mcp_api import common, fmt
-from analysis.services.mcp_api.registry import ToolError, tool
+from analysis.services.mcp_api.registry import SCOPE_ADMIN, ToolError, tool
 from analysis.services.telezip import TelezipClient
 
 MAX_WINDOW_DAYS = 62
@@ -796,7 +796,7 @@ def tz_ingest(task: str, query: str = "", days: int = 1, date_from: str = "",
         f"конвеєр. Прогрес: service_queues task={t.slug}")
 
 
-@tool("tz_slots_set", group="telezip", mutates=True)
+@tool("tz_slots_set", group="telezip", mutates=True, scope=SCOPE_ADMIN)
 def tz_slots_set(count: int):
     """Змінити глобальний ліміт паралельних запитів до TeleZip (таблиця слотів).
 
@@ -819,7 +819,7 @@ async def _probe_call(method, endpoint, params, body, timeout):
         return await tz.raw(method, endpoint, params=params, json_data=body)
 
 
-@tool("tz_probe", group="telezip", mutates=True)
+@tool("tz_probe", group="telezip", mutates=True, scope=SCOPE_ADMIN)
 def tz_probe(endpoint: str, method: str = "GET", params: str = "", body: str = "",
              timeout: int = 60, chars: int = 1500):
     """Сирий виклик будь-якого ендпоінта TeleZip (v3 і `/v4/...`) — розвідка API.

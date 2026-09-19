@@ -79,6 +79,32 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- MCP-сервер (мережевий, для інших користувачів) -----------------------
+  # Ті самі інструменти, що й локально, але через HTTPS і з OAuth: кожен виклик
+  # іде від імені Django-користувача, видимість даних — як в адмінці, роль
+  # вирішує, чи можна змінювати. Docker-інструментів тут НЕМА за побудовою:
+  # сокет усередину не прокидаємо, тож рестарт воркерів лишається локальним.
+  # Bind лише на loopback — назовні пускає nginx з TLS (див. deploy/nginx).
+  mcp:
+    image: tg-event-analytics-web:latest
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DJANGO_DEBUG: "false"
+    command: >
+      python manage.py run_mcp_server --host 0.0.0.0 --port 8765
+    volumes:
+      - ./backend:/app/backend
+    ports:
+      - "127.0.0.1:8765:8765"
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
   # --- infospace stage workers (моніторинг інформпростору) ------------------
   # info-collect — ОДНА репліка (полінг/Telethon-сесія не терплять паралелі).
   # НЕ масштабувати (docker compose up --scale заборонено для цього воркера).

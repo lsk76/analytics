@@ -25,18 +25,18 @@ def as_int(value, name):
 
 
 def resolve_task(ref):
-    """AnalysisTask за id / slug / частиною назви."""
+    """AnalysisTask за id / slug / частиною назви (лише видимі цьому користувачу)."""
     from analysis.models import AnalysisTask
     ref = str(ref).strip()
     if ref.lstrip("#").isdigit():
-        t = AnalysisTask.objects.filter(pk=int(ref.lstrip("#"))).first()
+        t = scope_tasks(AnalysisTask.objects).filter(pk=int(ref.lstrip("#"))).first()
         if not t:
             raise ToolError(f"задачі #{ref} немає")
         return t
-    exact = AnalysisTask.objects.filter(slug=ref).first()
+    exact = scope_tasks(AnalysisTask.objects).filter(slug=ref).first()
     if exact:
         return exact
-    qs = AnalysisTask.objects.filter(name__icontains=ref).order_by("id")
+    qs = scope_tasks(AnalysisTask.objects).filter(name__icontains=ref).order_by("id")
     return _pick(qs, ref, "задачу", lambda t: f"#{t.id} {t.slug}")
 
 
@@ -45,12 +45,13 @@ def resolve_account(ref):
     from accounts.models import TelegramAccount
     ref = str(ref).strip()
     if ref.lstrip("#").isdigit():
-        a = TelegramAccount.objects.filter(pk=int(ref.lstrip("#"))).first()
+        a = scope_accounts(TelegramAccount.objects).filter(pk=int(ref.lstrip("#"))).first()
         if not a:
             raise ToolError(f"акаунта #{ref} немає")
         return a
-    qs = (TelegramAccount.objects.filter(phone_number__icontains=ref)
-          | TelegramAccount.objects.filter(name__icontains=ref)).order_by("id")
+    qs = scope_accounts(
+        TelegramAccount.objects.filter(phone_number__icontains=ref)
+        | TelegramAccount.objects.filter(name__icontains=ref)).order_by("id")
     return _pick(qs, ref, "акаунт", lambda a: f"#{a.id} {a.name} {a.phone_number}")
 
 
@@ -59,14 +60,14 @@ def resolve_accounts(ref):
     from accounts.models import TelegramAccount
     ref = str(ref).strip().lower()
     if ref in ("all", "усі", "все", "*"):
-        return list(TelegramAccount.objects.order_by("id"))
+        return list(scope_accounts(TelegramAccount.objects).order_by("id"))
     if ref in ("active", "активні"):
-        return list(TelegramAccount.objects.filter(is_active=True).order_by("id"))
-    if ref in ("problem", "проблемні"):
-        return list(TelegramAccount.objects
-                    .filter(is_active=True)
-                    .exclude(is_authenticated=True, spam_status="free")
+        return list(scope_accounts(TelegramAccount.objects.filter(is_active=True))
                     .order_by("id"))
+    if ref in ("problem", "проблемні"):
+        return list(scope_accounts(
+            TelegramAccount.objects.filter(is_active=True)
+            .exclude(is_authenticated=True, spam_status="free")).order_by("id"))
     return [resolve_account(ref)]
 
 
@@ -101,12 +102,13 @@ def resolve_chat(ref):
     from analysis.models import MonitorChat
     ref = str(ref).strip()
     if ref.lstrip("#").isdigit():
-        c = MonitorChat.objects.filter(pk=int(ref.lstrip("#"))).first()
+        c = scope_by_task(MonitorChat.objects).filter(pk=int(ref.lstrip("#"))).first()
         if not c:
             raise ToolError(f"чату моніторингу #{ref} немає")
         return c
-    qs = (MonitorChat.objects.filter(channel__username__iexact=ref.lstrip("@"))
-          .select_related("task", "channel").order_by("id"))
+    qs = scope_by_task(
+        MonitorChat.objects.filter(channel__username__iexact=ref.lstrip("@"))
+        .select_related("task", "channel")).order_by("id")
     return _pick(qs, ref, "чат моніторингу",
                  lambda c: f"#{c.id} {c.task.slug}/@{c.channel.username}")
 
@@ -133,3 +135,57 @@ def pollable_source_ids():
     return SourceSubscription.objects.filter(
         is_active=True, task__is_active=True,
         task__pipeline="infospace").values("source_id")
+
+
+# --------------------------------------------------------------------------- видимість
+# Те саме розмежування, що й в адмінці: суперюзер бачить усе, решта — свої
+# задачі (`owner`) і свої або спільні Telegram-акаунти (`visible_to`). Інакше
+# мережевий MCP став би дірою в обхід адмінки.
+
+def scope_tasks(qs):
+    from analysis.services.mcp_api.registry import actor
+    who = actor()
+    return qs if who.is_superuser else qs.filter(owner=who.user)
+
+
+def scope_by_task(qs, field="task"):
+    """Вибірка об'єктів, що належать задачам (чати, підписки, збори, події)."""
+    from analysis.services.mcp_api.registry import actor
+    who = actor()
+    return qs if who.is_superuser else qs.filter(**{f"{field}__owner": who.user})
+
+
+def scope_accounts(qs):
+    from analysis.services.mcp_api.registry import actor
+    who = actor()
+    return qs if who.is_superuser else qs.visible_to(who.user)
+
+
+def mask_proxy(proxy_string: str) -> str:
+    """`host:port:user:pass` → пароль сховано для не-адміна.
+
+    Оператор має бачити, ЯКА проксі призначена (хост і логін), але пароль
+    лягав би в чат і їхав до провайдера моделі разом із рештою виводу.
+    """
+    from analysis.services.mcp_api.registry import SCOPE_ADMIN, actor
+    text = str(proxy_string or "")
+    if not text or actor().can(SCOPE_ADMIN):
+        return text
+    parts = text.split(":")
+    if len(parts) >= 4:
+        parts[3] = "***"
+    return ":".join(parts)
+
+
+def mask_secret(value: str, keep: int = 6) -> str:
+    """Сховати хвіст рядка від не-адміна (проксі з паролем, номер телефону).
+
+    Оператор має бачити, ЯКА проксі призначена, але не її пароль: вивід
+    інструмента лягає в чат і їде до провайдера моделі.
+    """
+    from analysis.services.mcp_api.registry import actor
+    from analysis.services.mcp_api.registry import SCOPE_ADMIN
+    text = str(value or "")
+    if not text or actor().can(SCOPE_ADMIN):
+        return text
+    return text[:keep] + "***" if len(text) > keep else "***"

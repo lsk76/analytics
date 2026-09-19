@@ -33,8 +33,8 @@ def accounts_list(query: str = "", problems_only: bool = False, limit: int = 100
     (не авторизовані, обмежені SpamBot-ом, без проксі або з мертвою проксі).
     «чати»/«джерела» — скільки моніторингів читає саме цей акаунт.
     """
-    qs = (TelegramAccount.objects.select_related("proxy")
-          .prefetch_related("tags")
+    qs = common.scope_accounts(TelegramAccount.objects).select_related("proxy")
+    qs = (qs.prefetch_related("tags")
           .annotate(n_chats=Count("monitor_chats", distinct=True),
                     n_sources=Count("sources", distinct=True))
           .order_by("-is_active", "id"))
@@ -57,7 +57,7 @@ def accounts_list(query: str = "", problems_only: bool = False, limit: int = 100
         return "акаунтів за цим фільтром немає"
     head = ["id", "акт", "авт", "назва", "номер", "SpamBot", "проксі",
             "чати", "джер", "викор.", "теги"]
-    total = TelegramAccount.objects.count()
+    total = common.scope_accounts(TelegramAccount.objects).count()
     return (fmt.table(head, rows)
             + f"\n\nпоказано {len(rows)} із {total} акаунтів у базі")
 
@@ -73,7 +73,7 @@ def account_show(ref: str):
         ("власник", a.user.username if a.user_id else "спільний"),
         ("SpamBot", f"{a.get_spam_status_display()} — {fmt.trunc(a.spam_status_detail, 160)}"
                     f" (перевірено {fmt.ago(a.spam_status_checked_at)})"),
-        ("проксі", f"#{a.proxy_id} {a.proxy.proxy_string} "
+        ("проксі", f"#{a.proxy_id} {common.mask_proxy(a.proxy.proxy_string)} "
                    f"({'працює' if a.proxy.is_working else 'МЕРТВА'}, "
                    f"збоїв {a.proxy.fail_count})" if a.proxy_id else "НЕ ПРИЗНАЧЕНА"),
         ("2FA-пароль", "збережено" if a.two_fa_password else "—"),
@@ -193,7 +193,7 @@ def account_update(ref: str, is_active: bool = None, proxy: str = "",
         else:
             p = common.resolve_proxy(proxy)
             a.proxy = p
-            changed.append(f"проксі=#{p.id} {p.proxy_string}")
+            changed.append(f"проксі=#{p.id} {common.mask_proxy(p.proxy_string)}")
     a.save()
     for name in [t.strip() for t in add_tags.split(",") if t.strip()]:
         tag, _ = AccountTag.objects.get_or_create(name=name)
@@ -291,7 +291,7 @@ def proxies_list(problems_only: bool = False, limit: int = 60):
     if problems_only:
         qs = qs.filter(Q(is_working=False) | Q(fail_count__gt=0))
     rows = [[f"#{p.id}", fmt.flag(p.is_active), fmt.flag(p.is_working), p.proxy_type,
-             fmt.trunc(p.proxy_string, 46), p.fail_count, p.n_acc,
+             fmt.trunc(common.mask_proxy(p.proxy_string), 46), p.fail_count, p.n_acc,
              fmt.ago(p.last_tested_at)] for p in qs[:limit]]
     if not rows:
         return "проксі за цим фільтром немає"
@@ -330,6 +330,7 @@ def proxy_check(ref: str, repair: bool = True):
         p.fail_count = 0 if ok else p.fail_count + 1
         p.last_tested_at = timezone.now()
         p.save(update_fields=["proxy_string", "is_working", "fail_count", "last_tested_at"])
-        rows.append([f"#{p.id}", fmt.trunc(p.proxy_string, 46), fmt.flag(ok),
+        rows.append([f"#{p.id}", fmt.trunc(common.mask_proxy(p.proxy_string), 46),
+                     fmt.flag(ok),
                      p.fail_count, note])
     return fmt.table(["id", "проксі", "жива", "збоїв", "нотатка"], rows)

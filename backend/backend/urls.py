@@ -9,4 +9,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("analysis.urls")),
     path("api/accounts/", include("accounts.urls")),
+    path("mcp/", include("mcpauth.urls")),      # згода на доступ до MCP-сервера
 ]

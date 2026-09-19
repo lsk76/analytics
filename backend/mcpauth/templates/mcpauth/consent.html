@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Доступ до MCP</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fff; --fg:#1b1b1b; --muted:#6b7280;
+            --line:#e5e7eb; --accent:#417690; --warn:#b45309; --danger:#b91c1c; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#111418; --fg:#e6e6e6; --muted:#9aa4b2; --line:#2a3038; --accent:#79aec8; }
+    }
+    body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif;
+           display:flex; min-height:100vh; align-items:center; justify-content:center; padding:24px; }
+    .card { width:100%; max-width:540px; border:1px solid var(--line); border-radius:12px; padding:28px; }
+    h1 { font-size:20px; margin:0 0 4px; }
+    .sub { color:var(--muted); font-size:14px; margin-bottom:20px; }
+    ul { padding-left:20px; margin:12px 0; } li { margin:6px 0; }
+    code { background:rgba(127,127,127,.15); padding:1px 5px; border-radius:4px; font-size:13px; }
+    .row { display:flex; gap:12px; margin-top:24px; }
+    button { flex:1; padding:11px 16px; font-size:15px; border-radius:8px; cursor:pointer;
+             border:1px solid var(--line); background:transparent; color:var(--fg); }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+    .note { font-size:13px; color:var(--muted); margin-top:18px; border-top:1px solid var(--line); padding-top:14px; }
+    .err { color:var(--danger); } .warn { color:var(--warn); font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {% if error %}
+      <h1 class="err">Доступ не видано</h1>
+      <p>{{ error }}</p>
+    {% else %}
+      <h1>Дозволити доступ до сервісу?</h1>
+      <div class="sub">
+        Клієнт <strong>{{ req.client.name|default:req.client.client_id }}</strong>
+        просить діяти від імені <strong>{{ user.username }}</strong>
+        (роль: {{ role.get_role_display }}).
+      </div>
+
+      <div>Що він зможе робити:</div>
+      <ul>
+        {% for scope, label in grants %}<li><code>{{ scope }}</code> — {{ label }}</li>{% endfor %}
+      </ul>
+
+      {% if narrowed %}
+        <p class="warn">Клієнт просив більше ({{ narrowed|join:", " }}), але роль цього не
+        дозволяє — буде видано лише перелічене вище.</p>
+      {% endif %}
+
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="req" value="{{ req.key }}">
+        <div class="row">
+          <button type="submit" name="action" value="deny">Відмовити</button>
+          <button type="submit" name="action" value="allow" class="primary">Дозволити</button>
+        </div>
+      </form>
+
+      <div class="note">
+        Доступ обмежений тим, що ти й так бачиш в адмінці: свої задачі та свої або
+        спільні Telegram-акаунти. Кожен виклик записується в журнал
+        (Доступ до MCP → Виклики MCP), а доступ можна будь-коли відкликати.
+      </div>
+    {% endif %}
+  </div>
+</body>
+</html>

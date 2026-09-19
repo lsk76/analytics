@@ -6,8 +6,8 @@ from django.utils import timezone
 
 from analysis.models import (AnalysisTask, CollectChunk, Event, Post, PublishConfig,
                              PublishedEvent, ResearchRun, Setting, Source)
-from analysis.services.mcp_api import common, fmt
-from analysis.services.mcp_api.registry import tool
+from analysis.services.mcp_api import common, fmt, registry
+from analysis.services.mcp_api.registry import SCOPE_ADMIN, tool
 
 TERMINAL = (Post.STAGE_DONE, Post.STAGE_FAILED)
 NON_TERMINAL = [s for s, _ in Post.STAGE_CHOICES if s not in TERMINAL]
@@ -41,7 +41,9 @@ def service_health():
     parts = []
 
     # --- задачі -------------------------------------------------------------
-    tasks = list(AnalysisTask.objects.order_by("id"))
+    # зведення показує рівно те, що користувачу видно в адмінці: свої задачі
+    # (суперюзер — усі), тож числа збігаються з тим, що він бачить у списках
+    tasks = list(common.scope_tasks(AnalysisTask.objects).order_by("id"))
     active = [t for t in tasks if t.is_active]
     by_pipe = {}
     for t in active:
@@ -53,28 +55,29 @@ def service_health():
 
     # --- черги постів -------------------------------------------------------
     rows = []
-    q = (Post.objects.filter(stage__in=NON_TERMINAL).order_by()
+    q = (common.scope_by_task(Post.objects.filter(stage__in=NON_TERMINAL)).order_by()
          .values("stage").annotate(n=Count("id"), oldest=Min("created_at")))
     for r in sorted(q, key=lambda r: -r["n"]):
         rows.append([r["stage"], STAGE_LABEL.get(r["stage"], r["stage"]), r["n"],
                      fmt.ago(r["oldest"]), STAGE_WORKER.get(r["stage"], "—")])
-    failed = Post.objects.filter(stage=Post.STAGE_FAILED).count()
+    failed = common.scope_by_task(
+        Post.objects.filter(stage=Post.STAGE_FAILED)).count()
     body = fmt.table(["стадія", "що це", "постів", "найстаріший", "хто розгрібає"], rows) \
         if rows else "черги порожні"
     parts.append(fmt.section(f"Черги постів (у роботі; failed: {failed})", body))
 
     # --- збір (чанки TeleZip) ----------------------------------------------
-    ch = dict(CollectChunk.objects.order_by().values_list("status")
-              .annotate(n=Count("id")))
-    cooldown = CollectChunk.objects.filter(status="pending",
-                                           next_retry_at__gt=now).count()
+    chunks = common.scope_by_task(CollectChunk.objects)
+    ch = dict(chunks.order_by().values_list("status").annotate(n=Count("id")))
+    cooldown = chunks.filter(status="pending", next_retry_at__gt=now).count()
     parts.append(fmt.section(
         "Чанки збору",
         ", ".join(f"{k}: {v}" for k, v in sorted(ch.items())) +
         (f" (з них у бекофі: {cooldown})" if cooldown else "") or "немає"))
 
     # --- запуски ------------------------------------------------------------
-    runs = (ResearchRun.objects.exclude(status__in=["done", "cancelled"])
+    runs = (common.scope_by_task(ResearchRun.objects)
+            .exclude(status__in=["done", "cancelled"])
             .select_related("task").order_by("-created_at")[:12])
     rows = [[f"#{r.id}", r.task.slug, r.status, f"{r.date_from}…{r.date_to}",
              r.posts_collected, fmt.ago(r.created_at)] for r in runs]
@@ -92,9 +95,9 @@ def service_health():
     # циклі: на кількох мільйонах постів зворотний скан pk-індексу під фільтром
     # задачі коштував ~3с НА ЗАДАЧУ (45с на екран). Max(posted_at) лягає на
     # індекс (task, stage, posted_at) — 1.3с на всі задачі разом.
-    posts_agg = {r["task_id"]: r for r in Post.objects.order_by()
+    posts_agg = {r["task_id"]: r for r in common.scope_by_task(Post.objects).order_by()
                  .values("task_id").annotate(n=Count("id"), last=Max("posted_at"))}
-    events_agg = {r["task_id"]: r for r in Event.objects.order_by()
+    events_agg = {r["task_id"]: r for r in common.scope_by_task(Event.objects).order_by()
                   .values("task_id").annotate(n=Count("id"), last=Max("created_at"))}
     rows = []
     for t in active:
@@ -108,7 +111,7 @@ def service_health():
 
     # --- акаунти й проксі ---------------------------------------------------
     from accounts.models import Proxy, TelegramAccount
-    acc = TelegramAccount.objects.all()
+    acc = common.scope_accounts(TelegramAccount.objects)
     a_total, a_active = acc.count(), acc.filter(is_active=True).count()
     a_auth = acc.filter(is_active=True, is_authenticated=True).count()
     spam = dict(acc.filter(is_active=True).order_by().values_list("spam_status")
@@ -138,9 +141,13 @@ def service_health():
     ])))
 
     # --- публікація ---------------------------------------------------------
-    cfgs = PublishConfig.objects.filter(is_active=True).count()
+    pub_cfgs = PublishConfig.objects.filter(is_active=True)
+    if not registry.actor().is_superuser:
+        pub_cfgs = pub_cfgs.filter(owner=registry.actor().user)
+    cfgs = pub_cfgs.count()
     day = now - timedelta(days=1)
-    pub = dict(PublishedEvent.objects.filter(created_at__gte=day).order_by()
+    pub = dict(PublishedEvent.objects.filter(created_at__gte=day,
+                                             config__in=pub_cfgs).order_by()
                .values_list("status").annotate(n=Count("id")))
     parts.append(fmt.section("Публікація", fmt.kv([
         ("активних профілів", cfgs),
@@ -156,7 +163,7 @@ def service_queues(task: str = "", stage: str = "", errors: int = 3):
     task — id/slug/назва (порожньо = всі); stage — конкретна стадія;
     errors — скільки прикладів помилок показати (0 = без них).
     """
-    qs = Post.objects.all()
+    qs = common.scope_by_task(Post.objects.all())
     if task:
         qs = qs.filter(task=common.resolve_task(task))
     if stage:
@@ -202,7 +209,7 @@ def settings_list(prefix: str = ""):
         if rows else "налаштувань немає"
 
 
-@tool("setting_set", mutates=True, group="service")
+@tool("setting_set", mutates=True, group="service", scope=SCOPE_ADMIN)
 def setting_set(key: str, value: str, description: str = ""):
     """Записати налаштування (`Setting`). Порожнє значення = дефолт із коду."""
     obj, created = Setting.objects.get_or_create(key=key.strip())
@@ -221,7 +228,10 @@ def setting_set(key: str, value: str, description: str = ""):
 def publish_status(limit: int = 10):
     """Профілі публікації + останні публікації подій у Telegram."""
     rows = []
-    for c in PublishConfig.objects.order_by("-is_active", "id"):
+    cfg_qs = PublishConfig.objects.order_by("-is_active", "id")
+    if not registry.actor().is_superuser:
+        cfg_qs = cfg_qs.filter(owner=registry.actor().user)
+    for c in cfg_qs:
         pub = c.published.order_by()
         rows.append([f"#{c.id}", fmt.flag(c.is_active), fmt.trunc(c.name, 28),
                      c.task.slug if c.task_id else "всі",
@@ -233,8 +243,8 @@ def publish_status(limit: int = 10):
         ["id", "акт", "назва", "задача", "опубл.", "відсіяно", "збій", "остання"], rows)
         if rows else "профілів немає")]
 
-    last = (PublishedEvent.objects.select_related("config", "event")
-            .order_by("-created_at")[:limit])
+    last = (PublishedEvent.objects.filter(config__in=cfg_qs)
+            .select_related("config", "event").order_by("-created_at")[:limit])
     rows = [[f"#{p.id}", p.config.name[:18], p.status,
              fmt.trunc(p.event.summary if p.event_id else "", 46),
              fmt.trunc(p.ai_reason or p.error, 40), fmt.ago(p.created_at)]

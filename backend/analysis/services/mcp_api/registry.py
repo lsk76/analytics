@@ -9,19 +9,64 @@ host-процесі MCP: той лише транспорт (`manage.py mcp_rpc`
 Хендлер повертає ГОТОВИЙ ТЕКСТ (див. `fmt`), а не структуру: це кінцева
 відповідь моделі, а не проміжний формат.
 """
+import contextvars
 import inspect
 import os
+import time
 
 TOOLS = {}
+
+# Хто саме зараз викликає інструмент. Локальний stdio-сервер працює без
+# користувача (повні права — доступ до машини вже все вирішив), мережевий
+# прод-сервер завжди підставляє реального Django-юзера з токена.
+_actor: contextvars.ContextVar = contextvars.ContextVar("mcp_actor", default=None)
+
+SCOPE_READ = "mcp:read"
+SCOPE_WRITE = "mcp:write"
+SCOPE_ADMIN = "mcp:admin"
 
 
 class ToolError(Exception):
     """Очікувана помилка інструмента (не баг): показуємо текст як є."""
 
 
+class Actor:
+    """Викликач: Django-користувач + його скоупи. `local()` — режим без мережі."""
+
+    def __init__(self, user=None, scopes=None, role="", client=None, unrestricted=False):
+        self.user = user
+        self.scopes = list(scopes or [])
+        self.role = role
+        self.client = client
+        self.unrestricted = unrestricted
+
+    @classmethod
+    def local(cls):
+        """Локальний stdio: користувача немає, обмежень теж (це ноутбук власника)."""
+        return cls(unrestricted=True, role="local")
+
+    @property
+    def is_superuser(self) -> bool:
+        return self.unrestricted or bool(self.user and self.user.is_superuser)
+
+    def can(self, scope: str) -> bool:
+        return self.unrestricted or scope in self.scopes
+
+    def __str__(self):
+        return "local" if self.unrestricted else f"{getattr(self.user, 'username', '?')}/{self.role}"
+
+
+def actor() -> "Actor":
+    """Поточний викликач (для скоупінгу вибірок усередині інструментів)."""
+    return _actor.get() or Actor.local()
+
+
 class Tool:
-    def __init__(self, name, fn, mutates, group):
+    def __init__(self, name, fn, mutates, group, scope=""):
         self.name, self.fn, self.mutates, self.group = name, fn, mutates, group
+        # «Що для цього треба мати»: читання — усім, зміни — операторам,
+        # небезпечне (налаштування, контейнери, сире API) — лише адмінам.
+        self.scope = scope or (SCOPE_WRITE if mutates else SCOPE_READ)
         self.doc = inspect.getdoc(fn) or ""
         self.sig = inspect.signature(fn)
 
@@ -37,6 +82,12 @@ class Tool:
         if self.mutates and readonly():
             raise ToolError(f"{self.name} змінює стан, а сервер запущено в режимі "
                             "лише-читання (MCP_READONLY=1)")
+        who = actor()
+        if not who.can(self.scope):
+            raise ToolError(
+                f"бракує прав: «{self.name}» потребує {self.scope}, а роль "
+                f"«{who.role or 'без ролі'}» дає {', '.join(who.scopes) or 'нічого'}. "
+                "Права змінює власник в адмінці (Ролі у MCP).")
         # None від host-шару = «параметр не передали» (MCP шле всі поля схеми)
         return self.fn(**{k: v for k, v in payload.items() if v is not None})
 
@@ -45,21 +96,57 @@ def readonly() -> bool:
     return os.environ.get("MCP_READONLY", "").strip().lower() in ("1", "true", "yes")
 
 
-def tool(name, *, mutates=False, group="service"):
-    """Зареєструвати хендлер. `mutates=True` — інструмент змінює стан сервісу."""
+def tool(name, *, mutates=False, group="service", scope=""):
+    """Зареєструвати хендлер.
+
+    `mutates=True` — інструмент змінює стан сервісу (і потребує mcp:write).
+    `scope="mcp:admin"` — явно піднімає планку для небезпечного: налаштування,
+    рестарт контейнерів, сирі виклики платного API.
+    """
     def deco(fn):
         if name in TOOLS:
             raise RuntimeError(f"дубль інструмента MCP: {name}")
-        TOOLS[name] = Tool(name, fn, mutates, group)
+        TOOLS[name] = Tool(name, fn, mutates, group, scope)
         return fn
     return deco
 
 
-def call(name: str, payload: dict | None = None) -> str:
+def call(name: str, payload: dict | None = None, who: "Actor | None" = None) -> str:
+    """Викликати інструмент від імені `who` і лишити слід в аудиті.
+
+    Аудит пишеться і на відмовах — інакше «хто вимкнув джерело» лишається без
+    відповіді. Локальні stdio-виклики (без користувача) не журналюємо: це
+    власник на своїй машині, шуму більше, ніж користі.
+    """
+    started = time.monotonic()
+    token = _actor.set(who) if who is not None else None
     t = TOOLS.get(name)
-    if not t:
-        raise ToolError(f"невідомий інструмент: {name}. Є: {', '.join(sorted(TOOLS))}")
-    return t(payload or {})
+    try:
+        if not t:
+            raise ToolError(f"невідомий інструмент: {name}. Є: {', '.join(sorted(TOOLS))}")
+        text = t(payload or {})
+        _audit(name, payload, who, True, "", started)
+        return text
+    except Exception as e:  # noqa: BLE001 — журнал важливіший за тип помилки
+        _audit(name, payload, who, False, str(e)[:300], started)
+        raise
+    finally:
+        if token is not None:
+            _actor.reset(token)
+
+
+def _audit(tool_name, payload, who, ok, error, started):
+    if who is None or getattr(who, "unrestricted", False):
+        return
+    try:
+        from mcpauth.models import McpAuditLog
+        McpAuditLog.objects.create(
+            user=who.user, role=who.role, tool=tool_name,
+            payload={k: v for k, v in (payload or {}).items() if v is not None},
+            ok=ok, error=error, client=who.client,
+            duration_ms=int((time.monotonic() - started) * 1000))
+    except Exception:  # noqa: BLE001 — журнал не має права валити виклик
+        pass
 
 
 def _type_name(ann) -> str:
@@ -72,7 +159,7 @@ def _type_name(ann) -> str:
 def manifest() -> list[dict]:
     """Опис інструментів для host-шару (звірка сигнатур у тестах/доках)."""
     return [{
-        "name": t.name, "group": t.group, "mutates": t.mutates,
+        "name": t.name, "group": t.group, "mutates": t.mutates, "scope": t.scope,
         "doc": t.doc.split("\n\n")[0],
         "params": [
             {"name": p.name,

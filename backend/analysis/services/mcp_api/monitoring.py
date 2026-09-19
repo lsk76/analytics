@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, Post,
                              ResearchRun, Source, SourceSubscription)
-from analysis.services.mcp_api import common, fmt
+from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import ToolError, tool
 
 PIPE_SHORT = {"events": "події", "monitor": "критика", "research": "дослідж.",
@@ -16,7 +16,7 @@ PIPE_SHORT = {"events": "події", "monitor": "критика", "research": "
 @tool("tasks_list", group="monitoring")
 def tasks_list(pipeline: str = "", active_only: bool = False):
     """Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено."""
-    qs = AnalysisTask.objects.order_by("id")
+    qs = common.scope_tasks(AnalysisTask.objects).order_by("id")
     if pipeline:
         qs = qs.filter(pipeline=pipeline)
     if active_only:
@@ -125,7 +125,8 @@ def task_show(ref: str):
 @tool("runs_list", group="monitoring")
 def runs_list(task: str = "", status: str = "", limit: int = 15):
     """Збори (ResearchRun): статус, період, прогрес чанків."""
-    qs = ResearchRun.objects.select_related("task").order_by("-created_at")
+    qs = common.scope_by_task(
+        ResearchRun.objects.select_related("task")).order_by("-created_at")
     if task:
         qs = qs.filter(task=common.resolve_task(task))
     if status:
@@ -148,7 +149,7 @@ def runs_list(task: str = "", status: str = "", limit: int = 15):
 @tool("run_show", group="monitoring")
 def run_show(run_id: int):
     """Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»)."""
-    r = (ResearchRun.objects.select_related("task")
+    r = (common.scope_by_task(ResearchRun.objects.select_related("task"))
          .filter(pk=common.as_int(run_id, "run_id")).first())
     if not r:
         raise ToolError(f"збору #{run_id} немає")
@@ -234,7 +235,8 @@ def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
 @tool("run_cancel", group="monitoring", mutates=True)
 def run_cancel(run_id: int, drop_pending_chunks: bool = True):
     """Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки."""
-    r = ResearchRun.objects.filter(pk=common.as_int(run_id, "run_id")).first()
+    r = common.scope_by_task(ResearchRun.objects).filter(
+        pk=common.as_int(run_id, "run_id")).first()
     if not r:
         raise ToolError(f"збору #{run_id} немає")
     dropped = 0
@@ -253,8 +255,9 @@ def chats_list(task: str = "", active: bool = None, stream_only: bool = False,
 
     problems_only — без акаунта, або стрім не оновлювався понад добу.
     """
-    qs = (MonitorChat.objects.select_related("task", "channel", "tg_account")
-          .order_by("task__slug", "priority", "channel__username"))
+    qs = common.scope_by_task(
+        MonitorChat.objects.select_related("task", "channel", "tg_account")
+    ).order_by("task__slug", "priority", "channel__username")
     if task:
         qs = qs.filter(task=common.resolve_task(task))
     if active is not None:
@@ -327,6 +330,11 @@ def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
     qs = (Source.objects.select_related("region_subject", "tg_account")
           .annotate(n_subs=Count("subscriptions", filter=Q(subscriptions__is_active=True)))
           .order_by("kind", "name"))
+    # джерело саме по собі нічиє, тож видимість успадковується від підписок:
+    # не-суперюзер бачить лише ті, що живлять ЙОГО задачі
+    if not registry.actor().is_superuser:
+        qs = qs.filter(id__in=common.scope_by_task(
+            SourceSubscription.objects.filter(is_active=True)).values("source_id"))
     if task:
         t = common.resolve_task(task)
         qs = qs.filter(subscriptions__task=t, subscriptions__is_active=True).distinct()
@@ -367,6 +375,12 @@ def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = Non
                   account: str = ""):
     """Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill)."""
     s = common.resolve_source(ref)
+    if not registry.actor().is_superuser:
+        mine = common.scope_by_task(
+            SourceSubscription.objects.filter(is_active=True, source=s)).exists()
+        if not mine:
+            raise ToolError(f"джерело #{s.id} не підключене до жодної твоєї задачі — "
+                            "правити його може лише власник або адмін")
     changed = []
     if is_active is not None:
         s.is_active = bool(is_active)
@@ -404,7 +418,7 @@ def events_stats(task: str = "", days: int = 14, group_by: str = "day",
     Рахує через services/metrics.py — ті самі формули, що й графіки адмінки.
     """
     from analysis.services.metrics import EventSource
-    qs = Event.objects.all()
+    qs = common.scope_by_task(Event.objects.all())
     if task:
         qs = qs.filter(task=common.resolve_task(task))
     if review_status and review_status != "all":
