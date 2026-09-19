@@ -16,7 +16,8 @@ DC_LIVE      = docker compose -f docker-compose.yml -f docker-compose.monitor.ym
         seed run backup restore list-backups prod-build prod-logs prod-stop clean \
         prod-analytics prod-analytics-build prod-analytics-logs prod-analytics-ps prod-analytics-stop \
         workers workers-logs workers-stop scale-workers worker \
-        live-restart-web live-restart live-ps live-logs live-collectstatic
+        live-restart-web live-restart-mcp live-restart live-ps live-logs live-logs-mcp \
+        live-collectstatic
 
 # Default
 help:
@@ -195,11 +196,17 @@ live-ps:                   # статус контейнерів живого п
 live-logs:                 # логи web (Ctrl-C щоб вийти)
 	$(DC_LIVE) logs -f --tail=50 web
 
+live-logs-mcp:             # логи мережевого MCP (у стартовому рядку — скільки інструментів піднялось)
+	$(DC_LIVE) logs --tail=200 mcp
+
 live-collectstatic:        # перезібрати статику адмінки
 	$(DC_LIVE) exec -T web python manage.py collectstatic --noinput
 
 live-restart-web:          # перезапустити лише web (підхопити зміни .py-коду адмінки)
 	$(DC_LIVE) restart web
+
+live-restart-mcp:          # перезапустити мережевий MCP (обовʼязково після змін у analysis/services/mcp_api/)
+	$(DC_LIVE) restart mcp
 
 live-restart:              # перезапустити ВЕСЬ живий стек (не чіпаючи том БД)
 	$(DC_LIVE) restart
