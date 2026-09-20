@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 import re
 
+from analysis.services import peers
+
 from ..utils import canonical_url
 from . import register
 from .base import BaseSourceAdapter, RateLimited, RawItem
@@ -19,42 +21,21 @@ from .base import BaseSourceAdapter, RateLimited, RawItem
 logger = logging.getLogger(__name__)
 
 
-def _remember_peer(handle: str, peer: dict, account_id: int) -> None:
-    """Зберегти access_hash каналу ДЛЯ ЦЬОГО АКАУНТА.
-
-    access_hash у Telegram видається під конкретного користувача: хеш, здобутий
-    одним акаунтом, для іншого недійсний і дає ChannelInvalidError. Тому мапа
-    {id акаунта: хеш}, а читач (публікація) бере ЛИШЕ свій.
-    """
-    if not peer or not handle or not account_id or not peer.get("access_hash"):
-        return
-    from django.db import IntegrityError, transaction
-
+def _channel(handle: str):
     from analysis.models import Channel
-    ch = Channel.objects.filter(username__iexact=handle).only(
-        "id", "raw_meta", "tg_id").first()
-    if ch is None:
-        return
-    meta = ch.raw_meta or {}
-    by_acc = dict(meta.get("access_hash_by_acc") or {})
-    key = str(account_id)
-    if by_acc.get(key) == peer["access_hash"]:
-        return
-    by_acc[key] = peer["access_hash"]
-    meta["access_hash_by_acc"] = by_acc
-    ch.raw_meta = meta
-    fields = ["raw_meta"]
-    # tg_id пишемо ЛИШЕ якщо він вільний: у довіднику той самий канал буває
-    # двічі (під різними юзернеймами), і запис ламав uniq_channel_tgid
-    if not ch.tg_id and not (Channel.objects.filter(tg_id=peer["id"])
-                             .exclude(pk=ch.pk).exists()):
-        ch.tg_id = peer["id"]
-        fields.append("tg_id")
-    try:
-        with transaction.atomic():
-            ch.save(update_fields=fields)
-    except IntegrityError:
-        logger.debug("_remember_peer: %s — конфлікт унікальності, пропускаю", handle)
+    return Channel.objects.filter(username__iexact=handle).only("id", "raw_meta", "tg_id").first()
+
+
+def _channel_or_create(handle: str, source, peer: dict):
+    """Рядок Channel для кешу хеша. Без рядка кеш не працює і джерело платить
+    резолв на кожен рестарт gateway (на проді таких джерел ~100). Створюємо
+    лише після УСПІШНОГО читання з хешем — не плодимо рядки для мертвих
+    юзернеймів."""
+    ch = _channel(handle)
+    if ch is None and peer and peer.get("access_hash"):
+        from analysis.models import Channel
+        ch = Channel.objects.create(username=handle, title=(source.name or handle)[:512])
+    return ch
 
 
 def _bump_shift(source) -> None:
@@ -104,9 +85,13 @@ class TelegramAdapter(BaseSourceAdapter):
         # (reverse=True) суцільно, щоб бурст >limit не лишив діру
         reverse = not first_poll
 
+        # хеш, який ЦЕЙ акаунт уже здобув, → читаємо без ResolveUsernameRequest
+        # (добовий ліміт резолву — головна причина «No user has X as username»)
+        channel = _channel(handle)
+        target = peers.peer_for(channel, acc.id) or handle
         peer: dict = {}
         try:
-            msgs = acc.fetch_history(handle, min_id=min_id, limit=limit, reverse=reverse,
+            msgs = acc.fetch_history(target, min_id=min_id, limit=limit, reverse=reverse,
                                      peer_sink=peer)
         except AccountUnavailable as e:
             # проксі/пауза/резолв цього акаунта — джерело ні до чого: інший акаунт
@@ -117,7 +102,7 @@ class TelegramAdapter(BaseSourceAdapter):
             raise RateLimited(e.retry_after or 60)
         except GwRateLimited as e:
             raise RateLimited(e.retry_after)
-        _remember_peer(handle, peer, acc.id)
+        peers.remember_peer(channel or _channel_or_create(handle, source, peer), acc.id, peer)
 
         items, max_id = [], min_id
         for m in msgs:

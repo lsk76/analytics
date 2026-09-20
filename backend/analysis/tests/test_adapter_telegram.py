@@ -91,13 +91,34 @@ def test_fetch_first_poll_then_watermark(accounts, fake):
     assert fake.calls[-1]["min_id"] == 7 and fake.calls[-1]["reverse"] is True
 
 
-def test_fetch_remembers_peer_per_account(accounts, fake):
+def test_fetch_remembers_peer_per_account_and_reuses_it(accounts, fake):
     Channel.objects.create(username="ulan_smi", title="u")
     s = Source.objects.create(kind="telegram", url="https://t.me/ulan_smi", name="u")
     TelegramAdapter().fetch(s)
     ch = Channel.objects.get(username="ulan_smi")
     acc_id = fake.calls[-1]["id"]
+    assert fake.calls[-1]["handle"] == "ulan_smi"                   # перший раз — резолв
     assert ch.raw_meta["access_hash_by_acc"] == {str(acc_id): 777} and ch.tg_id == 555
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["handle"] == {"channel_id": 555, "access_hash": 777}  # далі — без
+    # інший акаунт хеш не бере: він персональний
+    s.tg_account = accounts[1] if accounts[0].id == acc_id else accounts[0]
+    s.save()
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["handle"] == "ulan_smi"
+
+
+def test_fetch_creates_channel_row_for_cache(accounts, fake):
+    s = Source.objects.create(kind="telegram", url="https://t.me/newchan", name="Новий")
+    assert not Channel.objects.filter(username="newchan").exists()
+    TelegramAdapter().fetch(s)
+    ch = Channel.objects.get(username="newchan")
+    assert ch.tg_id == 555 and ch.title == "Новий" and str(fake.calls[-1]["id"]) in ch.raw_meta["access_hash_by_acc"]
+    fake.exc = TelegramOpError("ChannelPrivateError")
+    s2 = Source.objects.create(kind="telegram", url="https://t.me/deadchan", name="d")
+    with pytest.raises(TelegramOpError):
+        TelegramAdapter().fetch(s2)
+    assert not Channel.objects.filter(username="deadchan").exists()     # мертвий — не плодимо
 
 
 def test_account_unavailable_rotates_and_rate_limits(accounts, fake):

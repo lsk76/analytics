@@ -28,7 +28,7 @@ from accounts.models import TelegramAccount
 from analysis.models import MonitorChat, Post
 from django.conf import settings
 
-from analysis.services import llm
+from analysis.services import llm, peers
 from analysis.services.monitor_stages import (_claim, _content_hash, _parse_object,
                                               _release_for_retry, mon_prescreen_once,
                                               sync_comment_event)
@@ -105,10 +105,13 @@ def _assign_accounts(chats):
     return by_acc
 
 
-def _entity_spec(channel) -> dict | None:
-    """Специфікація чату для gateway: публічний — за юзернеймом; приватна
-    linked-група — за закешованим access_hash, а вперше — через батьківський
-    канал (gateway резолвить і повертає хеш у `resolved`)."""
+def _entity_spec(channel, account_id: int | None = None) -> dict | None:
+    """Специфікація чату для gateway. Порядок: хеш, який ЦЕЙ акаунт уже здобув
+    (без резолву) → юзернейм публічного чату → хеш linked-групи → батьківський
+    канал linked-групи (gateway резолвить і повертає хеш у `resolved`)."""
+    cached = peers.peer_for(channel, account_id) if account_id else None
+    if cached:
+        return cached
     u = (channel.username or "").strip()
     if u and not u.startswith(("linked:", "+")):
         return {"username": u}
@@ -121,16 +124,10 @@ def _entity_spec(channel) -> dict | None:
     return None
 
 
-def _apply_resolved(channel, resolved: dict | None) -> None:
-    """Хеш linked-групи, який gateway щойно здобув, — у raw_meta, щоб наступні
-    проходи не платили резолв удруге."""
-    if not resolved or not resolved.get("access_hash"):
-        return
-    meta = dict(channel.raw_meta or {})
-    if meta.get("access_hash") == resolved["access_hash"] and channel.tg_id == resolved["id"]:
-        return
-    meta["access_hash"] = resolved["access_hash"]
-    type(channel).objects.filter(id=channel.id).update(tg_id=resolved["id"], raw_meta=meta)
+def _apply_resolved(channel, resolved: dict | None, account_id: int) -> None:
+    """Хеш, який gateway щойно здобув, — під цей акаунт, щоб наступні проходи
+    (і після рестарту gateway) не платили резолв удруге."""
+    peers.remember_peer(channel, account_id, resolved)
 
 
 def _hits_to_msgs(hits: list[dict], channel) -> list[dict]:
@@ -165,7 +162,7 @@ def _run_search_account(acc_id, chats, terms, since, limit, out):
     from accounts.services.managed import AccountUnavailable, RateLimited, TelegramOpError
     req = []
     for mc in chats:
-        spec = _entity_spec(mc.channel)
+        spec = _entity_spec(mc.channel, acc_id)
         if spec is None:
             out.append((mc, None, "немає юзернейма й access_hash"))
             continue
@@ -252,7 +249,7 @@ def _stream_account(acc_id, chats, patterns, media_chat_id, out):
     from accounts.services.managed import AccountUnavailable, RateLimited, TelegramOpError
     req = []
     for mc in chats:
-        spec = _entity_spec(mc.channel)
+        spec = _entity_spec(mc.channel, acc_id)
         if spec is None:
             out.append((mc, None, mc.stream_last_msg_id, 0, "немає юзернейма й access_hash", 0))
             continue
@@ -288,7 +285,7 @@ def _stream_account(acc_id, chats, patterns, media_chat_id, out):
         mc = by_id.get(row.get("key"))
         if mc is None:
             continue
-        _apply_resolved(mc.channel, row.get("resolved"))
+        _apply_resolved(mc.channel, row.get("resolved"), acc_id)
         msgs = None if row.get("error") else _hits_to_msgs(row["hits"], mc.channel)
         out.append((mc, msgs, int(row.get("max_id") or mc.stream_last_msg_id),
                     int(row.get("n_media") or 0), row.get("error"), int(row.get("n_seen") or 0)))
