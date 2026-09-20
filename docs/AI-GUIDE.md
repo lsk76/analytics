@@ -195,8 +195,12 @@ publisher/service, `Setting registry_roles_json`). Три винятки для 
 `RateLimited` (зачекати), `AccountUnavailable` (взяти інший), `TelegramOpError`
 (вина цілі — рахувати як збій). Єдина операція читання — `scan` (чати від
 watermark + регулярки + медіа-форвард тим самим акаунтом); `fetch_history` —
-її окремий випадок. Налаштування: `gateway_cooldown_base_sec`, `gateway_cooldown_cap_sec`,
-`gateway_repair_after`, `gateway_repair_interval_sec`, `gateway_repair_proactive`
+її окремий випадок. **Резолв юзернейма — один раз на пару акаунт+чат:** хеш кешується
+в `Channel.raw_meta.access_hash_by_acc` (`analysis/services/peers.py`), споживачі
+передають gateway хеш, а юзернейм — лише вперше; чат без хеша дістається лише акаунту
+з живим резолвом (`registry.candidates(..., need_resolve=True)`). Налаштування: `gateway_cooldown_base_sec`, `gateway_cooldown_cap_sec`,
+`gateway_repair_after`, `gateway_repair_interval_sec`, `gateway_resolve_base_sec`,
+`gateway_resolve_cap_sec`, `gateway_repair_proactive`
 (0/1; на дев-стеку з копією прод-акаунтів НЕ вмикати), `gateway_lock_wait_sec`,
 `gateway_idle_disconnect_sec`. План і cutover: `docs/tg-gateway-plan.md`.
 

@@ -28,7 +28,8 @@ logger = logging.getLogger("accounts.gateway.state")
 DEFAULT_COOLDOWN_BASE_SEC = 300
 DEFAULT_COOLDOWN_CAP_SEC = 3600
 DEFAULT_REPAIR_AFTER = 3
-RESOLVE_EXHAUSTED_FOR = timedelta(hours=24)
+DEFAULT_RESOLVE_BASE_SEC = 6 * 3600     # перша відмова резолву
+DEFAULT_RESOLVE_CAP_SEC = 24 * 3600     # стеля подвоєнь
 
 _TRANSPORT_MARKERS = ("Connection to Telegram failed", "Connection refused",
                       "Server closed the connection", "підвисло")
@@ -113,6 +114,10 @@ def apply(account, outcome: Outcome, *, meta: dict | None = None,
         _set("cooldown_until", None)
         _set("last_ok_at", now)
         _set("last_error", "")
+        if meta.get("resolved"):
+            # акаунт щойно резолвив юзернейм — ліміт живий, паузу знімаємо
+            _set("resolve_failures", 0)
+            _set("resolve_exhausted_until", None)
     elif outcome is Outcome.TRANSPORT:
         n = (account.transport_failures or 0) + 1
         base = _setting_int("gateway_cooldown_base_sec", DEFAULT_COOLDOWN_BASE_SEC)
@@ -129,8 +134,15 @@ def apply(account, outcome: Outcome, *, meta: dict | None = None,
         _set("cooldown_until", now + timedelta(seconds=secs))
         _set("last_error", error[:2000] or f"FloodWait {secs}s")
     elif outcome is Outcome.RESOLVE:
-        # акаунт живий: лише резолв вичерпано, для операцій без резолву він ready
-        _set("resolve_exhausted_until", now + RESOLVE_EXHAUSTED_FOR)
+        # акаунт живий: лише резолв вичерпано, для операцій без резолву він ready.
+        # Пауза адаптивна: 6 год, повторна відмова одразу після паузи — 12, далі
+        # 24 (кап). Успішний резолв (meta resolved) скидає. Обмежений SpamBot-ом
+        # акаунт так сам «відсунеться» до доби, живий — повернеться за 6 год.
+        n = (account.resolve_failures or 0) + 1
+        base = _setting_int("gateway_resolve_base_sec", DEFAULT_RESOLVE_BASE_SEC)
+        cap = _setting_int("gateway_resolve_cap_sec", DEFAULT_RESOLVE_CAP_SEC)
+        _set("resolve_failures", n)
+        _set("resolve_exhausted_until", now + timedelta(seconds=min(base * (2 ** (n - 1)), cap)))
         _set("last_error", error[:2000])
     elif outcome is Outcome.DEAUTH:
         _set("state", A.STATE_DEAUTHORIZED)

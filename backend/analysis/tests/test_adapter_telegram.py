@@ -70,6 +70,26 @@ def test_account_selection_prefers_pinned_then_pool(accounts, fake):
     assert ad._account(s).id == a1.id                               # pinned мертвий → пул
 
 
+def test_account_without_resolve_is_skipped_unless_hash_cached(accounts, fake):
+    from datetime import timedelta
+    a1, a2 = accounts
+    ch = Channel.objects.create(username="x", title="x", tg_id=1)
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    ad = TelegramAdapter()
+    first = ad._account(s, ch)
+    first_row = TelegramAccount.objects.get(pk=first.id)
+    first_row.resolve_exhausted_until = timezone.now() + timedelta(hours=1)
+    first_row.save()
+    other = a2 if first.id == a1.id else a1
+    assert ad._account(s, ch).id == other.id                       # без хеша → хто резолвить
+    ch.raw_meta = {"access_hash_by_acc": {str(first.id): 9}}
+    ch.save()
+    assert ad._account(s, ch).id == first.id                       # є хеш → резолв не потрібен
+    TelegramAccount.objects.update(resolve_exhausted_until=timezone.now() + timedelta(hours=1))
+    ch.raw_meta = {}
+    assert ad._account(s, ch) is None                              # ніхто не резолвить → чекати
+
+
 def test_no_accounts_is_rate_limited_not_failure(fake):
     s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
     with pytest.raises(RateLimited):

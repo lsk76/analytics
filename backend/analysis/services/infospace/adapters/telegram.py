@@ -52,15 +52,23 @@ def _bump_shift(source) -> None:
 class TelegramAdapter(BaseSourceAdapter):
     kind = "telegram"
 
-    def _account(self, source):
-        """Привʼязаний акаунт джерела або стабільний вибір із пулу збирачів."""
+    def _account(self, source, channel=None):
+        """Привʼязаний акаунт джерела або стабільний вибір із пулу збирачів.
+
+        Акаунт, який ще не резолвив цей канал (нема кешованого хеша), має
+        вміти резолвити зараз: вичерпаний ліміт резолву — це ще один прохід
+        у нікуди. Тому без хеша беремо лише кандидатів із живим резолвом."""
         from accounts.services import registry
         acc = registry.pinned_for(source)
         if acc is not None:
             return acc
         shift = int((source.poll_cursor or {}).get("acc_shift", 0))
+        key = source.id or 0
         try:
-            return registry.pick("collector", key=source.id or 0, shift=shift)
+            acc = registry.pick("collector", key=key, shift=shift)
+            if peers.peer_for(channel, acc.id) is None and not acc.can_resolve():
+                acc = registry.pick("collector", key=key, shift=shift, need_resolve=True)
+            return acc
         except registry.NoAccountAvailable:
             return None
 
@@ -73,10 +81,11 @@ class TelegramAdapter(BaseSourceAdapter):
     def fetch(self, source) -> list[RawItem]:
         from accounts.services.managed import AccountUnavailable
         from accounts.services.managed import RateLimited as GwRateLimited
-        acc = self._account(source)
+        handle = self._handle(source)
+        channel = _channel(handle)
+        acc = self._account(source, channel)
         if acc is None:
             raise RateLimited(120)     # пул порожній: не збій джерела, зачекати
-        handle = self._handle(source)
         poll_cursor = dict(source.poll_cursor or {})
         first_poll = "last_msg_id" not in poll_cursor
         min_id = int(poll_cursor.get("last_msg_id", 0))
@@ -87,7 +96,6 @@ class TelegramAdapter(BaseSourceAdapter):
 
         # хеш, який ЦЕЙ акаунт уже здобув, → читаємо без ResolveUsernameRequest
         # (добовий ліміт резолву — головна причина «No user has X as username»)
-        channel = _channel(handle)
         target = peers.peer_for(channel, acc.id) or handle
         peer: dict = {}
         try:

@@ -292,7 +292,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     # стан веде gateway (accounts/gateway/state.py): в адмінці лише читання
     readonly_fields = ("authorize_button", "channels_button", "messages_button",
                        "state", "cooldown_until", "transport_failures",
-                       "resolve_exhausted_until", "last_ok_at", "last_error",
+                       "resolve_failures", "resolve_exhausted_until", "last_ok_at", "last_error",
                        "gateway_connected")
     filter_horizontal = ("tags",)
     actions = ["check_alive", "check_spam_status", "test_bot_flow", "warm_up_channels",

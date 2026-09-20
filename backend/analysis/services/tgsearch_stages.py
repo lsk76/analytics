@@ -77,6 +77,8 @@ def _assign_accounts(chats):
     -> {account_id: [MonitorChat]} або {} якщо нема кому читати."""
     from accounts.services import registry
     pool = _account_order(registry.candidates("stream"))
+    # чату без кешованого хеша потрібен акаунт, що ВМІЄ резолвити зараз
+    pool_resolve = [i for i in pool if i in set(registry.candidates("stream", need_resolve=True))]
     pinned_ok = set(TelegramAccount.objects.filter(
         id__in=[mc.tg_account_id for mc in chats if mc.tg_account_id],
         is_active=True, is_authenticated=True)
@@ -96,7 +98,13 @@ def _assign_accounts(chats):
     for i, mc in enumerate(chats):
         acc_id = mc.tg_account_id if mc.tg_account_id in pinned_ok else None
         if acc_id is None:
-            acc_id = donor.get(mc.channel_id) or (pool[i % len(pool)] if pool else None)
+            acc_id = donor.get(mc.channel_id)
+            if acc_id is None:
+                # є хеш під якийсь акаунт із пулу → він; інакше — той, хто резолвить
+                by_hash = ((mc.channel.raw_meta or {}).get(peers.KEY) or {})
+                known = [i for i in pool if str(i) in by_hash]
+                cand = known or pool_resolve
+                acc_id = cand[i % len(cand)] if cand else None
             if acc_id is None:
                 continue
             mc.tg_account_id = acc_id

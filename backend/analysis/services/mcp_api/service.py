@@ -52,6 +52,8 @@ def _gateway_health(acc) -> list:
     hour_ago = timezone.now() - timedelta(hours=1)
     rows.append(("транспортних збоїв за годину",
                  acc.filter(transport_failures__gt=0, updated_at__gte=hour_ago).count() or "—"))
+    rows.append(("резолв вичерпано (до 24 год)",
+                 acc.filter(resolve_exhausted_until__gt=timezone.now()).count() or "—"))
     rows.append(("у cooldown / needs_proxy",
                  f"{acc.filter(state='cooldown', cooldown_until__gt=timezone.now()).count()} / "
                  f"{acc.filter(state='needs_proxy').count()}"))
