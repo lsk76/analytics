@@ -44,10 +44,19 @@ def section(request, task_id):
         "presets": PRESETS,
         "chart_json": json.dumps(charts.chart_data(task, period), ensure_ascii=False),
         "feed": charts.feed(task, period),
-        "overview": settings_drawer.overview(task),
-        "settings": settings_drawer.all_settings(task),
     }
     return render(request, "simpleui/section.html", ctx)
+
+
+@login_required
+def settings_page(request, task_id):
+    """Налаштування секції — окрема сторінка, лише читання."""
+    task = _task(request, task_id)
+    return render(request, "simpleui/settings.html", {
+        "task": task,
+        "overview": settings_drawer.overview(task),
+        "settings": settings_drawer.all_settings(task),
+    })
 
 
 @login_required

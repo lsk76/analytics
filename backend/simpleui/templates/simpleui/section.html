@@ -19,7 +19,7 @@
     </div>
   </div>
   <div class="actions">
-    <button class="btn" type="button" onclick="document.getElementById('drawer').showModal()">⚙️ Налаштування</button>
+    <a class="btn" href="{% url 'simpleui:settings' task.id %}">⚙️ Налаштування</a>
     <a class="btn" href="{% url 'simpleui:collect' task.id %}">⬇️ Зібрати за період</a>
   </div>
 </div>
@@ -84,44 +84,6 @@
   {% endif %}
 </div>
 
-{# Шухляда налаштувань — лише читання #}
-<dialog class="drawer" id="drawer">
-  <div class="inner">
-    <button class="close" type="button" onclick="document.getElementById('drawer').close()" aria-label="Закрити">×</button>
-    <h2>Налаштування</h2>
-    <p style="font-size:1.05rem">{{ overview.sentence }}</p>
-
-    {% if overview.groups %}
-    <h3 style="margin:18px 0 6px">Джерела</h3>
-    {% for g in overview.groups %}
-      <details class="src-group">
-        <summary>{{ g.region }} <span class="soft">· {{ g.items|length }}</span></summary>
-        <ul>{% for s in g.items %}<li>{{ s.name }} <span class="soft">({{ s.kind }})</span></li>{% endfor %}</ul>
-      </details>
-    {% endfor %}
-    {% endif %}
-
-    <h3 style="margin:22px 0 6px">Як працює збір</h3>
-    <p class="soft" style="margin-top:0">Усі налаштування секції. Змінити їх можна лише через асистента (фрази нижче).</p>
-    {% for g in settings %}
-      <details class="src-group">
-        <summary>{{ g.title }}</summary>
-        <dl class="kv">
-        {% for r in g.rows %}
-          <dt>{{ r.label }}</dt>
-          <dd>{% if r.long %}<details><summary>показати текст</summary><pre>{{ r.value }}</pre></details>{% else %}{{ r.value }}{% endif %}</dd>
-        {% endfor %}
-        </dl>
-      </details>
-    {% endfor %}
-
-    <h3 style="margin:22px 0 6px">Змінити через асистента</h3>
-    <p class="soft" style="margin-top:0">Скопіюйте фразу і надішліть асистенту. Він усе зробить і підтвердить.</p>
-    {% for p in overview.phrases %}
-      <div class="phrase"><code>{{ p }}</code><button class="btn" type="button" onclick="copyPhrase(this)">Скопіювати</button></div>
-    {% endfor %}
-  </div>
-</dialog>
 {% endblock %}
 
 {% block scripts %}
@@ -176,16 +138,5 @@
   hbar('c-src', D.sources, 'Джерел немає');
 })();
 
-function copyPhrase(btn) {
-  const text = btn.parentElement.querySelector('code').textContent;
-  const done = () => { btn.textContent = 'Скопійовано ✓'; setTimeout(() => btn.textContent = 'Скопіювати', 1800); };
-  if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => fallback());
-  else fallback();
-  function fallback() {
-    const r = document.createRange(); r.selectNodeContents(btn.parentElement.querySelector('code'));
-    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-    try { document.execCommand('copy'); done(); } catch (e) {}
-  }
-}
 </script>
 {% endblock %}

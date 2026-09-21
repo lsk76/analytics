@@ -1,0 +1,63 @@
+{% extends "simpleui/base.html" %}
+{% block title %}Налаштування — {{ task.human_name }}{% endblock %}
+{% block crumb %} › <a href="{% url 'simpleui:section' task.id %}">{{ task.human_name }}</a> › налаштування{% endblock %}
+{% block content %}
+<p><a class="btn" href="{% url 'simpleui:section' task.id %}">← Назад до секції</a></p>
+<h1>Налаштування</h1>
+<p class="sub">{{ task.human_name }}</p>
+
+<div class="card">
+  <p style="font-size:1.1rem;margin:0">{{ overview.sentence }}</p>
+</div>
+
+<h2>Змінити через асистента</h2>
+<div class="card">
+  <p class="soft" style="margin-top:0">Тут нічого не редагується руками. Скопіюйте фразу і надішліть асистенту — він зробить і підтвердить.</p>
+  {% for p in overview.phrases %}
+    <div class="phrase"><code>{{ p }}</code><button class="btn" type="button" onclick="copyPhrase(this)">Скопіювати</button></div>
+  {% endfor %}
+</div>
+
+{% if overview.groups %}
+<h2>Джерела <span class="soft" style="font-weight:400">· {{ overview.n_sources }} у {{ overview.n_regions }} регіонах</span></h2>
+<div class="card">
+  {% for g in overview.groups %}
+    <details class="src-group">
+      <summary>{{ g.region }} <span class="soft">· {{ g.items|length }}</span></summary>
+      <ul>{% for s in g.items %}<li>{% if s.url %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %} <span class="soft">({{ s.kind }})</span></li>{% endfor %}</ul>
+    </details>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Як працює збір</h2>
+<div class="card">
+  <p class="soft" style="margin-top:0">Усі параметри секції по етапах. Порожнє значення означає стандартне.</p>
+  {% for g in settings %}
+    <details class="src-group" {% if forloop.first %}open{% endif %}>
+      <summary>{{ g.title }}</summary>
+      <dl class="kv">
+      {% for r in g.rows %}
+        <dt>{{ r.label }}</dt>
+        <dd>{% if r.long %}<details><summary>показати текст</summary><pre>{{ r.value }}</pre></details>{% else %}{{ r.value }}{% endif %}</dd>
+      {% endfor %}
+      </dl>
+    </details>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyPhrase(btn) {
+  const code = btn.parentElement.querySelector('code');
+  const done = () => { btn.textContent = 'Скопійовано ✓'; setTimeout(() => btn.textContent = 'Скопіювати', 1800); };
+  const fallback = () => {
+    const r = document.createRange(); r.selectNodeContents(code);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    try { document.execCommand('copy'); done(); } catch (e) {}
+  };
+  if (navigator.clipboard) navigator.clipboard.writeText(code.textContent).then(done, fallback); else fallback();
+}
+</script>
+{% endblock %}
