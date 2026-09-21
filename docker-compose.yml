@@ -2,7 +2,7 @@ name: tg-event-analytics
 
 # shared config for every stage worker (reuses the web image)
 x-worker: &worker
-  image: tg-event-analytics-web:latest
+  image: ${WEB_IMAGE:-tg-event-analytics-web:latest}
   env_file: .env
   environment:
     POSTGRES_HOST: db
@@ -39,7 +39,7 @@ services:
     ports:
       # Лише loopback: публікація на 0.0.0.0 обходить UFW (docker пише свої
       # DNAT-правила ПЕРЕД ufw), тож на сервері порт світився б в інтернет.
-      - "127.0.0.1:5433:5432"   # host 5433 (5432 is taken by pso)
+      - "127.0.0.1:${DB_PORT:-5433}:5432"   # host 5433 (5432 is taken by pso); DB_PORT — для другого стека на тому ж хості
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tg_events}"]
       interval: 5s
@@ -49,7 +49,7 @@ services:
 
   web:
     build: .
-    image: tg-event-analytics-web:latest
+    image: ${WEB_IMAGE:-tg-event-analytics-web:latest}
     env_file: .env
     environment:
       POSTGRES_HOST: db
@@ -60,7 +60,7 @@ services:
     ports:
       # Лише loopback (див. коментар у db): назовні gunicorn/runserver не
       # світиться, його проксіює nginx з TLS і rate-limit на /admin/login/.
-      - "127.0.0.1:8001:8000"   # host 8001 (8000 is taken by pso)
+      - "127.0.0.1:${WEB_PORT:-8001}:8000"   # host 8001 (8000 is taken by pso); WEB_PORT — для dev-стека поруч із продом
     depends_on:
       db:
         condition: service_healthy

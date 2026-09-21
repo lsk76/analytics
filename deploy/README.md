@@ -117,6 +117,38 @@ cd /opt/tg-event-analytics && git pull
 make prod-analytics-build            # rebuild + up (migrate виконається на старті web)
 ```
 
+## Dev-стенд на тому ж сервері (з 2026-09-21)
+
+Поруч із продом у `/opt/tg-event-analytics-dev` живе другий, ізольований стек для
+розробки: свій git-клон, своя копія прод-БД, свій образ, свої порти. Там же стоїть
+Claude Code (`~/.local/bin/claude`, юзер `deploy-analytics`). Ізоляція — через `.env`
+дев-клону (compose-файли ті самі, що на проді):
+
+```
+COMPOSE_PROJECT_NAME=tg-event-analytics-dev    # інші контейнери/мережа/том pgdata
+WEB_IMAGE=tg-event-analytics-dev-web:latest    # build не перетирає прод-образ
+WEB_PORT=8002  DB_PORT=5434  MCP_PORT=8766     # лише loopback, як і на проді
+DJANGO_SSL_REDIRECT=false  DJANGO_HSTS_SECONDS=0   # доки немає TLS-піддомену
+```
+
+Піднімаються ТІЛЬКИ `db` і `web`:
+`docker compose -f docker-compose.yml -f docker-compose.monitor.yml up -d db web`
+(`make live-*` працює як на проді). **НЕ піднімати `tg-gateway` і Telegram-воркери:**
+у копії БД ті самі акаунти, що на проді, другий вхід тією ж сесією з іншого процесу =
+`AuthKeyDuplicated`, сесія згорає назавжди. Тому копія знешкоджується
+`deploy/dev-sanitize.sql` (сесії/2FA обнулені, публікація вимкнена).
+
+Доступ: тунель `ssh -L 8002:127.0.0.1:8002 tg-analytics` → http://localhost:8002/admin/.
+Піддомен `dev.analytics.matter-d.pro` (nginx + certbot за зразком §4) — коли з'явиться
+DNS-запис (CNAME на `analytics.matter-d.pro`).
+
+Оновити копію БД з прода (читання прод-БД, ~3 хв на 600 МБ):
+```bash
+docker exec -i tg-event-analytics-db-1 pg_dump -U tg_events -d tg_events -Fc > backups/seed.dump
+make restore FILE=backups/seed.dump            # у дев-клоні; проєкт береться з .env
+docker compose exec -T db psql -U tg_events -d tg_events < deploy/dev-sanitize.sql
+```
+
 ## Що НЕ робити
 - Не відкривай 8001/5433 у UFW і не міняй bind у compose на `0.0.0.0`.
 - Не став `DJANGO_DEBUG=true` на цьому сервері.

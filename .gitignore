@@ -1,4 +1,5 @@
 # --- Secrets / env ---
+CLAUDE.local.md
 .env
 *.env
 .env.*

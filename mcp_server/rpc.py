@@ -33,8 +33,12 @@ class Target:
     """Куди керуємо: каталог проєкту, набір compose-файлів, опційний ssh-хост."""
 
     def __init__(self):
+        # "local" / "-" = без ssh: той самий .mcp.json на самому сервері
+        # (TGA_PROD_SSH=local) керує продом локально.
         self.ssh = _env("TGA_SSH")
-        self.dir = _env("TGA_DIR") or ("/opt/tg-event-analytics" if self.ssh else str(ROOT))
+        if self.ssh in ("local", "-"):
+            self.ssh = ""
+        self.dir =_env("TGA_DIR") or ("/opt/tg-event-analytics" if self.ssh else str(ROOT))
         self.files = [f for f in _env("TGA_COMPOSE_FILES", "docker-compose.yml").split(":") if f]
         self.web = _env("TGA_WEB_SERVICE", "web")
         self.timeout = int(_env("TGA_TIMEOUT", "240"))

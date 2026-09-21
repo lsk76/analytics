@@ -4,7 +4,7 @@ name: tg-event-analytics
 # Shares the same db volume (pgdata) as dev via the shared project name.
 
 x-worker: &worker
-  image: tg-event-analytics-web:latest
+  image: ${WEB_IMAGE:-tg-event-analytics-web:latest}
   env_file: .env
   environment:
     POSTGRES_HOST: db
@@ -42,7 +42,7 @@ services:
 
   web:
     build: .
-    image: tg-event-analytics-web:latest
+    image: ${WEB_IMAGE:-tg-event-analytics-web:latest}
     env_file: .env
     environment:
       POSTGRES_HOST: db
@@ -55,7 +55,7 @@ services:
     # Bind лише на loopback хоста — назовні gunicorn НЕ світиться, його проксіює
     # nginx (TLS-термінація). У фаєрволі відкриті тільки 80/443, не 8001.
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:${WEB_PORT:-8001}:8000"
     depends_on:
       db:
         condition: service_healthy

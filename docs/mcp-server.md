@@ -66,7 +66,7 @@ echo '{"ref":"3"}' | docker compose exec -T web python manage.py mcp_rpc account
 |--------|--------|-----------|
 | `TGA_DIR` | корінь репо (або `/opt/tg-event-analytics` для ssh) | каталог з compose-файлами |
 | `TGA_COMPOSE_FILES` | `docker-compose.yml` | набір файлів через `:` |
-| `TGA_SSH` | — | хост із `~/.ssh/config`; усе піде через ssh |
+| `TGA_SSH` | — | хост із `~/.ssh/config`; усе піде через ssh. `local` або `-` = без ssh (на самому сервері `.mcp.json` бере його з `TGA_PROD_SSH=local`) |
 | `TGA_WEB_SERVICE` | `web` | сервіс, у якому виконується `manage.py` |
 | `TGA_READONLY` | — | `1` — інструменти, що пишуть, відмовляють (і на хості, і в контейнері) |
 | `TGA_TIMEOUT` | `240` | таймаут одного виклику, секунд |
