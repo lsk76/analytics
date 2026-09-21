@@ -27,17 +27,76 @@
 {# 2. Період — єдиний контрол #}
 <div class="period">
   {% for key, label, days in presets %}
-    <a class="{% if period.key == key %}on{% endif %}" href="?period={{ key }}">{{ label }}</a>
+    <a class="{% if period.key == key %}on{% endif %}" href="?period={{ key }}{% if filter_query %}&{{ filter_query }}{% endif %}">{{ label }}</a>
   {% endfor %}
   <form method="get">
     <input type="hidden" name="period" value="custom">
+    {% for k, v in filters_hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     <input type="date" name="from" value="{{ period.date_from|date:'Y-m-d' }}" aria-label="від">
     <span>—</span>
     <input type="date" name="to" value="{{ period.date_to|date:'Y-m-d' }}" aria-label="до">
     <button type="submit" class="{% if period.key == 'custom' %}on{% endif %}">Свій період</button>
   </form>
   <span class="label">{{ period.date_from|date:"d.m.Y" }} — {{ period.date_to|date:"d.m.Y" }}</span>
+  <button type="button" class="{% if filters.active %}on{% endif %}" onclick="document.getElementById('flt').toggleAttribute('open')">🔍 Фільтри{% if filters.active %} · {{ chips|length }}{% endif %}</button>
 </div>
+
+{% if chips %}
+<div class="chips-row">
+  {% for label, value in chips %}<span class="chip"><b>{{ label }}:</b> {{ value }}</span>{% endfor %}
+  <a class="chip reset" href="?{{ period.query }}">✕ скинути</a>
+</div>
+{% endif %}
+
+{# Фільтри — ті самі, що в адмінці подій, ті самі імена параметрів #}
+<details class="card flt" id="flt" {% if filters.active %}open{% endif %}>
+  <summary>Фільтри <span class="soft">· знайдено {{ total }}</span></summary>
+  <form method="get" class="flt-form">
+    <input type="hidden" name="period" value="{{ period.key }}">
+    {% if period.key == 'custom' %}<input type="hidden" name="from" value="{{ period.date_from|date:'Y-m-d' }}"><input type="hidden" name="to" value="{{ period.date_to|date:'Y-m-d' }}">{% endif %}
+    <div class="flt-row">
+      <label>Пошук по тексту <input type="search" name="q" value="{{ filters.q }}" placeholder="слово або назва місця"></label>
+      <label>Джерел не менше <input type="number" name="channel_count__gte" min="0" value="{{ filters.min_channels|default:'' }}" placeholder="напр. 2" style="width:6em"></label>
+    </div>
+    <div class="flt-grid">
+      {% if facets.regions %}
+      <details class="src-group" {% if filters.regions %}open{% endif %}>
+        <summary>Регіон {% if filters.regions %}<span class="soft">· {{ filters.regions|length }}</span>{% endif %}</summary>
+        <div class="opts">
+          {% for r in facets.regions %}<label><input type="checkbox" name="region_id" value="{{ r.id }}" {% if r.on %}checked{% endif %}> {{ r.name }} <span class="soft">{{ r.n }}</span></label>{% endfor %}
+        </div>
+      </details>
+      {% endif %}
+      {% for c in facets.tag_cats %}
+      <details class="src-group" {% if c.active %}open{% endif %}>
+        <summary>{{ c.label }} {% if c.active %}<span class="soft">· обрано</span>{% endif %}</summary>
+        <div class="opts tri">
+          <div class="hdr"><span></span><span title="включити">✓</span><span title="виключити">✗</span></div>
+          {% for t in c.items %}
+          <div class="tri-row">
+            <span>{{ t.name }} <span class="soft">{{ t.n }}</span></span>
+            <input type="checkbox" name="tag_{{ c.key }}" value="{{ t.id }}" {% if t.inc %}checked{% endif %} onchange="if(this.checked)this.nextElementSibling.checked=false">
+            <input type="checkbox" name="tag_{{ c.key }}_excl" value="{{ t.id }}" {% if t.exc %}checked{% endif %} onchange="if(this.checked)this.previousElementSibling.checked=false">
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+      {% if facets.sources %}
+      <details class="src-group" {% if filters.sources or filters.channels %}open{% endif %}>
+        <summary>Джерело</summary>
+        <div class="opts">
+          {% for s in facets.sources %}<label><input type="checkbox" name="{{ s.param }}" value="{{ s.id }}" {% if s.on %}checked{% endif %}> {{ s.name }} <span class="soft">{{ s.n }}</span></label>{% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+    <div class="actions">
+      <button class="btn primary" type="submit">Застосувати</button>
+      <a class="btn" href="?{{ period.query }}">Скинути</a>
+    </div>
+  </form>
+</details>
 
 {# 3. Графіки #}
 <div class="grid" id="charts">
@@ -64,12 +123,12 @@
 </div>
 
 {# 4. Стрічка #}
-<h2>Останні події <span class="soft" style="font-weight:400">· {{ feed|length }} з {{ period.label }}</span></h2>
+<h2>Останні події <span class="soft" style="font-weight:400">· {{ feed|length }} з {{ total }} за {{ period.label }}</span></h2>
 <div class="card">
   {% if feed %}
   <ul class="feed">
     {% for e in feed %}
-    <li><a href="{% url 'simpleui:event' task.id e.id %}?{{ period.query }}">
+    <li><a href="{% url 'simpleui:event' task.id e.id %}?{{ period.query }}{% if filter_query %}&{{ filter_query }}{% endif %}">
       <div class="t">{{ e.title }}</div>
       <div class="m">
         <span>{{ e.date|date:"d.m.Y" }}</span>

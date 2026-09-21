@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from analysis.models import TagCategory
 
-from .services import charts, settings_drawer, status
+from .services import charts, filters, settings_drawer, status
 from .services.access import approved_events, visible_tasks
 from .services.periods import PRESETS, period_from_request
 
@@ -37,13 +37,26 @@ def sections(request):
 def section(request, task_id):
     task = _task(request, task_id)
     period = period_from_request(request)
+    flt = filters.Filters.from_request(request)
+    base_qs = charts.period_events(task, period)
+    qs = flt.apply(base_qs)
+    # query string фільтрів без періоду — щоб кнопки періоду зберігали фільтри
+    keep = request.GET.copy()
+    for k in ("period", "from", "to"):
+        keep.pop(k, None)
     ctx = {
         "task": task,
         "status": status.task_status(task),
         "period": period,
         "presets": PRESETS,
-        "chart_json": json.dumps(charts.chart_data(task, period), ensure_ascii=False),
-        "feed": charts.feed(task, period),
+        "chart_json": json.dumps(charts.chart_data(task, period, qs), ensure_ascii=False),
+        "feed": charts.feed(task, period, qs=qs),
+        "filters": flt,
+        "chips": flt.chips(),
+        "facets": filters.facets(base_qs, flt),
+        "filter_query": keep.urlencode(),
+        "filters_hidden": [(k, v) for k in keep for v in keep.getlist(k)],
+        "total": qs.distinct().count(),
     }
     return render(request, "simpleui/section.html", ctx)
 

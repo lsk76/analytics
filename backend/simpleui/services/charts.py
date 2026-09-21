@@ -60,8 +60,8 @@ def top_sources(qs):
     return [{"name": r["src"] or "без назви", "count": r["count"]} for r in rows]
 
 
-def chart_data(task, period):
-    qs = period_events(task, period)
+def chart_data(task, period, qs=None):
+    qs = period_events(task, period) if qs is None else qs
     src = EventSource(qs, period.gran)
     cat = main_tag_category(task, qs)
     regions = src.by_region()[:TOP_N]
@@ -87,9 +87,9 @@ def headline(summary: str, limit: int = 140) -> str:
     return s if len(s) <= limit else s[:limit - 1].rstrip() + "…"
 
 
-def feed(task, period, limit=FEED_N):
-    qs = (period_events(task, period)
-          .select_related("region_subject")
+def feed(task, period, limit=FEED_N, qs=None):
+    qs = period_events(task, period) if qs is None else qs
+    qs = (qs.select_related("region_subject")
           .prefetch_related("posts__source", "posts__channel")
           .order_by("-event_date", "-created_at")[:limit])
     items = []

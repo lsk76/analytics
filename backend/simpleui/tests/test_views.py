@@ -100,3 +100,22 @@ def test_period_gran():
 def test_human_name_fallback():
     t = AnalysisTask(name="tech", display_name="")
     assert t.human_name == "tech"
+
+
+def test_filters_same_params_as_admin(client, users, task):
+    client.force_login(users[1])
+    region = Region.objects.get(name="Дагестан")
+    from analysis.models import Tag, TagCategory
+    TagCategory.objects.create(key="topic", label="Тема")
+    tag = Tag.objects.create(name="дороги", category="topic")
+    Event.objects.get(summary__startswith="Подія 0.").tags.add(tag)
+    url = f"/app/{task.id}/?period=month"
+    body = client.get(url + f"&region_id={region.id}").content.decode()
+    assert "Регіон:" in body and "Подія 0." in body
+    body = client.get(url + f"&tag_topic={tag.id}").content.decode()
+    assert "Подія 0." in body and "Подія 1." not in body
+    body = client.get(url + f"&tag_topic_excl={tag.id}").content.decode()
+    assert "Подія 0." not in body and "Подія 1." in body
+    body = client.get(url + "&q=Подія 2").content.decode()
+    assert "Подія 2." in body and "Подія 1." not in body
+    assert client.get(url + "&channel_count__gte=5&region_id=abc").status_code == 200
