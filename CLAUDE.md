@@ -17,6 +17,10 @@
   key-value таблиця `Setting`**: додати рядок (`/admin/analysis/setting/`) і читати з коду
   `Setting.get("ключ", ДЕФОЛТ)` (порожнє значення = дефолт із коду). Не хардкодити такий
   конфіг. Приклад: `digest_report_prompt` (промпт дайджест-звіту, `services/infospace/report.py`).
+- **Telegram-акаунти — ТІЛЬКИ через `accounts.services.registry` → `ManagedAccount`**
+  (HTTP до процесу `tg-gateway`, де живе весь Telethon; `docs/tg-gateway-plan.md`).
+  Ніякого `TelegramClient` поза `accounts/gateway/` (тест `test_no_direct_telethon`),
+  без проксі акаунт не працює, стан/паузи/ремонт проксі веде gateway.
 - **Керування сервісом із чату — MCP-сервер** (`mcp_server/`, док `docs/mcp-server.md`):
   `service_health` (що стоїть і хто розгрібає), `accounts_list`/`account_check`,
   `chats_list`, `sources_list`, `run_create`, `service_restart`… Нові інструменти

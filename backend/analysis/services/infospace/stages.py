@@ -105,79 +105,18 @@ def _schedule_rate_limited(source, retry_after):
     source.save(update_fields=["next_poll_at", "locked_at"])
 
 
-def _is_resolve_error(err) -> bool:
-    """«No user has X as username» — це ВИЧЕРПАНИЙ ЛІМІТ РЕЗОЛВУ на акаунті, а
-    не мертвий канал. Перевіряли живим акаунтом: усі шість «ніколи не
-    працювали» каналів існують і відкриваються. Тому джерело треба віддати
-    іншому акаунту, а не довбати тим самим до посиніння (25 джерел так і не
-    зібрали ні разу)."""
-    e = str(err or "")
-    return "as username" in e or "Cannot find any entity" in e
-
-
-def _is_transport_error(err) -> bool:
-    """«Connection to Telegram failed», «Connection refused», наш 120-с таймаут —
-    це не джерело лежить, а ПРОКСІ акаунта, яким його читали (Marsproxies
-    sticky-сесії відвалюються без попередження, а proxy_healthcheck доходить
-    до кожної раз на 4 год). Джерело тут ні до чого: йому треба інший акаунт
-    ЗАРАЗ, а проксі — позачергову перевірку."""
-    if isinstance(err, (ConnectionError, TimeoutError, OSError)):
-        return True
-    e = str(err or "")
-    return ("Connection to Telegram failed" in e or "Connection refused" in e
-            or "Server closed the connection" in e or "підвисло" in e)
-
-
-def _flag_proxy_suspect(source) -> None:
-    """Проксі акаунта, яким щойно не змогли з'єднатись, — у голову черги
-    proxy_healthcheck (last_tested_at=None) і +1 до лічильника відмов.
-    is_working НЕ чіпаємо: False змусив би to_telethon_proxy() віддати None,
-    і акаунт полiз би в Telegram НАПРЯМУ з IP сервера — гірше за простій."""
-    acc = getattr(source, "_tg_account_used", None)
-    if acc is None or not getattr(acc, "proxy_id", None):
-        return
-    from django.db.models import F
-
-    from accounts.models import Proxy
-    Proxy.objects.filter(pk=acc.proxy_id).update(
-        fail_count=F("fail_count") + 1, last_tested_at=None)
-    logger.info("info_collect: %s — акаунт #%s не з'єднався, проксі #%s на позачергову "
-                "перевірку", source.name, acc.pk, acc.proxy_id)
-
-
 def _schedule_fail(source, err):
+    """Збій джерела (TelegramOpError, битий RSS, 404…). Помилки АКАУНТА сюди
+    не доходять: адаптер Telegram перетворює їх на RateLimited і ротує акаунт,
+    а стан акаунта/проксі веде tg-gateway."""
     source.consecutive_failures = (source.consecutive_failures or 0) + 1
-    transport = source.kind == Source.KIND_TELEGRAM and _is_transport_error(err)
-    # транспорт: бекоф НЕ експоненційний (макс 4× інтервалу) — наступний прохід
-    # піде вже іншим акаунтом, і немає сенсу тримати джерело годинами
-    exp = min(source.consecutive_failures, 2 if transport else 10)
-    backoff = source.poll_interval_sec * (2 ** exp)
+    backoff = source.poll_interval_sec * (2 ** min(source.consecutive_failures, 10))
     delay = min(timedelta(seconds=backoff), BACKOFF_CAP)
     source.next_poll_at = djtz.now() + delay
     source.last_error = str(err)[:2000]
     source.locked_at = None
-    fields = ["next_poll_at", "last_error", "consecutive_failures", "locked_at"]
-    if transport:
-        _flag_proxy_suspect(source)
-        # зсув у пулі → інший акаунт (привʼязаний tg_account лишаємо: це вибір
-        # оператора, і його проксі полагодить healthcheck)
-        cur = dict(source.poll_cursor or {})
-        cur["acc_shift"] = int(cur.get("acc_shift", 0)) + 1
-        source.poll_cursor = cur
-        fields.append("poll_cursor")
-    elif _is_resolve_error(err):
-        if source.tg_account_id:
-            logger.info("info_collect: %s — резолв не дався акаунту #%s, відвʼязую",
-                        source.name, source.tg_account_id)
-            source.tg_account = None    # наступний прохід візьме інший із пулу
-            fields.append("tg_account")
-        # зсув у пулі: інакше вибір за лишком від id щоразу давав ТОЙ САМИЙ
-        # акаунт, і джерело з вичерпаним лімітом стояло назавжди
-        cur = dict(source.poll_cursor or {})
-        cur["acc_shift"] = int(cur.get("acc_shift", 0)) + 1
-        source.poll_cursor = cur
-        fields.append("poll_cursor")
-    source.save(update_fields=fields)
+    source.save(update_fields=["next_poll_at", "last_error", "consecutive_failures",
+                               "locked_at"])
 
 
 def _fanout(source, items):

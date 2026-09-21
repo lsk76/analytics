@@ -131,7 +131,6 @@ services:
   # --- warm-up worker (accounts.WarmUpJob: підписка акаунта на випадкові канали) --
   worker-warm-up:          { <<: *worker, command: python manage.py run_worker --stage warm_up --interval 60 }
 
-  # --- proxy healthcheck worker (accounts.Proxy: автоперевірка + авторемонт sticky-сесій) --
   # --- tg-gateway: ЄДИНИЙ процес із Telethon (docs/tg-gateway-plan.md) ------
   # Усі споживачі ходять сюди по HTTP у внутрішній мережі; без ports назовні.
   tg-gateway:
@@ -145,8 +144,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  worker-proxy-health:     { <<: *worker, command: python manage.py run_worker --stage proxy_healthcheck --interval 600 }
 
   # --- spam-status worker (accounts.TelegramAccount: обмеження через @SpamBot) --
   worker-spam-status:      { <<: *worker, command: python manage.py run_worker --stage spam_status_check --interval 900 }

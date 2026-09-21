@@ -11,7 +11,8 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from accounts.models import AccountTag, Proxy, TelegramAccount, TestBotJob, WarmUpJob
-from accounts.services.telegram_client import TelegramUserClient
+from accounts.services import registry
+from accounts.services.managed import gw_result
 from analysis.services.mcp_api import common, fmt
 from analysis.services.mcp_api.registry import ToolError, tool
 
@@ -142,7 +143,7 @@ def account_check(ref: str, pause: float = 2.0):
                         "на акаунт). Звузь ref або став `problem`.")
     rows, alive = [], 0
     for a in accounts:
-        res = TelegramUserClient.check_alive_sync(a)
+        res = registry.get(a.id).check_alive()
         if res.get("ok"):
             alive += 1
             a.last_used_at = timezone.now()
@@ -172,7 +173,7 @@ def account_spam_check(ref: str, pause: float = 2.0):
                         "`spam-status` і так перевіряє пул раз на добу.")
     rows = []
     for a in accounts:
-        res = TelegramUserClient.check_spam_status_sync(a)
+        res = gw_result(lambda: registry.get(a.id).spam_status(), status="unknown")
         a.spam_status = res.get("status", "unknown")
         a.spam_status_detail = (res.get("detail") or "")[:300]
         a.spam_status_checked_at = timezone.now()
@@ -211,6 +212,8 @@ def account_update(ref: str, is_active: bool = None, proxy: str = "",
             a.proxy = p
             changed.append(f"проксі=#{p.id} {common.mask_proxy(p.proxy_string)}")
     a.save()
+    if proxy:
+        registry.get(a.id).invalidate()   # gateway перебудує клієнт під нову проксі
     for name in [t.strip() for t in add_tags.split(",") if t.strip()]:
         tag, _ = AccountTag.objects.get_or_create(name=name)
         a.tags.add(tag)
@@ -250,6 +253,31 @@ def account_warm_up(ref: str, channels: int = 0):
             + "\nПрогрес: account_jobs kind=warm_up")
 
 
+@tool("account_repair", group="accounts", mutates=True, params={
+      "ref": "id/номер/назва, або `problem` — усі в cooldown / needs_proxy."})
+def account_repair(ref: str):
+    """Полагодити акаунт через gateway: живість → регенерація session-id проксі →
+    стан. Те саме робить фоновий ремонт gateway після транспортних збоїв."""
+    ref_l = str(ref).strip().lower()
+    if ref_l in ("problem", "проблемні"):
+        accounts = list(common.scope_accounts(TelegramAccount.objects).filter(
+            is_active=True, state__in=["cooldown", "needs_proxy"]).order_by("id"))
+    else:
+        accounts = common.resolve_accounts(ref)
+    if not accounts:
+        return "нема кого лагодити"
+    if len(accounts) > 15:
+        raise ToolError(f"{len(accounts)} акаунтів за раз — забагато (до 60с на акаунт)")
+    rows = []
+    for a in accounts:
+        res = gw_result(lambda: registry.get(a.id).repair())
+        a.refresh_from_db()
+        rows.append([f"#{a.id}", fmt.trunc(a.name, 20), fmt.flag(bool(res.get("ok"))),
+                     res.get("action") or "", a.get_state_display(),
+                     fmt.trunc(res.get("error") or res.get("reason") or "", 60)])
+    return fmt.table(["id", "акаунт", "ok", "дія", "стан", "деталь"], rows)
+
+
 @tool("account_dialogs", group="accounts", params={
       "ref": "Акаунт: id, номер або частина назви (лише один, не група).",
       "limit": "Скільки діалогів показати.",
@@ -260,7 +288,7 @@ def account_dialogs(ref: str, limit: int = 40, kind: str = ""):
     kind — фільтр `канал` / `група` / `приват`.
     """
     a = common.resolve_account(ref)
-    res = TelegramUserClient.list_dialogs_sync(a)
+    res = gw_result(lambda: {"dialogs": registry.get(a.id).dialogs()}, dialogs=[])
     if not res.get("ok"):
         raise ToolError(f"#{a.id} {a.name}: {res.get('error', 'невідома помилка')}")
     dialogs = res.get("dialogs", [])
@@ -334,7 +362,6 @@ def proxy_check(ref: str, repair: bool = True):
 
     ref — id/частина рядка, або `all` / `broken`. repair=False — лише діагноз.
     """
-    from accounts.services.proxy_health import generate_new_session, test_proxy_connectivity
     ref_l = str(ref).strip().lower()
     if ref_l in ("all", "усі", "*"):
         proxies = list(Proxy.objects.filter(is_active=True).order_by("id"))
@@ -343,21 +370,25 @@ def proxy_check(ref: str, repair: bool = True):
     else:
         proxies = [common.resolve_proxy(ref)]
     if len(proxies) > 30:
-        raise ToolError(f"{len(proxies)} проксі за раз — забагато (до 12с на перевірку)")
+        raise ToolError(f"{len(proxies)} проксі за раз — забагато (до 30с на перевірку)")
     rows = []
     for p in proxies:
-        ok = test_proxy_connectivity(p.proxy_string)
-        note = ""
-        if not ok and repair:
-            new = generate_new_session(p.proxy_string)
-            if new and test_proxy_connectivity(new):
-                p.proxy_string, ok, note = new, True, "нова sticky-сесія"
-            else:
-                note = "ремонт не вдався"
-        p.is_working = ok
-        p.fail_count = 0 if ok else p.fail_count + 1
-        p.last_tested_at = timezone.now()
-        p.save(update_fields=["proxy_string", "is_working", "fail_count", "last_tested_at"])
+        # перевірка йде РЕАЛЬНОЮ сесією акаунта через gateway (repair): проксі без
+        # акаунта перевірити нічим — так і кажемо
+        acc = TelegramAccount.objects.filter(proxy=p, is_active=True, is_authenticated=True) \
+            .order_by("id").first()
+        if acc is None:
+            p.refresh_from_db()
+            ok, note = p.is_working, "немає акаунта на цій проксі — не перевіряли"
+        else:
+            res = gw_result(lambda: registry.get(acc.id).repair())
+            p.refresh_from_db()
+            ok = bool(res.get("ok"))
+            note = {"alive": "жива", "regenerated": "нова sticky-сесія",
+                    "failed": "ремонт не вдався", "skipped": "акаунт пропущено"}.get(
+                        res.get("action"), res.get("error") or "")
+            if not repair and res.get("action") == "regenerated":
+                note += " (repair=false ігнорується: gateway лагодить сам)"
         rows.append([f"#{p.id}", fmt.trunc(common.mask_proxy(p.proxy_string), 46),
                      fmt.flag(ok),
                      p.fail_count, note])

@@ -24,8 +24,6 @@ Stage worker — polls the DB for posts/chunks at its stage and processes them.
     python manage.py run_worker --stage test_bot
     # accounts: прогрів акаунта підпискою на канали (taskless, accounts.WarmUpJob)
     python manage.py run_worker --stage warm_up
-    # accounts: автоперевірка й авторемонт пулу проксі (taskless, кожні 4 год/проксі)
-    python manage.py run_worker --stage proxy_healthcheck --interval 600
     # accounts: перевірка обмежень акаунтів через @SpamBot (taskless, кожні 24 год/акаунт)
     python manage.py run_worker --stage spam_status_check --interval 900
 
@@ -96,17 +94,6 @@ except ImportError as _e:  # noqa: BLE001
     import sys
     print(f"[run_worker] warm_up-стадія недоступна: {_e!r}", file=sys.stderr)
 
-# accounts: автоперевірка й авторемонт пулу проксі (services/proxy_health.py).
-# Marsproxies sticky-сесії не гарантують IP на весь заявлений термін — на
-# невдалий конект сама генерує новий session-id (не потребує API-виклику
-# провайдеру) і перевіряє його; жодних ручних списків від оператора.
-try:
-    from accounts.services.proxy_health import proxy_healthcheck_once
-    ALL_RUNNERS["proxy_healthcheck"] = proxy_healthcheck_once
-except ImportError as _e:  # noqa: BLE001
-    import sys
-    print(f"[run_worker] proxy_healthcheck-стадія недоступна: {_e!r}", file=sys.stderr)
-
 # accounts: перевірка обмежень акаунтів через @SpamBot (services/spam_status_stage.py).
 try:
     from accounts.services.spam_status_stage import spam_status_check_once
@@ -123,7 +110,7 @@ except ImportError as _e:  # noqa: BLE001
 # task.info_retention_days), тож іде звичайним циклом задач (не тут).
 # publish — теж по НЕ-задачах: ітерує PublishConfig-профілі, а не AnalysisTask.
 TASKLESS_STAGES = {"info_collect", "info_healthcheck", "publish", "test_bot", "warm_up",
-                   "proxy_healthcheck", "spam_status_check"}
+                   "spam_status_check"}
 
 
 class Command(BaseCommand):

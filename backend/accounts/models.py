@@ -191,6 +191,10 @@ class TelegramAccount(models.Model):
     transport_failures = models.PositiveIntegerField(
         default=0, verbose_name="Транспортних збоїв поспіль",
         help_text="Проксі не зʼєднує / таймаут. Скидається успішною операцією.")
+    resolve_failures = models.PositiveIntegerField(
+        default=0, verbose_name="Відмов резолву поспіль",
+        help_text="Кожна наступна відмова подовжує паузу резолву (6 → 12 → 24 год); "
+                  "успішний резолв скидає.")
     resolve_exhausted_until = models.DateTimeField(
         null=True, blank=True, verbose_name="Резолв юзернеймів вичерпано до",
         help_text="«No user has X as username» — добовий ліміт резолву; акаунт "

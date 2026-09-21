@@ -11,7 +11,8 @@ from django.db.models import Q
 from django.utils import timezone as djtz
 
 from ..models import TestBotJob
-from .telegram_client import TelegramUserClient
+from . import registry
+from .managed import gw_result as _gw_result
 
 LOCK_TIMEOUT = timedelta(minutes=10)
 RETRY_DELAYS = [30, 60, 90]  # секунд, після 1-ї/2-ї/3-ї помилки; 4-та — вже failed остаточно
@@ -53,9 +54,8 @@ def test_bot_once() -> bool:
     if not job:
         return False
 
-    res = TelegramUserClient.test_bot_flow_sync(
-        job.account, job.bot_username, feedback_text=job.feedback_text,
-    )
+    res = _gw_result(lambda: registry.get(job.account_id).test_bot(
+        job.bot_username, feedback_text=job.feedback_text), steps=[])
     job.result = res
     job.error = res.get("error") or ""
 

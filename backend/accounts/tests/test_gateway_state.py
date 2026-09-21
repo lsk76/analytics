@@ -122,13 +122,26 @@ def test_flood_pauses_exact_seconds(acc):
     assert acc.proxy.fail_count == 0
 
 
-def test_resolve_exhausted_keeps_account_ready(acc):
+def test_resolve_exhausted_keeps_account_ready_and_backs_off(acc):
     now = timezone.now()
     st.apply(acc, st.Outcome.RESOLVE, error='No user has "x" as username', now=now)
     acc.refresh_from_db()
     assert acc.state == "ready" and acc.is_available
-    assert not acc.can_resolve()
-    assert acc.resolve_exhausted_until == now + timedelta(hours=24)
+    assert not acc.can_resolve() and acc.resolve_failures == 1
+    assert acc.resolve_exhausted_until == now + timedelta(hours=6)
+    st.apply(acc, st.Outcome.RESOLVE, now=now)
+    acc.refresh_from_db()
+    assert acc.resolve_exhausted_until == now + timedelta(hours=12)
+    st.apply(acc, st.Outcome.RESOLVE, now=now)
+    st.apply(acc, st.Outcome.RESOLVE, now=now)
+    acc.refresh_from_db()
+    assert acc.resolve_exhausted_until == now + timedelta(hours=24)    # кап
+    st.apply(acc, st.Outcome.OK, now=now)                               # ok БЕЗ резолву
+    acc.refresh_from_db()
+    assert acc.resolve_failures == 4 and not acc.can_resolve()
+    st.apply(acc, st.Outcome.OK, meta={"resolved": True}, now=now)     # резолв удався
+    acc.refresh_from_db()
+    assert acc.resolve_failures == 0 and acc.can_resolve()
 
 
 def test_deauth_and_banned_drop_authentication(acc):

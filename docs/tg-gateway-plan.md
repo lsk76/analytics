@@ -1,7 +1,9 @@
 # Telegram Gateway — план переїзду на централізовану роботу з акаунтами
 
-Статус: **план, погоджено 2026-09-19**. Реалізація локально → тести → одне
-вікно cutover на проді (20–30 хв зупинки) → відкат за потреби.
+Статус: **кроки 1–6 реалізовано 2026-09-19** (код, тести, compose, доки);
+далі — локальна інтеграція §7 і cutover §8. Не переносили в gateway (legacy,
+дозволено тестом-запобіжником): `monitor_sample_collect.py` (ad-hoc збір по
+датах), `tdata_import.py` (офлайн-конвертація сесії, без мережі).
 
 ## 1. Проблема
 
@@ -160,7 +162,8 @@ registry.pinned_for(obj) -> ManagedAccount | None    # obj: Source / MonitorChat
 | transport: `ConnectionError`, `Connection refused`, `TimeoutError`, `Server closed` | `transport_failures++`; проксі `fail_count++`, `last_tested_at=None`; cooldown `5хв × 2^(n-1)` (кап 1 год); при `n ≥ 3` — негайний `repair()` | `cooldown` |
 | `repair()` не зміг (3 регенерації session-id) | проксі `is_working=False`; акаунт | `needs_proxy` |
 | `FloodWaitError(s)` | `cooldown_until = now + s`; операція кидає `RateLimited(s)` | `cooldown` |
-| «No user has … as username» / `UsernameInvalid` / `Cannot find any entity` | `resolve_exhausted_until = now + 24h`; кидає `AccountUnavailable(resolve)` | `ready` (для операцій без резолву) |
+| «No user has … as username» / `UsernameInvalid` / `Cannot find any entity` | `resolve_failures++`, `resolve_exhausted_until = now + min(6год × 2^(n-1), 24год)` (Setting `gateway_resolve_base_sec`/`_cap_sec`); кидає `AccountUnavailable(resolve)`. Споживачі для чату без кешованого хеша беруть лише акаунт із живим резолвом | `ready` (для операцій без резолву) |
+| успішна операція, що резолвила юзернейм (resolve/channel_meta/scan з `username`) | `resolve_failures=0`, `resolve_exhausted_until=None` | `ready` |
 | `AuthKeyUnregistered` / `SessionRevoked` / `AuthKeyDuplicated` / `UserDeactivated` | `is_authenticated=False`, клієнт закрито | `deauthorized` |
 | `UserDeactivatedBan` / `PhoneNumberBanned` | те саме | `banned` |
 | оператор: `replace_proxy` → `check_alive` ok | `transport_failures=0` | `ready` |

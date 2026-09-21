@@ -300,3 +300,13 @@ def test_http_call_and_errors(acc, fake):
             r = await (await c.post(f"/accounts/{acc.id}/invalidate")).json()
             assert r["ok"] and h["pool"]["connected"] == 1
     run(go())
+
+
+def test_did_resolve_detection():
+    assert lv._did_resolve("resolve", {"handle": "chan"}, {}) is True
+    assert lv._did_resolve("resolve", {"handle": "-100123"}, {}) is False
+    chats = [{"key": 1, "entity": {"username": "a"}}, {"key": 2, "entity": {"channel_id": 1, "access_hash": 2}}]
+    assert lv._did_resolve("scan", {"chats": chats}, [{"key": 1, "error": None}, {"key": 2}]) is True
+    assert lv._did_resolve("scan", {"chats": chats}, [{"key": 1, "error": "ChannelPrivate"}]) is False
+    assert lv._did_resolve("scan", {"chats": chats[1:]}, [{"key": 2}]) is False
+    assert lv._did_resolve("get_me", {}, {}) is False

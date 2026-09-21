@@ -31,6 +31,35 @@ STAGE_WORKER = {
 }
 
 
+def _gateway_health(acc) -> list:
+    """Живий /health gateway + зріз транспортних збоїв за годину з БД."""
+    import httpx
+
+    from accounts.services.managed import gateway_url
+    rows = []
+    try:
+        h = httpx.get(f"{gateway_url()}/health", timeout=5).json()
+        pool = h.get("pool") or {}
+        up = int(pool.get("uptime_sec") or 0)
+        rows.append(("стан", f"живий, аптайм {up // 3600}год {(up % 3600) // 60}хв, "
+                             f"RSS {h.get('rss_mb')} МБ"))
+        rows.append(("клієнтів", f"підключено {pool.get('connected', 0)} "
+                                 f"(бачив {pool.get('accounts_seen', 0)}), зайнято {pool.get('locked', 0)}"))
+        rows.append(("операцій", f"ok {pool.get('ops_ok', 0)}, збоїв {pool.get('ops_failed', 0)}, "
+                                 f"у черзі ремонту {pool.get('repair_pending', 0)}"))
+    except Exception as e:  # noqa: BLE001
+        rows.append(("стан", f"❌ НЕДОСТУПНИЙ ({type(e).__name__}) — увесь Telegram-трафік стоїть"))
+    hour_ago = timezone.now() - timedelta(hours=1)
+    rows.append(("транспортних збоїв за годину",
+                 acc.filter(transport_failures__gt=0, updated_at__gte=hour_ago).count() or "—"))
+    rows.append(("резолв вичерпано (до 24 год)",
+                 acc.filter(resolve_exhausted_until__gt=timezone.now()).count() or "—"))
+    rows.append(("у cooldown / needs_proxy",
+                 f"{acc.filter(state='cooldown', cooldown_until__gt=timezone.now()).count()} / "
+                 f"{acc.filter(state='needs_proxy').count()}"))
+    return rows
+
+
 @tool("service_health", group="service")
 def service_health():
     """Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.
@@ -117,11 +146,17 @@ def service_health():
     spam = dict(acc.filter(is_active=True).order_by().values_list("spam_status")
                 .annotate(n=Count("id")))
     px = Proxy.objects.filter(is_active=True)
+    states = dict(acc.filter(is_active=True).order_by().values_list("state")
+                  .annotate(n=Count("id")))
     parts.append(fmt.section("Telegram-акаунти", fmt.kv([
         ("акаунтів", f"{a_active} активних із {a_total}, авторизованих {a_auth}"),
+        ("стан (gateway)", ", ".join(f"{k}: {v}" for k, v in sorted(states.items())) or "—"),
         ("SpamBot", ", ".join(f"{k}: {v}" for k, v in sorted(spam.items())) or "—"),
         ("проксі", f"{px.filter(is_working=True).count()} робочих із {px.count()} активних"),
     ])))
+
+    # --- tg-gateway ---------------------------------------------------------
+    parts.append(fmt.section("tg-gateway", fmt.kv(_gateway_health(acc))))
 
     # --- джерела інформпростору --------------------------------------------
     # «Прострочений полінг» рахуємо ЛИШЕ по тих, кого воркер реально бере: у

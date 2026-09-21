@@ -80,6 +80,21 @@ def _apply(account, outcome, meta, error):
 _setting_int_async = sync_to_async(_setting_int)
 
 
+def _did_resolve(op: str, kwargs: dict, result) -> bool:
+    """Чи операція успішно пройшла через резолв юзернейма (не хеш і не id):
+    тоді ліміт резолву акаунта точно живий і паузу можна зняти."""
+    if op in ("resolve", "channel_meta"):
+        return not str(kwargs.get("handle", "")).lstrip("-").isdigit()
+    if op in ("scan", "search"):
+        by_key = {r.get("key"): r for r in (result or [])} if isinstance(result, list) else {}
+        for ch in kwargs.get("chats") or []:
+            ent = ch.get("entity") or {}
+            if (ent.get("username") or ent.get("linked_parent")) \
+                    and not (by_key.get(ch.get("key")) or {}).get("error"):
+                return True
+    return False
+
+
 def build_client(account) -> TelegramClient:
     """Клієнт ЛИШЕ через проксі акаунта. Немає робочої — GatewayError, не
     фолбек на IP сервера (саме так горіли сесії: один auth key з двох IP)."""
@@ -207,7 +222,8 @@ class LiveAccount:
             error_for_state = e
         if error_for_state is None:
             self.ops_ok += 1
-            await _apply(account, st.Outcome.OK, {}, "")
+            await _apply(account, st.Outcome.OK,
+                         {"resolved": _did_resolve(op, kwargs, result)}, "")
             await _save_fields(self.id, last_used_at=djtz.now())
             return result
 

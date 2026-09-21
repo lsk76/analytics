@@ -1,195 +1,177 @@
-"""Telegram-адаптер: watermark min_id, backfill, url, handle-parse, FloodWait."""
-from datetime import datetime, timezone
-
+"""Telegram-адаптер infospace поверх registry/ManagedAccount (gateway замокано)."""
 import pytest
+from django.utils import timezone
 
-from analysis.services.infospace.adapters import get_adapter, telegram
+from accounts.models import Proxy, TelegramAccount
+from accounts.services import registry
+from accounts.services.managed import AccountUnavailable, ManagedAccount
+from accounts.services.managed import RateLimited as GwRateLimited
+from accounts.services.managed import TelegramOpError
+from analysis.models import Channel, Source
+from analysis.services.infospace.adapters import telegram
 from analysis.services.infospace.adapters.base import RateLimited
 from analysis.services.infospace.adapters.telegram import TelegramAdapter
 
-
-class _Src:
-    def __init__(self, url="https://t.me/ulan_smi", poll_cursor=None, config=None):
-        self.url = url
-        self.poll_cursor = poll_cursor or {}
-        self.config = config or {}
-        self.tg_account = None
+pytestmark = pytest.mark.django_db
 
 
-class _Acct:
-    id = 1
-    is_authenticated = True
-    proxy = None
+@pytest.fixture
+def accounts(django_user_model):
+    u = django_user_model.objects.create(username="tg-owner")
+    out = []
+    for i in (1, 2):
+        p = Proxy.objects.create(proxy_string=f"h:{i}:u:p")
+        out.append(TelegramAccount.objects.create(user=u, phone_number=f"+{i}",
+                                                  is_authenticated=True, proxy=p))
+    TelegramAccount.objects.create(user=u, phone_number="+3", is_authenticated=False)
+    return out
 
 
-def _msgs(ids):
-    return [{"id": i, "text": f"повідомлення {i}",
-             "date": datetime(2026, 7, 8, tzinfo=timezone.utc)} for i in ids]
+class _FakeManaged(ManagedAccount):
+    """fetch_history без HTTP: результат/виняток задає тест."""
+    msgs, exc, calls = [], None, []
+
+    def fetch_history(self, handle, min_id=0, limit=50, reverse=False, peer_sink=None):
+        _FakeManaged.calls.append(dict(id=self.id, handle=handle, min_id=min_id,
+                                       limit=limit, reverse=reverse))
+        if _FakeManaged.exc:
+            raise _FakeManaged.exc
+        if peer_sink is not None:
+            peer_sink.update({"id": 555, "access_hash": 777})
+        return list(_FakeManaged.msgs)
 
 
-def _patch(monkeypatch, hist, acct=_Acct()):
-    monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: acct)
-    monkeypatch.setattr(telegram, "_fetch_history",
-                        lambda account, handle, min_id, limit, reverse, peer_sink=None: hist)
+@pytest.fixture
+def fake(monkeypatch):
+    _FakeManaged.msgs, _FakeManaged.exc, _FakeManaged.calls = [], None, []
+    monkeypatch.setattr(registry, "ManagedAccount", _FakeManaged)
+    return _FakeManaged
 
 
-def test_telegram_registered():
-    assert isinstance(get_adapter("telegram"), TelegramAdapter)
-
-
-@pytest.mark.parametrize("url,expected", [
-    ("https://t.me/ulan_smi", "ulan_smi"),
-    ("https://t.me/s/ulan_smi", "ulan_smi"),
-    ("@ulan_smi", "ulan_smi"),
-    ("ulan_smi", "ulan_smi"),
-])
-def test_handle_parse(url, expected):
-    assert TelegramAdapter._handle(_Src(url=url)) == expected
-
-
-def test_first_poll_sets_watermark_and_urls(monkeypatch):
-    src = _Src()
-    _patch(monkeypatch, _msgs([28919, 28920, 28921]))
-    items = TelegramAdapter().fetch(src)
-    assert len(items) == 3
-    assert items[0].url == "https://t.me/ulan_smi/28919"
-    assert items[0].text == "повідомлення 28919"
-    assert items[0].posted_at.year == 2026
-    assert src.poll_cursor["last_msg_id"] == 28921         # максимум id
-
-
-def test_second_poll_uses_min_id_and_reverse(monkeypatch):
-    src = _Src(poll_cursor={"last_msg_id": 28921})
-    captured = {}
-
-    def _fh(account, handle, min_id, limit, reverse, peer_sink=None):
-        captured.update(min_id=min_id, limit=limit, reverse=reverse)
-        return _msgs([28922])
-    monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: _Acct())
-    monkeypatch.setattr(telegram, "_fetch_history", _fh)
-    items = TelegramAdapter().fetch(src)
-    assert captured["min_id"] == 28921               # watermark → min_id
-    assert captured["reverse"] is True               # догін суцільно (без діри)
-    assert captured["limit"] == 100                  # max_items на подальших полінгах
-    assert src.poll_cursor["last_msg_id"] == 28922
-
-
-def test_first_poll_uses_backfill_limit_and_no_reverse(monkeypatch):
-    src = _Src(config={"backfill_limit": 5})          # порожній poll_cursor → перший полінг
-    captured = {}
-
-    def _fh(account, handle, min_id, limit, reverse, peer_sink=None):
-        captured.update(limit=limit, reverse=reverse, min_id=min_id)
-        return _msgs([1, 2])
-    monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: _Acct())
-    monkeypatch.setattr(telegram, "_fetch_history", _fh)
-    TelegramAdapter().fetch(src)
-    assert captured["limit"] == 5                      # backfill_limit
-    assert captured["reverse"] is False               # найновіші N
-    assert captured["min_id"] == 0
-
-
-def test_fetch_history_converts_floodwait_to_ratelimited(monkeypatch):
-    """Реальна конверсія telethon FloodWaitError → RateLimited у _fetch_history."""
-    from telethon.errors import FloodWaitError
-    from accounts.services import telegram_client as tc
-
-    class _FW(FloodWaitError):
-        def __init__(self):            # без super().__init__ — не тягнемо RPC-payload
-            self.seconds = 33
-
-    async def _boom(*a, **k):
-        raise _FW()
-    monkeypatch.setattr(tc.TelegramUserClient, "fetch_history", _boom)
-    with pytest.raises(RateLimited) as ei:
-        telegram._fetch_history(_Acct(), "ulan_smi", 0, 5, False)
-    assert ei.value.retry_after == 33
-
-
-def test_empty_channel_keeps_watermark(monkeypatch):
-    src = _Src(poll_cursor={"last_msg_id": 100})
-    _patch(monkeypatch, [])
-    assert TelegramAdapter().fetch(src) == []
-    assert src.poll_cursor["last_msg_id"] == 100
-
-
-def test_floodwait_propagates_as_ratelimited(monkeypatch):
-    src = _Src()
-    monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: _Acct())
-
-    def _boom(account, handle, min_id, limit, reverse, peer_sink=None):
-        raise RateLimited(42)
-    monkeypatch.setattr(telegram, "_fetch_history", _boom)
-    with pytest.raises(RateLimited) as ei:
-        TelegramAdapter().fetch(src)
-    assert ei.value.retry_after == 42
-
-
-def test_no_account_raises(monkeypatch):
-    monkeypatch.setattr(TelegramAdapter, "_account", lambda self, s: None)
-    with pytest.raises(RuntimeError):
-        TelegramAdapter().fetch(_Src())
-
-
-@pytest.mark.django_db
-def test_account_selection_prefers_source_then_pool():
-    """_account: явний авторизований акаунт джерела > перший авторизований із пулу."""
-    from django.contrib.auth import get_user_model
-    from accounts.models import TelegramAccount
-    from analysis.models import Source
-
-    u = get_user_model().objects.create(username="tg-owner")
-    a1 = TelegramAccount.objects.create(user=u, phone_number="+1", is_authenticated=True)
-    a2 = TelegramAccount.objects.create(user=u, phone_number="+2", is_authenticated=True)
-    unauth = TelegramAccount.objects.create(user=u, phone_number="+3", is_authenticated=False)
+def test_handle_parsing():
     ad = TelegramAdapter()
+    for url, exp in [("https://t.me/ulan_smi", "ulan_smi"), ("https://t.me/s/ulan_smi", "ulan_smi"),
+                     ("@ulan_smi", "ulan_smi"), ("https://t.me/ulan_smi/123", "ulan_smi")]:
+        assert ad._handle(Source(url=url)) == exp
 
-    # пул: перший авторизований (a1)
-    s = Source(kind="telegram", url="https://t.me/x")
-    assert ad._account(s) == a1
-    # явно призначений авторизований — має пріоритет
+
+def test_account_selection_prefers_pinned_then_pool(accounts, fake):
+    a1, a2 = accounts
+    ad = TelegramAdapter()
+    s = Source(kind="telegram", url="https://t.me/x", id=10)
+    assert ad._account(s).id in (a1.id, a2.id)
+    assert ad._account(s).id == ad._account(s).id                  # стабільно
+    s.poll_cursor = {"acc_shift": 1}
+    assert ad._account(s).id != ad._account(Source(kind="telegram", url="u", id=10)).id
     s.tg_account = a2
-    assert ad._account(s) == a2
-    # призначений НЕавторизований → фолбек на пул (a1)
-    s.tg_account = unauth
-    assert ad._account(s) == a1
-    # немає жодного авторизованого → None
-    TelegramAccount.objects.update(is_authenticated=False)
-    s.tg_account = None
-    assert ad._account(s) is None
+    assert ad._account(s).id == a2.id                               # pinned
+    a2.state = "deauthorized"; a2.save()
+    s.tg_account = a2
+    assert ad._account(s).id == a1.id                               # pinned мертвий → пул
 
 
-@pytest.mark.django_db
-def test_fetch_history_with_proxy_account_no_sync_only_error(monkeypatch):
-    """Регресія 2026-09-05: акаунт із проксі (FK) → _client читав account.proxy
-    усередині корутини → SynchronousOnlyOperation, увесь TG-полінг лежав."""
-    from django.contrib.auth import get_user_model
-    from accounts.models import Proxy, TelegramAccount
-    from accounts.services import telegram_client as tc
+def test_account_without_resolve_is_skipped_unless_hash_cached(accounts, fake):
+    from datetime import timedelta
+    a1, a2 = accounts
+    ch = Channel.objects.create(username="x", title="x", tg_id=1)
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    ad = TelegramAdapter()
+    first = ad._account(s, ch)
+    first_row = TelegramAccount.objects.get(pk=first.id)
+    first_row.resolve_exhausted_until = timezone.now() + timedelta(hours=1)
+    first_row.save()
+    other = a2 if first.id == a1.id else a1
+    assert ad._account(s, ch).id == other.id                       # без хеша → хто резолвить
+    ch.raw_meta = {"access_hash_by_acc": {str(first.id): 9}}
+    ch.save()
+    assert ad._account(s, ch).id == first.id                       # є хеш → резолв не потрібен
+    TelegramAccount.objects.update(resolve_exhausted_until=timezone.now() + timedelta(hours=1))
+    ch.raw_meta = {}
+    assert ad._account(s, ch) is None                              # ніхто не резолвить → чекати
 
-    u = get_user_model().objects.create(username="tg-proxy-owner")
-    px = Proxy.objects.create(proxy_string="127.0.0.1:1080:u:p")
-    TelegramAccount.objects.create(user=u, phone_number="+7", api_id="1", api_hash="h",
-                                   is_authenticated=True, proxy=px)
-    acct = TelegramAccount.objects.get(phone_number="+7")   # свіжий, FK не в кеші
-    seen = {}
 
-    class _FakeClient:
-        def __init__(self, session, api_id, api_hash, proxy=None, **kw):
-            seen["proxy"] = proxy
+def test_no_accounts_is_rate_limited_not_failure(fake):
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    with pytest.raises(RateLimited):
+        TelegramAdapter().fetch(s)
 
-        async def connect(self):
-            pass
 
-        async def disconnect(self):
-            pass
+def test_fetch_first_poll_then_watermark(accounts, fake):
+    now = timezone.now()
+    fake.msgs = [{"id": 5, "text": "a", "date": now, "media_kind": "photo"},
+                 {"id": 7, "text": "b", "date": now, "media_kind": None}]
+    s = Source.objects.create(kind="telegram", url="https://t.me/ulan_smi", name="u")
+    items = TelegramAdapter().fetch(s)
+    assert [i.external_id for i in items] == ["5", "7"]
+    assert items[0].meta["media"] == {"kind": "photo", "chat": "ulan_smi", "mid": 5}
+    assert items[0].url == "https://t.me/ulan_smi/5"
+    assert s.poll_cursor["last_msg_id"] == 7
+    assert fake.calls[-1]["reverse"] is False                      # backfill: найновіші
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["min_id"] == 7 and fake.calls[-1]["reverse"] is True
 
-        async def iter_messages(self, entity, **kw):
-            yield type("M", (), {"id": 7, "message": "текст", "date": None})()
 
-    monkeypatch.setattr(tc, "TelegramClient", _FakeClient)
-    out = telegram._fetch_history(acct, "ulan_smi", 0, 5, False)
-    # media_kind — позначка для публікації: на що послатись, щоб винести фото/
-    # відео поста в канал. None = медіа на повідомленні немає.
-    assert out == [{"id": 7, "text": "текст", "date": None, "media_kind": None}]
-    assert seen["proxy"][1:3] == ("127.0.0.1", 1080)
+def test_fetch_remembers_peer_per_account_and_reuses_it(accounts, fake):
+    Channel.objects.create(username="ulan_smi", title="u")
+    s = Source.objects.create(kind="telegram", url="https://t.me/ulan_smi", name="u")
+    TelegramAdapter().fetch(s)
+    ch = Channel.objects.get(username="ulan_smi")
+    acc_id = fake.calls[-1]["id"]
+    assert fake.calls[-1]["handle"] == "ulan_smi"                   # перший раз — резолв
+    assert ch.raw_meta["access_hash_by_acc"] == {str(acc_id): 777} and ch.tg_id == 555
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["handle"] == {"channel_id": 555, "access_hash": 777}  # далі — без
+    # інший акаунт хеш не бере: він персональний
+    s.tg_account = accounts[1] if accounts[0].id == acc_id else accounts[0]
+    s.save()
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["handle"] == "ulan_smi"
+
+
+def test_fetch_creates_channel_row_for_cache(accounts, fake):
+    s = Source.objects.create(kind="telegram", url="https://t.me/newchan", name="Новий")
+    assert not Channel.objects.filter(username="newchan").exists()
+    TelegramAdapter().fetch(s)
+    ch = Channel.objects.get(username="newchan")
+    assert ch.tg_id == 555 and ch.title == "Новий" and str(fake.calls[-1]["id"]) in ch.raw_meta["access_hash_by_acc"]
+    fake.exc = TelegramOpError("ChannelPrivateError")
+    s2 = Source.objects.create(kind="telegram", url="https://t.me/deadchan", name="d")
+    with pytest.raises(TelegramOpError):
+        TelegramAdapter().fetch(s2)
+    assert not Channel.objects.filter(username="deadchan").exists()     # мертвий — не плодимо
+
+
+def test_account_unavailable_rotates_and_rate_limits(accounts, fake):
+    fake.exc = AccountUnavailable("transport", "proxy dead", retry_after=300)
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    with pytest.raises(RateLimited) as ei:
+        TelegramAdapter().fetch(s)
+    assert ei.value.retry_after == 300
+    s.refresh_from_db()
+    assert s.poll_cursor["acc_shift"] == 1                          # інший акаунт
+    assert s.consecutive_failures == 0                              # не збій джерела
+
+
+def test_pinned_account_unavailable_keeps_binding(accounts, fake):
+    fake.exc = AccountUnavailable("resolve")
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x",
+                              tg_account=accounts[0])
+    with pytest.raises(RateLimited):
+        TelegramAdapter().fetch(s)
+    s.refresh_from_db()
+    assert "acc_shift" not in (s.poll_cursor or {}) and s.tg_account_id == accounts[0].id
+
+
+def test_gateway_rate_limited_passes_seconds(accounts, fake):
+    fake.exc = GwRateLimited(77)
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    with pytest.raises(RateLimited) as ei:
+        TelegramAdapter().fetch(s)
+    assert ei.value.retry_after == 77
+
+
+def test_chat_error_is_source_failure(accounts, fake):
+    fake.exc = TelegramOpError("ChannelPrivateError: x")
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    with pytest.raises(TelegramOpError):
+        TelegramAdapter().fetch(s)

@@ -4,7 +4,8 @@ from rest_framework.response import Response
 
 from .models import Proxy, TelegramAccount
 from .serializers import ProxySerializer, TelegramAccountSerializer
-from .services.telegram_client import TelegramUserClient
+from .services import registry
+from .services.managed import gw_result
 
 
 class ProxyViewSet(viewsets.ModelViewSet):
@@ -25,11 +26,11 @@ class TelegramAccountViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def send_code(self, request, pk=None):
         account = self.get_object()
-        return Response(TelegramUserClient.send_code_sync(account))
+        return Response(gw_result(lambda: registry.get(account.id).send_code()))
 
     @action(detail=True, methods=["post"])
     def verify_code(self, request, pk=None):
         account = self.get_object()
-        res = TelegramUserClient.verify_code_sync(
-            account, request.data.get("code", ""), request.data.get("password"))
+        res = gw_result(lambda: registry.get(account.id).verify_code(
+            request.data.get("code", ""), request.data.get("password")))
         return Response(res)

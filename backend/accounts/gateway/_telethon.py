@@ -111,7 +111,8 @@ async def scan(ctx, chats: list[dict], patterns: list[str] | None = None,
                media: dict | None = None) -> list[dict]:
     """ЄДИНА операція читання (план §10).
 
-    chats: [{"key", "entity": spec, "min_id", "limit", "reverse"}].
+    chats: [{"key", "entity": spec, "min_id", "limit", "reverse",
+             "forward_media": bool (дефолт True, діє лише разом із media)}].
     patterns: регулярки; порожньо = повертати всі текстові повідомлення.
     media: None | {"forward_to": peer, "per_tick": N, "pause": сек,
                    "which": "all"|"matched"} — пересилати фото/відео цим же
@@ -174,7 +175,7 @@ async def scan(ctx, chats: list[dict], patterns: list[str] | None = None,
                     else:
                         matched = True
                 if (media_peer is not None and kind and row["n_media"] < per_tick
-                        and (matched or not only_matched)):
+                        and ch.get("forward_media", True) and (matched or not only_matched)):
                     try:
                         await client.forward_messages(media_peer, m.id, entity)
                         row["n_media"] += 1

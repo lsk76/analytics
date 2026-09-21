@@ -14,7 +14,8 @@ from django.db.models import F, Q
 from django.utils import timezone as djtz
 
 from ..models import TelegramAccount
-from .telegram_client import TelegramUserClient
+from . import registry
+from .managed import gw_result as _gw_result
 
 CHECK_INTERVAL = timedelta(hours=24)
 
@@ -43,7 +44,7 @@ def spam_status_check_once() -> bool:
     if not acc:
         return False
 
-    res = TelegramUserClient.check_spam_status_sync(acc)
+    res = _gw_result(lambda: registry.get(acc.id).spam_status(), status="unknown")
     acc.spam_status = res.get("status", "unknown")
     acc.spam_status_detail = (res.get("detail") or "")[:300]
     acc.spam_status_checked_at = djtz.now()

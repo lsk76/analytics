@@ -182,7 +182,36 @@ backend/_dir/               # host-only (gitignored): ad-hoc скрипти, к�
 docs/                       # ARCHITECTURE, comments-…, ethnic-…, econ-… pipelines
 ```
 
+### Telegram-акаунти: tg-gateway (з 2026-09-19)
+
+Весь Telethon живе в ОДНОМУ процесі `tg-gateway` (`manage.py run_tg_gateway`,
+`accounts/gateway/`): 1 довгоживучий клієнт на акаунт + `asyncio.Lock`, стейт-машина
+(`state.py`: ready/cooldown/needs_proxy/deauthorized/banned), фоновий ремонт проксі
+(`repair.py`). Споживачі (збирач infospace, стрім tgsearch, публікація, warm-up,
+spam-status, адмінка, MCP) ходять по HTTP через `accounts/services/managed.py`
+(`ManagedAccount`) і беруть акаунт лише з `accounts/services/registry.py`
+(`get(id)` / `pick(role, key, shift)` / `pinned_for(obj)`; ролі collector/stream/
+publisher/service, `Setting registry_roles_json`). Три винятки для споживача:
+`RateLimited` (зачекати), `AccountUnavailable` (взяти інший), `TelegramOpError`
+(вина цілі — рахувати як збій). Єдина операція читання — `scan` (чати від
+watermark + регулярки + медіа-форвард тим самим акаунтом); `fetch_history` —
+її окремий випадок. **Резолв юзернейма — один раз на пару акаунт+чат:** хеш кешується
+в `Channel.raw_meta.access_hash_by_acc` (`analysis/services/peers.py`), споживачі
+передають gateway хеш, а юзернейм — лише вперше; чат без хеша дістається лише акаунту
+з живим резолвом (`registry.candidates(..., need_resolve=True)`). Налаштування: `gateway_cooldown_base_sec`, `gateway_cooldown_cap_sec`,
+`gateway_repair_after`, `gateway_repair_interval_sec`, `gateway_resolve_base_sec`,
+`gateway_resolve_cap_sec`, `gateway_repair_proactive`
+(0/1; на дев-стеку з копією прод-акаунтів НЕ вмикати), `gateway_lock_wait_sec`,
+`gateway_idle_disconnect_sec`. План і cutover: `docs/tg-gateway-plan.md`.
+
 ## 6. Граблі (перевірені кров'ю)
+
+- **Telethon поза `accounts/gateway/` — заборонено** (`test_no_direct_telethon`).
+  Прямий `TelegramClient` у споживачі = той самий auth key з двох IP =
+  `AuthKeyDuplicated`, сесія згорає назавжди. Без робочої проксі gateway
+  НЕ підключає акаунт (фолбек на IP сервера видалено навмисно).
+- **Дев-БД — копія прод-акаунтів.** Будь-який вхід у Telegram з локалі
+  (у т.ч. `gateway_repair_proactive=1`) паралельно з продом ризикує вбити сесію.
 
 - **TeleZip має ГЛИБИНУ індексу** (`/v4/stats` → `searchDateLimit`; 2026-09-18 —
   з 2025-10-01, 352 дні): старіше НЕ шукається зовсім, відповідь просто порожня.
