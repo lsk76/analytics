@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from asgiref.sync import sync_to_async
 from django.utils import timezone as djtz
 from telethon import TelegramClient
+from telethon.errors import TypeNotFoundError
 from telethon.sessions import StringSession
 
 from . import _telethon, state as st
@@ -107,6 +108,9 @@ def build_client(account) -> TelegramClient:
         int(account.api_id), account.api_hash,
         proxy=to_telethon(p.proxy_string, p.proxy_type),
         connection_retries=3, retry_delay=2, timeout=20,
+        # апдейти gateway не читає: без цього цикл апдейтів після кожного
+        # реконекту робив запити старим шаром (TypeNotFoundError) і ріс у памʼяті
+        receive_updates=False,
         **account.client_kwargs(),
     )
 
@@ -213,7 +217,19 @@ class LiveAccount:
                 raise AuthKeyUnregisteredError(request=None)
             ctx = OpContext(client=client, account=account,
                             save=lambda **f: _save_fields(self.id, **f))
-            result = await asyncio.wait_for(fn(ctx, **kwargs), timeout=timeout)
+            try:
+                result = await asyncio.wait_for(fn(ctx, **kwargs), timeout=timeout)
+            except TypeNotFoundError as e:
+                # зʼєднання після авто-реконекту без InvokeWithLayer: сервер шле
+                # обʼєкти старого шару. Свіжий клієнт домовляється заново — один
+                # повтор, далі вже справжня помилка
+                logger.warning("acc=#%s op=%s: TypeNotFound (%s) — перепідключаю і повторюю",
+                               self.id, op, str(e)[:60])
+                await self.drop()
+                client = await self._ensure_client(account)
+                ctx = OpContext(client=client, account=account,
+                                save=lambda **f: _save_fields(self.id, **f))
+                result = await asyncio.wait_for(fn(ctx, **kwargs), timeout=timeout)
         except GatewayError:
             raise
         except BaseException as e:  # noqa: BLE001 — класифікуємо все, крім наших

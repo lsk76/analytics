@@ -310,3 +310,24 @@ def test_did_resolve_detection():
     assert lv._did_resolve("scan", {"chats": chats}, [{"key": 1, "error": "ChannelPrivate"}]) is False
     assert lv._did_resolve("scan", {"chats": chats[1:]}, [{"key": 2}]) is False
     assert lv._did_resolve("get_me", {}, {}) is False
+
+
+def test_type_not_found_reconnects_and_retries_once(acc, fake):
+    from telethon.errors import TypeNotFoundError
+    calls = {"n": 0}
+
+    async def flaky(ctx, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TypeNotFoundError(0x31774388, b"")
+        return "ok"
+    monkeypatch_ops = _telethon.OPS
+    monkeypatch_ops["flaky"] = (flaky, 5, True)
+    try:
+        live = lv.LiveAccount(acc.id)
+        assert run(live.call("flaky")) == "ok"
+        assert calls["n"] == 2 and len(FakeClient.instances) == 2   # новий клієнт
+        acc.refresh_from_db()
+        assert acc.state == "ready" and acc.transport_failures == 0
+    finally:
+        monkeypatch_ops.pop("flaky", None)

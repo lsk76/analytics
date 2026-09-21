@@ -19,7 +19,7 @@ import random
 import re
 from datetime import timezone as _tz
 
-from telethon.errors import (ChannelPrivateError, FloodWaitError,
+from telethon.errors import (ChannelPrivateError, FloodWaitError, TypeNotFoundError,
                              UsernameInvalidError, UsernameNotOccupiedError)
 from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
 from telethon.tl.types import InputPeerChannel, MessageMediaDocument, MessageMediaPhoto
@@ -196,7 +196,10 @@ async def scan(ctx, chats: list[dict], patterns: list[str] | None = None,
                 })
             if row["resolved"] is None and not isinstance(entity, InputPeerChannel):
                 row["resolved"] = await _input_peer_meta(client, entity)
-        except FloodWaitError:
+        except (FloodWaitError, TypeNotFoundError):
+            # TypeNotFound — не вина чату: зʼєднання після реконекту лишилось без
+            # домовленого шару (сервер шле обʼєкти старого шару). live.py
+            # перебудує клієнт і повторить
             raise
         except (ChannelPrivateError, UsernameInvalidError, UsernameNotOccupiedError,
                 ValueError) as e:
@@ -243,7 +246,7 @@ async def search(ctx, chats: list[dict], terms: list[str], since: str | None = N
                         "term": term,
                     }
                 await asyncio.sleep(pause)
-        except FloodWaitError:
+        except (FloodWaitError, TypeNotFoundError):
             raise
         except Exception as e:  # noqa: BLE001
             row["error"] = f"{type(e).__name__}: {str(e)[:90]}"
