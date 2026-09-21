@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit
 
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 USER_AGENT = DEFAULT_USER_AGENT
 SEEN_CAP = 500
 HTTP_TIMEOUT = 20.0
+# Бюджет часу на один полінг: статті тягнемо послідовно (~3 с кожна), а стадія
+# рве fetch на 120 с. Без бюджету джерело з ≥40 новими статтями НІКОЛИ не
+# встигало: таймаут → усе втрачено → seen не рухається → те саме наступного
+# разу (amur.info так стояв 5 тижнів). Тепер віддаємо, що встигли; решта —
+# наступним полінгом, бо у watermark лише завантажені.
+TIME_BUDGET_SEC = 90.0
 # Евристика дефолтного discovery: id статті — це прогін ≥4 цифр у href
 # (напр. /news/16/525591/ або /2026/04/…), а НЕ короткі id розділів (/news/19/),
 # з яких trafilatura витягла б cookie-банер замість статті. Сайти зі
@@ -160,7 +167,12 @@ class WebAdapter(BaseSourceAdapter):
 
         items: list[RawItem] = []
         done: list[str] = []   # у watermark лише УСПІШНО завантажені (див. рев'ю)
-        for url in fresh:
+        deadline = time.monotonic() + TIME_BUDGET_SEC
+        for i, url in enumerate(fresh):
+            if time.monotonic() > deadline:
+                logger.info("web %s: бюджет %ss вичерпано, %d/%d статей — решта наступним полінгом",
+                            getattr(source, "name", source.url), TIME_BUDGET_SEC, i, len(fresh))
+                break
             try:
                 art = _get(url, opts)
                 data = self._extract(source, url, art)

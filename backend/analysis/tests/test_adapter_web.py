@@ -176,3 +176,27 @@ def test_custom_scraper_via_scraper_key(monkeypatch):
         assert all(i.text == "тіло від кастомного скрапера" for i in items)
     finally:
         SCRAPERS.pop("_test_web", None)
+
+
+def test_time_budget_keeps_partial_progress(monkeypatch):
+    """Повільні статті: віддаємо, що встигли, seen — лише завантажені, решта
+    підтягується наступним полінгом (а не губиться разом із таймаутом стадії)."""
+    import time as _t
+    pages = {LISTING_URL: LISTING, ART1: ARTICLE, ART2: ARTICLE}
+    real = _fake_get(pages)
+
+    def slow_get(url, opts=None):
+        if url != LISTING_URL:
+            _t.sleep(0.05)
+        return real(url, opts)
+    monkeypatch.setattr(web, "_get", slow_get)
+    monkeypatch.setattr(web, "TIME_BUDGET_SEC", 0.03)
+    src = _Src(config={"link_selector": "a.article-link",
+                       "selectors": {"title": "h1.headline", "body": ".article-body",
+                                     "date": "time.pub-date"}})
+    items = WebAdapter().fetch(src)
+    assert len(items) == 1                              # друга стаття — за бюджетом
+    assert src.poll_cursor["seen_ids"] == [items[0].url]
+    monkeypatch.setattr(web, "TIME_BUDGET_SEC", 90.0)
+    items2 = WebAdapter().fetch(src)                     # наступний полінг добирає
+    assert {i.url for i in items2} == {ART1, ART2} - {items[0].url}
