@@ -843,7 +843,7 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     # спільні для обох конвеєрів розділи
     _FS_HEAD = (
         ("Задача", {
-            "fields": ("name", "slug", "description", "pipeline", "is_active"),
+            "fields": ("name", "display_name", "slug", "description", "pipeline", "is_active"),
         }),
     )
     # 📰 ПОШУК ПОДІЙ: етапи

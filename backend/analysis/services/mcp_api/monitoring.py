@@ -528,10 +528,11 @@ def channels_find(query: str, limit: int = 20):
       "chunk_days": "Розмір чанка збору в днях. 0 = не змінювати.",
       "is_active": "Увімкнути/вимкнути задачу. Не передавати = не змінювати.",
       "min_subscribers": "Відсівати канали, менші за це число підписників. -1 = не змінювати, 0 = вимкнути фільтр.",
-      "llm_model": "Перевизначити модель LLM для задачі. Порожньо = не змінювати; повернути дефолт із коду звідси не можна — це робиться в адмінці задачі."})
+      "llm_model": "Перевизначити модель LLM для задачі. Порожньо = не змінювати; повернути дефолт із коду звідси не можна — це робиться в адмінці задачі.",
+      "display_name": "Людська назва секції для простого інтерфейсу (/app/), напр. «Інформпростір регіонів». Порожньо = не змінювати; '-' = очистити (показуватиметься технічна назва)."})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
-                min_subscribers: int = -1, llm_model: str = ""):
+                min_subscribers: int = -1, llm_model: str = "", display_name: str = ""):
     """Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.
 
     Замикає маршрут розвідки: `tz_find(stats=true)` показав, що обсяг здоровий →
@@ -566,6 +567,9 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
     if llm_model:
         t.llm_model = llm_model
         changed.append(f"модель={llm_model}")
+    if display_name:
+        t.display_name = "" if display_name.strip() == "-" else display_name.strip()[:120]
+        changed.append(f"назва для користувача: «{t.human_name}»")
     if not changed:
         return f"#{t.id} {t.slug}: нічого не змінено (жоден параметр не передано)"
     t.save()

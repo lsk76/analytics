@@ -263,6 +263,9 @@ docker compose exec -T web python manage.py shell -c \
   «моніторинг інформпростору» (RSS/сайти/TG-акаунти → Post → AI-скрін → живі Event).
 - `docs/telezip-api.md` — **повний контракт TeleZip API** (v3+v4): ендпоінти,
   поля запиту, межі, глибина індексу, граблі промацування.
+- `docs/simple-ui-design.md` — **простий інтерфейс `/app/`** (`backend/simpleui/`):
+  секція = задача людською назвою (`AnalysisTask.display_name`), світлофор стану,
+  4 графіки, стрічка, шухляда налаштувань лише для читання. Адмінка = експертний режим.
 - `docs/mcp-server.md` — **MCP-сервер керування сервісом** (акаунти ТГ, моніторинги,
   збори, черги, контейнери) — чим користуватись замість разових `manage.py shell`.
 - `docs/telemetrio-vs-telezip.md` — Telemetr.io API: клієнт, квоти, чим він НЕ є

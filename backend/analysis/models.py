@@ -93,6 +93,11 @@ reason ≤120 знаків; для keep без зауважень — порож
 
 class AnalysisTask(models.Model):
     name = models.CharField(max_length=200, verbose_name="Назва")
+    display_name = models.CharField(
+        max_length=120, blank=True, db_default="", verbose_name="Назва для користувача",
+        help_text="Людська назва секції у простому інтерфейсі (/app/), напр. "
+                  "«Інформпростір регіонів». Порожньо = показувати «Назва».",
+    )  # db_default: старий код (INSERT без display_name) не падає у вікні деплою
     slug = models.SlugField(unique=True, verbose_name="Ідентифікатор (slug)")
     description = models.TextField(blank=True, verbose_name="Опис")
     owner = models.ForeignKey(
@@ -397,6 +402,11 @@ class AnalysisTask(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def human_name(self) -> str:
+        """Назва для простого інтерфейсу: display_name, інакше name."""
+        return (self.display_name or "").strip() or self.name
 
 
 # ---------------------------------------------------------------------------

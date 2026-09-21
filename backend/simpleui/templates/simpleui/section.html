@@ -1,0 +1,177 @@
+{% extends "simpleui/base.html" %}
+{% load static %}
+{% block title %}{{ task.human_name }}{% endblock %}
+{% block crumb %} › {{ task.human_name }}{% endblock %}
+{% block content %}
+<h1>{{ task.human_name }}</h1>
+
+{# 1. Світлофор #}
+<div class="card">
+  <div class="status-row">
+    <div>
+      <span class="light {{ status.state }}">{{ status.label }}</span>
+      <div class="note">{{ status.note|capfirst }}{% if status.activity %} · {{ status.activity }}{% endif %}</div>
+      {% for d in status.details %}<div class="soft">{{ d|capfirst }}</div>{% endfor %}
+    </div>
+    <div class="nums">
+      <div class="num"><b>{{ status.today }}</b><span>сьогодні</span></div>
+      <div class="num"><b>{{ status.week }}</b><span>за тиждень</span></div>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" type="button" onclick="document.getElementById('drawer').showModal()">⚙️ Налаштування</button>
+    <a class="btn" href="{% url 'simpleui:collect' task.id %}">⬇️ Зібрати за період</a>
+  </div>
+</div>
+
+{# 2. Період — єдиний контрол #}
+<div class="period">
+  {% for key, label, days in presets %}
+    <a class="{% if period.key == key %}on{% endif %}" href="?period={{ key }}">{{ label }}</a>
+  {% endfor %}
+  <form method="get">
+    <input type="hidden" name="period" value="custom">
+    <input type="date" name="from" value="{{ period.date_from|date:'Y-m-d' }}" aria-label="від">
+    <span>—</span>
+    <input type="date" name="to" value="{{ period.date_to|date:'Y-m-d' }}" aria-label="до">
+    <button type="submit" class="{% if period.key == 'custom' %}on{% endif %}">Свій період</button>
+  </form>
+  <span class="label">{{ period.date_from|date:"d.m.Y" }} — {{ period.date_to|date:"d.m.Y" }}</span>
+</div>
+
+{# 3. Графіки #}
+<div class="grid" id="charts">
+  <div class="card chart-card">
+    <h3>Скільки подій</h3>
+    <p class="hint">по {% if period.gran == 'day' %}днях{% else %}тижнях{% endif %}</p>
+    <div class="chart-box"><canvas id="c-ts"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <h3>Де відбувалося</h3>
+    <p class="hint">регіони з найбільшою кількістю подій</p>
+    <div class="chart-box"><canvas id="c-reg"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <h3>Про що</h3>
+    <p class="hint" id="tags-label"></p>
+    <div class="chart-box"><canvas id="c-tags"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <h3>Хто пише найбільше</h3>
+    <p class="hint">джерела, з яких прийшло найбільше подій</p>
+    <div class="chart-box"><canvas id="c-src"></canvas></div>
+  </div>
+</div>
+
+{# 4. Стрічка #}
+<h2>Останні події <span class="soft" style="font-weight:400">· {{ feed|length }} з {{ period.label }}</span></h2>
+<div class="card">
+  {% if feed %}
+  <ul class="feed">
+    {% for e in feed %}
+    <li><a href="{% url 'simpleui:event' task.id e.id %}?{{ period.query }}">
+      <div class="t">{{ e.title }}</div>
+      <div class="m">
+        <span>{{ e.date|date:"d.m.Y" }}</span>
+        {% if e.region %}<span>{{ e.region }}</span>{% endif %}
+        {% if e.source %}<span>{{ e.source }}</span>{% endif %}
+      </div>
+    </a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <div class="empty">За цей період подій немає.</div>
+  {% endif %}
+</div>
+
+{# Шухляда налаштувань — лише читання #}
+<dialog class="drawer" id="drawer">
+  <div class="inner">
+    <button class="close" type="button" onclick="document.getElementById('drawer').close()" aria-label="Закрити">×</button>
+    <h2>Налаштування</h2>
+    <p style="font-size:1.05rem">{{ overview.sentence }}</p>
+
+    {% if overview.groups %}
+    <h3 style="margin:18px 0 6px">Джерела</h3>
+    {% for g in overview.groups %}
+      <details class="src-group">
+        <summary>{{ g.region }} <span class="soft">· {{ g.items|length }}</span></summary>
+        <ul>{% for s in g.items %}<li>{{ s.name }} <span class="soft">({{ s.kind }})</span></li>{% endfor %}</ul>
+      </details>
+    {% endfor %}
+    {% endif %}
+
+    <h3 style="margin:22px 0 6px">Змінити через асистента</h3>
+    <p class="soft" style="margin-top:0">Скопіюйте фразу і надішліть асистенту. Він усе зробить і підтвердить.</p>
+    {% for p in overview.phrases %}
+      <div class="phrase"><code>{{ p }}</code><button class="btn" type="button" onclick="copyPhrase(this)">Скопіювати</button></div>
+    {% endfor %}
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'analysis/vendor/chart.umd.min.js' %}"></script>
+<script id="chart-data" type="application/json">{{ chart_json|safe }}</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('chart-data').textContent);
+  const css = getComputedStyle(document.documentElement);
+  const ACCENT = css.getPropertyValue('--accent').trim() || '#2a6f97';
+  const MUTED = css.getPropertyValue('--muted').trim() || '#5f6b7a';
+  const LINE = css.getPropertyValue('--line').trim() || '#e3e1dc';
+  if (typeof Chart === 'undefined') return;
+  Chart.defaults.color = MUTED;
+  Chart.defaults.borderColor = LINE;
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.font.size = 14;
+
+  function empty(id, text) {
+    const c = document.getElementById(id);
+    c.parentElement.innerHTML = '<div class="empty">' + text + '</div>';
+  }
+  const base = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+
+  // 1. динаміка
+  if (D.timeseries.some(r => r.count)) {
+    new Chart(document.getElementById('c-ts'), {
+      type: 'bar',
+      data: { labels: D.timeseries.map(r => r.date.slice(5).replace('-', '.')),
+              datasets: [{ data: D.timeseries.map(r => r.count), backgroundColor: ACCENT, borderRadius: 6 }] },
+      options: { ...base, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+                                    y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  } else empty('c-ts', 'Подій за період немає');
+
+  function hbar(id, rows, emptyText) {
+    if (!rows.length) return empty(id, emptyText);
+    const trunc = s => s.length > 28 ? s.slice(0, 27) + '…' : s;
+    new Chart(document.getElementById(id), {
+      type: 'bar',
+      data: { labels: rows.map(r => trunc(r.name)),
+              datasets: [{ data: rows.map(r => r.count), backgroundColor: ACCENT + 'cc', borderRadius: 6 }] },
+      options: { ...base, indexAxis: 'y',
+                 plugins: { legend: { display: false },
+                            tooltip: { callbacks: { title: items => rows[items[0].dataIndex].name } } },
+                 scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { grid: { display: false } } } },
+    });
+  }
+  hbar('c-reg', D.regions, 'Регіон подій не визначено');
+  document.getElementById('tags-label').textContent = D.tags_label;
+  hbar('c-tags', D.tags, 'Теми ще не розмічені');
+  hbar('c-src', D.sources, 'Джерел немає');
+})();
+
+function copyPhrase(btn) {
+  const text = btn.parentElement.querySelector('code').textContent;
+  const done = () => { btn.textContent = 'Скопійовано ✓'; setTimeout(() => btn.textContent = 'Скопіювати', 1800); };
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => fallback());
+  else fallback();
+  function fallback() {
+    const r = document.createRange(); r.selectNodeContents(btn.parentElement.querySelector('code'));
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    try { document.execCommand('copy'); done(); } catch (e) {}
+  }
+}
+</script>
+{% endblock %}

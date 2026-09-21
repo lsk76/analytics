@@ -1,0 +1,61 @@
+{% extends "simpleui/base.html" %}
+{% block title %}Зібрати за період — {{ task.human_name }}{% endblock %}
+{% block crumb %} › <a href="{% url 'simpleui:section' task.id %}">{{ task.human_name }}</a> › зібрати{% endblock %}
+{% block content %}
+<p><a class="btn" href="{% url 'simpleui:section' task.id %}">← Назад</a></p>
+<h1>Зібрати за період</h1>
+<p class="sub">{{ task.human_name }}</p>
+
+{% if estimate.continuous %}
+<div class="card tip">
+  Ця секція оновлюється сама ({{ overview.how }}), окремий збір не потрібен.
+  Разовий перезбір за минулий період зʼявиться на етапі 2.
+</div>
+{% endif %}
+
+<div class="card steps">
+  <div class="step">
+    <b>Оберіть період</b>
+    <div class="period" style="margin-top:8px">
+      {% for p in presets %}
+        <a class="{% if chosen == p.key %}on{% endif %}" href="?preset={{ p.key }}">{{ p.label }}</a>
+      {% endfor %}
+      <form method="get">
+        <input type="date" name="from" aria-label="від"><span>—</span>
+        <input type="date" name="to" aria-label="до">
+        <button type="submit" disabled title="Свій період буде на етапі 2">Свій період</button>
+      </form>
+    </div>
+    <div class="soft">
+      {% for p in presets %}{% if chosen == p.key %}{{ p.from|date:"d.m.Y" }} — {{ p.to|date:"d.m.Y" }} · {{ p.days }} дн.{% endif %}{% endfor %}
+    </div>
+  </div>
+
+  <div class="step">
+    <b>Оцінка</b>
+    <div class="est">
+      <div class="num card"><b>{{ estimate.calls }}</b><span>запитів до пошуку</span></div>
+      <div class="num card"><b>≈ ${{ estimate.price_usd }}</b><span>вартість</span></div>
+      <div class="num card"><b>≈ {{ estimate.minutes }} хв</b><span>тривалість</span></div>
+    </div>
+    <div class="soft">Оцінка приблизна: важкі дні діляться навпіл і рахуються окремо.</div>
+  </div>
+
+  <div class="step">
+    <b>Запуск</b>
+    <div class="actions">
+      <button class="btn primary" type="button" onclick="document.getElementById('stub').showModal()">▶ Запустити</button>
+    </div>
+    <div class="soft">Після запуску збір іде у фоні, результати зʼявляться в секції самі.</div>
+  </div>
+</div>
+
+<dialog class="drawer" id="stub">
+  <div class="inner">
+    <h2>Поки що недоступно</h2>
+    <p>Запуск збору з цього екрана зʼявиться на етапі 2. Зараз попросіть асистента:</p>
+    <div class="phrase"><code>Збери «{{ task.human_name }}» за минулий тиждень</code></div>
+    <div class="actions"><button class="btn" type="button" onclick="document.getElementById('stub').close()">Зрозуміло</button></div>
+  </div>
+</dialog>
+{% endblock %}

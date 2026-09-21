@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "accounts",
     "analysis",
     "mcpauth",          # доступ до MCP-сервера: OAuth, ролі, аудит
+    "simpleui",         # простий інтерфейс /app/ (docs/simple-ui-design.md)
 ]
 
 MIDDLEWARE = [
