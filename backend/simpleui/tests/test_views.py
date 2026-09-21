@@ -57,9 +57,10 @@ def test_section_shows_only_approved_and_hides_internals(client, users, task):
     r = client.get(f"/app/{task.id}/?period=month")
     body = r.content.decode()
     assert "Подія 0." in body and "Не схвалено" not in body
-    for word in ("prescreen", "pending", "review_status", "Чекає агента", "чанк"):
-        assert word not in body
+    for word in ("prescreen_prompt", "review_status", "awaiting_agent", "task_id"):
+        assert word not in body           # внутрішні ідентифікатори назовні не йдуть
     assert "Стежимо за" in body           # шухляда з реченням
+    assert "Як працює збір" in body and "Назва для користувача" in body   # усі налаштування
     assert "Скопіювати" in body           # фрази для асистента
 
 

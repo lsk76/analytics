@@ -97,6 +97,7 @@ def _phrases(task, groups, n_sources):
     return [
         add, rm, silent,
         f"Збери «{name}» за минулий тиждень",
+        f"Зміни в «{name}» налаштування «…» на «…»",
         f"Перейменуй секцію «{name}» на «…»",
     ]
 
@@ -147,4 +148,63 @@ def collect_presets(today=None):
         out.append({"key": key, "label": label,
                     "from": today - timedelta(days=days), "to": today - timedelta(days=1),
                     "days": days})
+    return out
+
+
+# --- усі налаштування задачі (лише читання) ----------------------------------
+# Групування по етапах беремо з адмінки (AnalysisTaskAdmin._FS_*): один
+# перелік полів на конвеєр, без дублювання. Тут лише переклад значень у
+# людський вигляд; help_text і технічні описи етапів не показуємо.
+
+_GENERAL_FIELDS = ("display_name", "name", "description", "pipeline", "is_active")
+_LONG_TEXT = 160          # довші значення (промпти) згортаємо
+
+
+def _stage_fieldsets(task):
+    from analysis.admin import AnalysisTaskAdmin as A
+    return {
+        AnalysisTask.PIPELINE_MONITOR: A._FS_MONITOR,
+        AnalysisTask.PIPELINE_RESEARCH: A._FS_RESEARCH,
+        AnalysisTask.PIPELINE_INFOSPACE: A._FS_INFOSPACE,
+        AnalysisTask.PIPELINE_TGSEARCH: A._FS_TGSEARCH,
+    }.get(task.pipeline, A._FS_EVENTS)
+
+
+def _human_value(task, field):
+    """(текст, чи довгий). Порожньо → «стандартне» для промптів/моделей, «—» інакше."""
+    val = getattr(task, field.name)
+    if field.many_to_many:
+        names = [getattr(o, "label", None) or str(o) for o in val.all()]
+        return (", ".join(names) or "—"), False
+    if field.choices:
+        return dict(field.choices).get(val, str(val)), False
+    if isinstance(val, bool):
+        return ("так" if val else "ні"), False
+    if isinstance(val, (list, dict)):
+        if not val:
+            return "—", False
+        return (", ".join(map(str, val)) if isinstance(val, list) else str(val)), False
+    if val is None or val == "":
+        is_text = field.get_internal_type() == "TextField" or "model" in field.name
+        return ("стандартне (з коду)" if is_text else "—"), False
+    s = str(val)
+    return s, len(s) > _LONG_TEXT or "\n" in s
+
+
+def all_settings(task):
+    """[{title, rows:[{label, value, long}]}] — усі поля задачі по етапах конвеєра."""
+    meta = {f.name: f for f in task._meta.get_fields() if hasattr(f, "verbose_name")}
+    groups = [("Загальне", {"fields": _GENERAL_FIELDS})]
+    groups += [(title, opts) for title, opts in _stage_fieldsets(task)]
+    out = []
+    for title, opts in groups:
+        rows = []
+        for name in opts.get("fields", ()):
+            f = meta.get(name)
+            if not f:
+                continue
+            value, long = _human_value(task, f)
+            rows.append({"label": str(f.verbose_name), "value": value, "long": long})
+        if rows:
+            out.append({"title": title, "rows": rows})
     return out

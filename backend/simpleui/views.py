@@ -45,6 +45,7 @@ def section(request, task_id):
         "chart_json": json.dumps(charts.chart_data(task, period), ensure_ascii=False),
         "feed": charts.feed(task, period),
         "overview": settings_drawer.overview(task),
+        "settings": settings_drawer.all_settings(task),
     }
     return render(request, "simpleui/section.html", ctx)
 

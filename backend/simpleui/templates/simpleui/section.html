@@ -101,6 +101,20 @@
     {% endfor %}
     {% endif %}
 
+    <h3 style="margin:22px 0 6px">Як працює збір</h3>
+    <p class="soft" style="margin-top:0">Усі налаштування секції. Змінити їх можна лише через асистента (фрази нижче).</p>
+    {% for g in settings %}
+      <details class="src-group">
+        <summary>{{ g.title }}</summary>
+        <dl class="kv">
+        {% for r in g.rows %}
+          <dt>{{ r.label }}</dt>
+          <dd>{% if r.long %}<details><summary>показати текст</summary><pre>{{ r.value }}</pre></details>{% else %}{{ r.value }}{% endif %}</dd>
+        {% endfor %}
+        </dl>
+      </details>
+    {% endfor %}
+
     <h3 style="margin:22px 0 6px">Змінити через асистента</h3>
     <p class="soft" style="margin-top:0">Скопіюйте фразу і надішліть асистенту. Він усе зробить і підтвердить.</p>
     {% for p in overview.phrases %}
