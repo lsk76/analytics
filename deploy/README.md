@@ -128,7 +128,6 @@ Claude Code (`~/.local/bin/claude`, юзер `deploy-analytics`). Ізоляці
 COMPOSE_PROJECT_NAME=tg-event-analytics-dev    # інші контейнери/мережа/том pgdata
 WEB_IMAGE=tg-event-analytics-dev-web:latest    # build не перетирає прод-образ
 WEB_PORT=8002  DB_PORT=5434  MCP_PORT=8766     # лише loopback, як і на проді
-DJANGO_SSL_REDIRECT=false  DJANGO_HSTS_SECONDS=0   # доки немає TLS-піддомену
 ```
 
 Піднімаються ТІЛЬКИ `db` і `web`:
@@ -138,9 +137,11 @@ DJANGO_SSL_REDIRECT=false  DJANGO_HSTS_SECONDS=0   # доки немає TLS-п�
 `AuthKeyDuplicated`, сесія згорає назавжди. Тому копія знешкоджується
 `deploy/dev-sanitize.sql` (сесії/2FA обнулені, публікація вимкнена).
 
-Доступ: тунель `ssh -L 8002:127.0.0.1:8002 tg-analytics` → http://localhost:8002/admin/.
-Піддомен `dev.analytics.matter-d.pro` (nginx + certbot за зразком §4) — коли з'явиться
-DNS-запис (CNAME на `analytics.matter-d.pro`).
+Доступ: https://dev.analytics.matter-d.pro/admin/ — nginx-вхост
+`deploy/nginx/tg-analytics-dev.conf` (порядок увімкнення в шапці файлу), сертифікат
+`certbot certonly --webroot -w /var/www/html -d dev.analytics.matter-d.pro`.
+Claude Code на сервері: `ssh -t tg-analytics 'cd /opt/tg-event-analytics-dev && claude'`
+(бінарник — симлінк `/usr/local/bin/claude`, бо `ssh -t 'cmd'` не читає `.bashrc`).
 
 Оновити копію БД з прода (читання прод-БД, ~3 хв на 600 МБ):
 ```bash
