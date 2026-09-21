@@ -1,0 +1,27 @@
+# Claude Code Remote Control для dev-стенду — стартує після ребуту сервера.
+# Встановлення (deploy/README.md, «Dev-стенд на тому ж сервері»):
+#   sudo cp deploy/claude-remote-control.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable claude-remote-control
+#   sudo loginctl enable-linger deploy-analytics   # /run/user/1000 для сокетів сесій
+# Живе в tmux-сесії `claude-rc`: подивитись — `tmux attach -t claude-rc`, вийти Ctrl-b d.
+# ExecStartPost відповідає «y» на діалог «Enable Remote Control?» (прапорця в CLI нема;
+# якщо діалог не зʼявився, зайвий «y» + Enter для TUI нешкідливі).
+
+[Unit]
+Description=Claude Code Remote Control (analytics-dev)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy-analytics
+Group=deploy-analytics
+WorkingDirectory=/opt/tg-event-analytics-dev
+Environment=HOME=/home/deploy-analytics
+ExecStart=/usr/bin/tmux new-session -d -s claude-rc -c /opt/tg-event-analytics-dev "bash -lc 'exec claude remote-control --name analytics-dev --spawn=same-dir'"
+ExecStartPost=/bin/sh -c 'sleep 10; /usr/bin/tmux send-keys -t claude-rc y Enter'
+ExecStop=/usr/bin/tmux kill-session -t claude-rc
+
+[Install]
+WantedBy=multi-user.target
