@@ -54,3 +54,23 @@ def remember_peer(channel, account_id: int, peer: dict | None) -> bool:
     if "tg_id" in fields:
         channel.tg_id = fields["tg_id"]
     return True
+
+
+def forget_peer(channel, account_id: int) -> bool:
+    """Кешований хеш виявився недійсним (ChannelInvalidError): забути його під
+    цей акаунт, наступне читання піде за юзернеймом і перезбере хеш."""
+    if channel is None or not account_id:
+        return False
+    meta = dict(channel.raw_meta or {})
+    by_acc = dict(meta.get(KEY) or {})
+    if str(account_id) not in by_acc:
+        return False
+    by_acc.pop(str(account_id))
+    meta[KEY] = by_acc
+    type(channel).objects.filter(pk=channel.pk).update(raw_meta=meta)
+    channel.raw_meta = meta
+    return True
+
+
+def is_stale_peer_error(err: str) -> bool:
+    return "ChannelInvalid" in (err or "") or "CHANNEL_INVALID" in (err or "")

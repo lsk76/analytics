@@ -170,6 +170,22 @@ def test_gateway_rate_limited_passes_seconds(accounts, fake):
     assert ei.value.retry_after == 77
 
 
+def test_stale_cached_hash_is_forgotten_and_retried(accounts, fake):
+    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x",
+                              tg_account=accounts[0])
+    ch = Channel.objects.create(username="x", title="x", tg_id=1,
+                                raw_meta={"access_hash_by_acc": {str(accounts[0].id): 5}})
+    fake.exc = TelegramOpError("ChannelInvalidError: Invalid channel object")
+    with pytest.raises(RateLimited):                                # не збій джерела
+        TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["handle"] == {"channel_id": 1, "access_hash": 5}
+    ch.refresh_from_db()
+    assert ch.raw_meta["access_hash_by_acc"] == {}                  # хеш забуто
+    fake.exc = None
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["handle"] == "x"                          # далі — за юзернеймом
+
+
 def test_chat_error_is_source_failure(accounts, fake):
     fake.exc = TelegramOpError("ChannelPrivateError: x")
     s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")

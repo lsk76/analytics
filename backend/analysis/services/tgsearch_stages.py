@@ -294,6 +294,10 @@ def _stream_account(acc_id, chats, patterns, media_chat_id, out):
         if mc is None:
             continue
         _apply_resolved(mc.channel, row.get("resolved"), acc_id)
+        if row.get("error") and peers.is_stale_peer_error(row["error"]) \
+                and peers.forget_peer(mc.channel, acc_id):
+            # протухлий хеш: наступний прохід піде за юзернеймом
+            logger.info("tgs_stream: чат #%s — хеш під акаунт #%s протух, скинуто", mc.id, acc_id)
         msgs = None if row.get("error") else _hits_to_msgs(row["hits"], mc.channel)
         out.append((mc, msgs, int(row.get("max_id") or mc.stream_last_msg_id),
                     int(row.get("n_media") or 0), row.get("error"), int(row.get("n_seen") or 0)))

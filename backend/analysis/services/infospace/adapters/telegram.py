@@ -79,7 +79,7 @@ class TelegramAdapter(BaseSourceAdapter):
         return m.group(1) if m else u.lstrip("@")
 
     def fetch(self, source) -> list[RawItem]:
-        from accounts.services.managed import AccountUnavailable
+        from accounts.services.managed import AccountUnavailable, TelegramOpError
         from accounts.services.managed import RateLimited as GwRateLimited
         handle = self._handle(source)
         channel = _channel(handle)
@@ -110,6 +110,14 @@ class TelegramAdapter(BaseSourceAdapter):
             raise RateLimited(e.retry_after or 60)
         except GwRateLimited as e:
             raise RateLimited(e.retry_after)
+        except TelegramOpError as e:
+            if target is not handle and peers.is_stale_peer_error(str(e)):
+                # кешований хеш протух (канал мігрував/перестворений): забути й
+                # перечитати за юзернеймом наступним проходом — це не збій джерела
+                peers.forget_peer(channel, acc.id)
+                logger.info("info_collect: %s — хеш під акаунт #%s протух, скинуто", source.name, acc.id)
+                raise RateLimited(60)
+            raise
         peers.remember_peer(channel or _channel_or_create(handle, source, peer), acc.id, peer)
 
         items, max_id = [], min_id
