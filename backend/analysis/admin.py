@@ -1448,6 +1448,27 @@ class SourceSubscriptionAdmin(admin.ModelAdmin):
     list_editable = ("is_active", "priority")
     list_select_related = ("task", "source", "source__region_subject")
     list_per_page = 100
+    # Стокове «Видалити» прибрано: воно лякає сторінкою підтвердження, хоч
+    # джерело з довідника не чіпає. Замість нього — три зрозумілі дії.
+    actions = ("make_inactive", "make_active", "remove_from_study")
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    @admin.action(description="Зробити неактивними (не збирати, дані лишаються)")
+    def make_inactive(self, request, queryset):
+        self.message_user(request, f"Неактивних: {queryset.update(is_active=False)}.")
+
+    @admin.action(description="Зробити активними")
+    def make_active(self, request, queryset):
+        self.message_user(request, f"Активних: {queryset.update(is_active=True)}.")
+
+    @admin.action(description="Прибрати з дослідження (джерело лишається в довіднику)")
+    def remove_from_study(self, request, queryset):
+        n, _ = queryset.delete()
+        self.message_user(request, f"Прибрано з дослідження: {n}. Самі джерела не видалені.")
 
     def get_list_display(self, request):
         ld = list(super().get_list_display(request))
