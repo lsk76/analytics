@@ -3501,9 +3501,19 @@ def _studies_index(request, extra_context=None):
             links.append({"label": "Зібрати", "url": f"/admin/analysis/researchrun/add/?task={t.id}"})
         rows.append({"task": t, "status": st, "links": links,
                      "url": links[0]["url"] if links else ""})
-    rows.sort(key=lambda r: (r["status"].state == STOPPED, -r["status"].week))
+    rows.sort(key=lambda r: -r["status"].week)
+    from analysis.services.study_status import LIVE, PROBLEM
     ctx = dict(extra_context or {})
     ctx["studies"] = rows
+    # три списки: активні з проблемами → активні → неактивні
+    ctx["study_groups"] = [
+        {"title": "Потребують уваги", "state": PROBLEM,
+         "rows": [r for r in rows if r["status"].state == PROBLEM]},
+        {"title": "Працюють", "state": LIVE,
+         "rows": [r for r in rows if r["status"].state == LIVE]},
+        {"title": "Зупинені", "state": STOPPED,
+         "rows": [r for r in rows if r["status"].state == STOPPED]},
+    ]
     ctx["can_add_study"] = request.user.has_perm("analysis.add_analysistask")
     return _orig_admin_index(request, ctx)
 
