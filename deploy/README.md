@@ -142,6 +142,9 @@ WEB_PORT=8002  DB_PORT=5434  MCP_PORT=8766     # лише loopback, як і на
 `certbot certonly --webroot -w /var/www/html -d dev.analytics.matter-d.pro`.
 Claude Code на сервері: `ssh -t tg-analytics 'cd /opt/tg-event-analytics-dev && claude'`
 (бінарник — симлінк `/usr/local/bin/claude`, бо `ssh -t 'cmd'` не читає `.bashrc`).
+Remote Control (сесії з claude.ai/code або мобільного) живе в tmux `claude-rc` і
+стартує після ребуту юнітом `deploy/claude-remote-control.service` (інструкція в
+шапці файлу). Стан: `systemctl status claude-remote-control`, `tmux attach -t claude-rc`.
 
 Оновити копію БД з прода (читання прод-БД, ~3 хв на 600 МБ):
 ```bash
