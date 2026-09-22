@@ -259,6 +259,14 @@ ChannelFilter = autocomplete_filter(
     selected_lookup=lambda req, ids: Channel.objects.filter(id__in=ids),
     autocomplete_url_name="channel-autocomplete", placeholder="Пошук каналу…")
 
+# Інформпростір: пости привʼязані до Source, а не до Channel — там фільтр «Канал»
+# завжди порожній, тож для таких досліджень показуємо «Джерело».
+SourceFilter = autocomplete_filter(
+    title="Джерело", parameter_name="source_id",
+    filter_field="posts__source__id__in",
+    selected_lookup=lambda req, ids: Source.objects.filter(id__in=ids),
+    autocomplete_url_name="source-autocomplete", placeholder="Пошук джерела…")
+
 
 class RegionAliasInline(admin.TabularInline):
     model = RegionAlias
@@ -1349,13 +1357,93 @@ class SourceAdmin(admin.ModelAdmin):
         self.message_user(request, f"{queryset.update(is_active=False)} деактивовано.")
 
 
+class SubscriptionTaskFilter(admin.SimpleListFilter):
+    """Дослідження для підписок: той самий параметр, що в стоковому FK-фільтрі
+    (?task__id__exact=), але коли дослідження обране — не малюється (його
+    показує панель зверху), лише застосовується."""
+    title = "Дослідження"
+    parameter_name = "task__id__exact"
+
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        if self.value():
+            self.template = "admin/filters/hidden.html"
+
+    def lookups(self, request, model_admin):
+        return [(str(t.id), t.human_name) for t in AnalysisTask.objects.order_by("name")]
+
+    def queryset(self, request, queryset):
+        v = self.value()
+        return queryset.filter(task_id=v) if v else queryset
+
+
+class SubscriptionSourceHealthFilter(SourceHealthFilter):
+    """Стан джерела для списку підписок (через source__)."""
+    def queryset(self, request, qs):
+        v = self.value()
+        if v == "ok":
+            return qs.filter(source__consecutive_failures=0, source__quality_ok=True)
+        if v == "warn":
+            return qs.filter(source__consecutive_failures__lt=3).filter(
+                Q(source__consecutive_failures__gte=1) | Q(source__quality_ok=False))
+        if v == "down":
+            return qs.filter(source__consecutive_failures__gte=3)
+        return qs
+
+
+class SubscriptionSourceActiveFilter(admin.SimpleListFilter):
+    title = "Джерело активне"
+    parameter_name = "source_active"
+
+    def lookups(self, request, model_admin):
+        return [("1", "так"), ("0", "ні")]
+
+    def queryset(self, request, qs):
+        v = self.value()
+        return qs.filter(source__is_active=(v == "1")) if v in ("0", "1") else qs
+
+
 @admin.register(SourceSubscription)
 class SourceSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("task", "source", "is_active", "priority", "created_at")
-    list_filter = ("task", "is_active", "source__kind")
+    """Вкладка «Джерела» дослідження: що ми опитуємо для цієї теми, зі станом
+    самого джерела (health/last_ok — з Source, підписка їх не дублює)."""
+    list_display = ("task", "source_link", "kind", "region", "health", "last_ok",
+                    "is_active", "priority")
+    list_filter = (SubscriptionTaskFilter, "source__kind", SubscriptionSourceHealthFilter,
+                   "is_active", SubscriptionSourceActiveFilter,
+                   ("source__region_subject", admin.RelatedOnlyFieldListFilter))
     search_fields = ("source__name", "source__url", "notes")
     autocomplete_fields = ("task", "source")
     list_editable = ("is_active", "priority")
+    list_select_related = ("task", "source", "source__region_subject")
+    list_per_page = 100
+
+    def get_list_display(self, request):
+        ld = list(super().get_list_display(request))
+        if request.GET.get("task__id__exact"):   # дослідження показує панель зверху
+            ld.remove("task")
+        return ld
+
+    @admin.display(description="Джерело", ordering="source__name")
+    def source_link(self, obj):
+        return format_html('<a href="/admin/analysis/source/{}/change/">{}</a>',
+                           obj.source_id, obj.source.name or obj.source.url)
+
+    @admin.display(description="Тип", ordering="source__kind")
+    def kind(self, obj):
+        return obj.source.get_kind_display()
+
+    @admin.display(description="Регіон", ordering="source__region_subject__name")
+    def region(self, obj):
+        return obj.source.region_subject.name if obj.source.region_subject else "—"
+
+    @admin.display(description="Стан")
+    def health(self, obj):
+        return SourceAdmin.health_badge(self, obj.source)
+
+    @admin.display(description="Останній успіх", ordering="source__last_ok_at")
+    def last_ok(self, obj):
+        return obj.source.last_ok_at.strftime("%d.%m %H:%M") if obj.source.last_ok_at else "—"
 
 
 from rangefilter.filters import NumericRangeFilterBuilder as _NRFB
@@ -3092,6 +3180,7 @@ class EventAdmin(admin.ModelAdmin):
         # build one faceted multiselect per tag category, dynamically from the registry
         cats = list(TagCategory.objects.all())
         ethnic_filters = (InterEthnicFilter, RosMinorityClashFilter)
+        origin_filter = ChannelFilter
         task_id = request.GET.get("task")
         if task_id and str(task_id).isdigit():
             # Дослідження обране → лише доречні фільтри: категорії тегів цього
@@ -3105,6 +3194,8 @@ class EventAdmin(admin.ModelAdmin):
             cats = [c for c in cats if c.key in keys]
             if not keys & self._NATIONALITY_CATS:
                 ethnic_filters = ()
+            if task and task.pipeline == AnalysisTask.PIPELINE_INFOSPACE:
+                origin_filter = SourceFilter
         cat_filters = [tag_category_filter(c.key, c.label) for c in cats]
         return (
             ("event_date", ISODateRangeFilterBuilder(title="Період")),
@@ -3115,7 +3206,7 @@ class EventAdmin(admin.ModelAdmin):
             *ethnic_filters,
             SubjectFilter,
             *cat_filters,
-            ChannelFilter,
+            origin_filter,
             ("channel_count", ChannelCountFilter),
             ("reach", ReachFilter),
         )
