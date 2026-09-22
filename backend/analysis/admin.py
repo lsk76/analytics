@@ -24,12 +24,6 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from rangefilter.filters import DateRangeFilterBuilder, DateRangeFilter
 
-# Кнопка «Показати кількість» (Django 5 facets) у всій адмінці вимкнена: наші
-# фасетні фільтри (теги, суб'єкт, джерело) і так показують лічильники, а стоковий
-# підрахунок по кожній опції на таблицях у сотні тисяч рядків — повільний і
-# для користувача це незрозуміла кнопка.
-admin.ModelAdmin.show_facets = admin.ShowFacets.NEVER
-
 
 # --- date range filter that speaks YYYY-MM-DD (not the uk-locale DD.MM.YYYY) ---
 # The whole app standardises on ISO dates: chart drill-down URLs build
@@ -2347,6 +2341,7 @@ class EventAdmin(admin.ModelAdmin):
                        "review_locked_at")   # службовий claim-lock review-воркерів — лише читання
     date_hierarchy = "event_date"
     change_list_template = "admin/analysis/event/change_list.html"
+    ordering = ("-event_date", "-id")   # за замовчуванням новіші події зверху
 
     # ---------- charts -------------------------------------------------------
 
