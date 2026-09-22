@@ -58,7 +58,7 @@
   "name": "account_import",
   "group": "accounts",
   "mutates": true,
-  "scope": "mcp:write",
+  "scope": "mcp:create",
   "doc": "Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.\n\nТе саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,\ndevice-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається\nавторизованою; далі — `account_check` (жива?) і `account_spam_check`.\nСекрети (session, 2FA) у відповідь не потрапляють.",
   "summary": "Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.",
   "params": [
@@ -347,7 +347,7 @@
   "name": "channel_add",
   "group": "monitoring",
   "mutates": true,
-  "scope": "mcp:write",
+  "scope": "mcp:create",
   "doc": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.\n\nДовідник спільний: рядок ідентифікує посилання, тож повторний виклик не\nдублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал\nще й ОПИТУВАВСЯ, потрібне джерело: `source_add` (воно саме створить рядок\nдовідника, якщо його нема). У whitelist моніторингу — через адмінку.",
   "summary": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.",
   "params": [
@@ -984,7 +984,7 @@
   "name": "source_add",
   "group": "monitoring",
   "mutates": true,
-  "scope": "mcp:write",
+  "scope": "mcp:create",
   "doc": "Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.\n\nДжерело = рядок довідника (`Channel`, створюється/знаходиться за посиланням)\n+ розклад/курсор/акаунт. Без підписки активної infospace-задачі\n`info_collect` його НЕ бере в роботу — тож зазвичай передавай `task`.\nПовторний виклик з тим самим посиланням віддає наявне джерело.",
   "summary": "Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.",
   "params": [
@@ -1187,6 +1187,79 @@
     "type": "str",
     "doc": "Задача — показати лише її категорії (порожньо = усі) і по 12 найчастіших тегів кожної.",
     "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "task_create",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:create",
+  "doc": "Створити дослідження (`AnalysisTask`) — власник = ти, далі воно видиме\nлише тобі (і суперюзерам), як в адмінці.\n\nМінімум — slug, назва і конвеєр; решту (запит, промпти, стадії) правиш\n`task_update`, канали/джерела підключаєш `source_add`/`source_subscribe`,\nзбір запускаєш `run_create`. Промпти класифікації за замовчуванням — із коду.",
+  "summary": "Створити дослідження (`AnalysisTask`) — власник = ти, далі воно видиме лише тобі (і суперюзерам), як в адмінці.",
+  "params": [
+   {
+    "name": "slug",
+    "type": "str",
+    "doc": "Ідентифікатор латиницею (a-z, 0-9, дефіс), унікальний: `migrants-kavkaz-2026`.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "name",
+    "type": "str",
+    "doc": "Назва дослідження.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "pipeline",
+    "type": "str",
+    "doc": "events (події з TeleZip-збору) | infospace (полінг джерел → живі події) | monitor (критика в чатах) | research (тематичне) | tgsearch (пошук у чатах Telegram). Дефолт events.",
+    "default": "events",
+    "required": false
+   },
+   {
+    "name": "description",
+    "type": "str",
+    "doc": "Опис (для людей).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "telezip_query",
+    "type": "str",
+    "doc": "Запит TeleZip для збору (діалект v3: пробіл = АБО, І — `+`). Для infospace не потрібен.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "languages",
+    "type": "str",
+    "doc": "Мови через кому (ru, uk…).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tag_categories",
+    "type": "str",
+    "doc": "Ключі категорій тегів через кому (див. tag_categories) — які теги класифікатор збирає з поста.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "display_name",
+    "type": "str",
+    "doc": "Людська назва для простого інтерфейсу (/app/).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "doc": "Створити активною (дефолт true).",
+    "default": true,
     "required": false
    }
   ]

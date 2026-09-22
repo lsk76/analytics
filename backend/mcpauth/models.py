@@ -36,17 +36,22 @@ class McpRole(models.Model):
 
     READER = "reader"
     OPERATOR = "operator"
+    ANALYST = "analyst"
     ADMIN = "admin"
     ROLE_CHOICES = [
         (READER, "Читач — лише перегляд стану"),
-        (OPERATOR, "Оператор — збори, чати, джерела, акаунти"),
+        (OPERATOR, "Оператор — збори, чати, джерела, акаунти (наявні)"),
+        (ANALYST, "Просунутий аналітик — + створює дослідження, канали, джерела, акаунти"),
         (ADMIN, "Адмін — усе, включно з налаштуваннями й контейнерами"),
     ]
-    # скоупи, які отримає токен із цією роллю (перевіряються на кожному виклику)
+    # скоупи, які отримає токен із цією роллю (перевіряються на кожному виклику).
+    # mcp:create — створення нових обʼєктів (task_create, channel_add, source_add,
+    # account_import): оператор працює з тим, що є, аналітик заводить своє.
     SCOPES = {
         READER: ["mcp:read"],
         OPERATOR: ["mcp:read", "mcp:write"],
-        ADMIN: ["mcp:read", "mcp:write", "mcp:admin"],
+        ANALYST: ["mcp:read", "mcp:write", "mcp:create"],
+        ADMIN: ["mcp:read", "mcp:write", "mcp:create", "mcp:admin"],
     }
 
     user = models.OneToOneField(User, on_delete=models.CASCADE,

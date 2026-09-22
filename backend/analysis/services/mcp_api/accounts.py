@@ -14,7 +14,7 @@ from accounts.models import AccountTag, Proxy, TelegramAccount, TestBotJob, Warm
 from accounts.services import registry
 from accounts.services.managed import gw_result
 from analysis.services.mcp_api import common, fmt
-from analysis.services.mcp_api.registry import ToolError, actor, tool
+from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, actor, tool
 
 SPAM_ICON = {"free": "✓", "limited": "⚠", "frozen": "🧊", "unknown": "?"}
 
@@ -228,7 +228,7 @@ def account_update(ref: str, is_active: bool = None, proxy: str = "",
     return f"#{a.id} {a.name}: " + "; ".join(changed)
 
 
-@tool("account_import", group="accounts", mutates=True, params={
+@tool("account_import", group="accounts", mutates=True, scope=SCOPE_CREATE, params={
       "meta_json": "ВМІСТ файлу <phone>.json з tdata-експорту (JSON-текст як є: phone, app_id, app_hash, device, sdk, app_version, lang_pack, twoFA…).",
       "session_b64": "ВМІСТ файлу <phone>.session (Telethon SQLiteSession) у base64. Альтернатива — session_path.",
       "session_path": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/media/import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",

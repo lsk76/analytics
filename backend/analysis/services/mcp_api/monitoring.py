@@ -7,7 +7,7 @@ from django.utils import timezone
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, Post,
                              ResearchRun, Source, SourceSubscription)
 from analysis.services.mcp_api import common, fmt, registry
-from analysis.services.mcp_api.registry import ToolError, tool
+from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
 PIPE_SHORT = {"events": "події", "monitor": "критика", "research": "дослідж.",
               "infospace": "інформпр.", "tgsearch": "TG-пошук"}
@@ -775,7 +775,7 @@ def channels_find(query: str, limit: int = 20):
                      rows) if rows else f"каналів за «{query}» немає"
 
 
-@tool("channel_add", group="monitoring", mutates=True, params={
+@tool("channel_add", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
       "url": "Посилання або @username: https://t.me/name, @name, https://vk.com/club…, https://site/розділ. Ключ довідника — нормалізоване посилання, дубль не створиться.",
       "title": "Назва (заповнює лише порожню).",
       "region": "Субʼєкт РФ канонічною назвою або аліасом із довідника регіонів (заповнює лише порожній).",
@@ -933,7 +933,7 @@ def event_add(task: str, url: str):
                 ("правити", f"/admin/analysis/event/{ev.id}/change/?task={t.id}")]))
 
 
-@tool("source_add", group="monitoring", mutates=True, params={
+@tool("source_add", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
       "url": "Посилання: https://t.me/name або @name (Telegram), https://site/section або RSS-адреса (сайт/RSS), https://vk.com/… (VK).",
       "kind": "telegram | rss | web | vk. Порожньо = за посиланням (t.me → telegram, vk.com → vk, інакше web; '.xml'/'/rss'/'/feed' → rss).",
       "task": "Одразу підписати задачу (id/slug/назва — лише свою). Порожньо = джерело без підписок (воркер його не опитуватиме).",
@@ -1031,6 +1031,64 @@ def source_subscribe(ref: str, task: str, active: bool = True, priority: int = 0
     return (f"підписка {t.slug} → #{src.id} {src.name}: "
             f"{'створено' if created else ('оновлено' if changed else 'без змін')}, "
             f"{state}, пріоритет {sub.priority}")
+
+
+@tool("task_create", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
+      "slug": "Ідентифікатор латиницею (a-z, 0-9, дефіс), унікальний: `migrants-kavkaz-2026`.",
+      "name": "Назва дослідження.",
+      "pipeline": "events (події з TeleZip-збору) | infospace (полінг джерел → живі події) | monitor (критика в чатах) | research (тематичне) | tgsearch (пошук у чатах Telegram). Дефолт events.",
+      "description": "Опис (для людей).",
+      "telezip_query": "Запит TeleZip для збору (діалект v3: пробіл = АБО, І — `+`). Для infospace не потрібен.",
+      "languages": "Мови через кому (ru, uk…).",
+      "tag_categories": "Ключі категорій тегів через кому (див. tag_categories) — які теги класифікатор збирає з поста.",
+      "display_name": "Людська назва для простого інтерфейсу (/app/).",
+      "is_active": "Створити активною (дефолт true)."})
+def task_create(slug: str, name: str, pipeline: str = "events", description: str = "",
+                telezip_query: str = "", languages: str = "", tag_categories: str = "",
+                display_name: str = "", is_active: bool = True):
+    """Створити дослідження (`AnalysisTask`) — власник = ти, далі воно видиме
+    лише тобі (і суперюзерам), як в адмінці.
+
+    Мінімум — slug, назва і конвеєр; решту (запит, промпти, стадії) правиш
+    `task_update`, канали/джерела підключаєш `source_add`/`source_subscribe`,
+    збір запускаєш `run_create`. Промпти класифікації за замовчуванням — із коду.
+    """
+    import re as _re
+    from analysis.models import TagCategory
+    slug = (slug or "").strip().lower()
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,63}", slug):
+        raise ToolError("slug: латиниця, цифри й дефіс, 2–64 символи")
+    if AnalysisTask.objects.filter(slug=slug).exists():
+        raise ToolError(f"задача зі slug «{slug}» уже є (можливо, чужа)")
+    if not (name or "").strip():
+        raise ToolError("дай назву")
+    if pipeline not in dict(AnalysisTask.PIPELINE_CHOICES):
+        raise ToolError(f"pipeline: одне з {', '.join(dict(AnalysisTask.PIPELINE_CHOICES))}")
+    cats = []
+    for key in _split_csv(tag_categories):
+        c = TagCategory.objects.filter(key=key).first()
+        if not c:
+            raise ToolError(f"категорії тегів «{key}» немає (список: tag_categories)")
+        cats.append(c)
+    who = registry.actor()
+    t = AnalysisTask.objects.create(
+        slug=slug, name=name.strip()[:200], pipeline=pipeline, description=description.strip(),
+        telezip_query=telezip_query, display_name=(display_name or "").strip()[:120],
+        languages=[x.strip() for x in languages.replace(",", " ").split() if x.strip()],
+        is_active=bool(is_active), owner=who.user)
+    if cats:
+        t.tag_categories.set(cats)
+    return fmt.joinsec(
+        fmt.section(f"Задача #{t.id} {t.slug} створена", fmt.kv([
+            ("назва", t.name), ("конвеєр", PIPE_SHORT.get(t.pipeline, t.pipeline)),
+            ("власник", who.user.username if who.user else "— (спільна)"),
+            ("мови", ", ".join(t.languages) or "—"),
+            ("категорії тегів", ", ".join(c.key for c in cats) or "—"),
+            ("запит", fmt.trunc(t.telezip_query, 160) or "—"),
+            ("активна", fmt.flag(t.is_active)),
+        ])),
+        "Далі: task_update (промпти/стадії), source_add/source_subscribe (джерела), "
+        f"run_create task={t.slug} (збір), /admin/analysis/analysistask/{t.id}/change/")
 
 
 @tool("task_update", group="monitoring", mutates=True, params={

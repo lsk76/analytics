@@ -82,7 +82,7 @@ class Command(BaseCommand):
                 resource_server_url=public,
                 required_scopes=["mcp:read"],
                 client_registration_options=ClientRegistrationOptions(
-                    enabled=True, valid_scopes=["mcp:read", "mcp:write", "mcp:admin"],
+                    enabled=True, valid_scopes=["mcp:read", "mcp:write", "mcp:create", "mcp:admin"],
                     default_scopes=["mcp:read"]),
                 revocation_options=RevocationOptions(enabled=True),
                 # AS і resource server — той самий процес, а токени непрозорі й

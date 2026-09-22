@@ -25,6 +25,7 @@ _charged: contextvars.ContextVar = contextvars.ContextVar("mcp_charged", default
 
 SCOPE_READ = "mcp:read"
 SCOPE_WRITE = "mcp:write"
+SCOPE_CREATE = "mcp:create"   # нові обʼєкти: дослідження, канали, джерела, акаунти
 SCOPE_ADMIN = "mcp:admin"
 
 
@@ -71,7 +72,8 @@ class Tool:
         # (і, напр., пише пробіл там, де в TeleZip це АБО, а не І).
         self.param_docs = dict(params or {})
         # «Що для цього треба мати»: читання — усім, зміни — операторам,
-        # небезпечне (налаштування, контейнери, сире API) — лише адмінам.
+        # створення — аналітикам (mcp:create), небезпечне (налаштування,
+        # контейнери) — лише адмінам.
         self.scope = scope or (SCOPE_WRITE if mutates else SCOPE_READ)
         self.doc = inspect.getdoc(fn) or ""
         self.sig = inspect.signature(fn)

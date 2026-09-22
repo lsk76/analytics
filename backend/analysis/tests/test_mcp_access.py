@@ -261,19 +261,53 @@ def test_source_subscribe_refuses_foreign_task(alice, bob):
 
 
 def test_account_import_owner_follows_actor(alice, monkeypatch):
-    """Оператор додає акаунт СОБІ; спільний — лише суперюзер."""
+    """Імпорт — це створення (mcp:create): оператору зась, аналітик додає СОБІ;
+    спільний — лише суперюзер."""
     from accounts.services import tdata_import
     monkeypatch.setattr(tdata_import, "convert_sqlite_to_string_session", lambda p: "1BVtsOK0Bu_STRSESSION")
     meta = '{"phone": "79990000001", "app_id": 1, "app_hash": "h", "device": "PC"}'
     blob = "SQLite format 3\x00" + "x" * 32
     import base64
     b64 = base64.b64encode(blob.encode()).decode()
+    with pytest.raises(ToolError, match="mcp:create"):
+        mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64}, who=alice)
+    analyst = make_actor("ann2", McpRole.ANALYST)
     with pytest.raises(ToolError, match="суперюзер"):
         mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64, "shared": True},
-                     who=alice)
+                     who=analyst)
     out = mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64, "tags": "нові"},
-                       who=alice)
+                       who=analyst)
     acc = TelegramAccount.objects.get(phone_number="+79990000001")
-    assert acc.user == alice.user and acc.is_authenticated and acc.session_string == "1BVtsOK0Bu_STRSESSION"
+    assert acc.user == analyst.user and acc.is_authenticated and acc.session_string == "1BVtsOK0Bu_STRSESSION"
     assert "STRSESSION" not in out and "+79990000001" not in out     # секрети не в чаті
     assert [t.name for t in acc.tags.all()] == ["нові"]
+
+
+# --- просунутий аналітик: створює своє, не бачить чужого ---------------------
+
+def test_operator_cannot_create_but_analyst_can(alice):
+    analyst = make_actor("ann", McpRole.ANALYST)
+    with pytest.raises(ToolError, match="mcp:create"):
+        mcp_api.call("task_create", {"slug": "op-task", "name": "х"}, who=alice)
+    with pytest.raises(ToolError, match="mcp:create"):
+        mcp_api.call("channel_add", {"url": "@somechan"}, who=alice)
+    with pytest.raises(ToolError, match="mcp:create"):
+        mcp_api.call("source_add", {"url": "https://example.org/rss.xml"}, who=alice)
+    out = mcp_api.call("task_create", {"slug": "ann-task", "name": "Дослідження Анни",
+                                       "pipeline": "infospace", "languages": "ru, uk"},
+                       who=analyst)
+    t = AnalysisTask.objects.get(slug="ann-task")
+    assert t.owner == analyst.user and t.languages == ["ru", "uk"] and "створена" in out
+    # користується своїм: бачить, править, підписує джерело; чужого — ні
+    assert "ann-task" in mcp_api.call("tasks_list", {}, who=analyst)
+    assert "ann-task" not in mcp_api.call("tasks_list", {}, who=alice)
+    mcp_api.call("source_add", {"url": "https://example.org/rss.xml", "task": "ann-task"}, who=analyst)
+    assert t.source_subscriptions.filter(is_active=True).count() == 1
+    with pytest.raises(ToolError, match="mcp:admin"):
+        mcp_api.call("setting_set", {"key": "k", "value": "v"}, who=analyst)
+    with pytest.raises(ToolError, match="уже є"):
+        mcp_api.call("task_create", {"slug": "ann-task", "name": "дубль"}, who=analyst)
+    with pytest.raises(ToolError, match="slug"):
+        mcp_api.call("task_create", {"slug": "Погано!", "name": "x"}, who=analyst)
+    with pytest.raises(ToolError, match="pipeline"):
+        mcp_api.call("task_create", {"slug": "ok-slug", "name": "x", "pipeline": "bogus"}, who=analyst)
