@@ -9,8 +9,8 @@
   </li>
   {% if has_add_permission %}
   <li>
-    {# «Додати подію» = попап з одним полем «Посилання»; дослідження береться з ?task=.
-       Без обраного дослідження — окрема сторінка з вибором. #}
+    {% comment %}«Додати подію» = попап з одним полем «Посилання»; дослідження береться з ?task=.
+       Без обраного дослідження — окрема сторінка з вибором.{% endcomment %}
     {% if request.GET.task %}
       <a href="#" class="addlink" onclick="document.getElementById('abl-dialog').showModal();return false;">Додати подію</a>
     {% else %}
