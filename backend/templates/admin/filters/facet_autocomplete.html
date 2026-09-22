@@ -51,11 +51,11 @@ if (!document.getElementById('select2-css-loaded')) {
    Робимо контейнер flex-рядком, rendered — display:contents, поле — без рамки. */
 .select2-container--default .select2-selection--multiple {
     display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
-    min-height: 34px; padding: 3px 6px; box-sizing: border-box; }
+    min-height: 34px; padding: 4px 8px 4px 10px; box-sizing: border-box; }
 .select2-container--default .select2-selection--multiple .select2-selection__rendered {
     display: contents; }
 .select2-container--default .select2-selection--multiple .select2-selection__choice {
-    display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 2px 8px; line-height: 1.4; }
+    display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 3px 8px 3px 10px; line-height: 1.4; }
 .select2-container--default .select2-selection--multiple .select2-selection__choice__display { padding: 0; }
 .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
     position: static; order: 2; border: 0; background: none; padding: 0; margin: 0;
@@ -65,7 +65,7 @@ if (!document.getElementById('select2-css-loaded')) {
 .select2-container--default .select2-search--inline { flex: 1; min-width: 60px; display: flex; }
 .select2-container--default .select2-search--inline .select2-search__field {
     border: 0 !important; background: transparent !important; box-shadow: none; resize: none;
-    color: var(--body-fg, #333); margin: 0; padding: 0 2px; height: 26px; line-height: 26px;
+    color: var(--body-fg, #333); margin: 0; padding: 0 4px; height: 26px; line-height: 26px;
     min-width: 60px; width: 100% !important; font: inherit; }
 .select2-container--default .select2-search--inline .select2-search__field::placeholder { color: var(--body-quiet-color, #666); }
 /* Загальний хрестик «очистити все» не потрібен — є кнопка «Очистити». */
