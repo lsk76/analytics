@@ -147,3 +147,133 @@ def test_denied_calls_are_logged_too(alice):
 def test_local_calls_are_not_logged():
     mcp_api.call("tasks_list")
     assert McpAuditLog.objects.count() == 0
+
+
+# --- секрети в налаштуваннях -------------------------------------------------
+
+def test_settings_hide_credentials_from_non_admin(alice):
+    from analysis.models import Setting
+    Setting.objects.create(key="infospace_proxy_url",
+                           value="http://user1:SeCrEtPaSs@proxy.example.com:8080")
+    Setting.objects.create(key="digest_report_prompt", value="Ти — редактор дайджесту")
+    out = mcp_api.call("settings_list", {}, who=alice)
+    assert "SeCrEtPaSs" not in out and "user1:***@proxy.example.com" in out
+    assert "Ти — редактор" in out                       # промпти — відкриті
+
+    root = make_actor("root3", McpRole.ADMIN, superuser=True)
+    assert "SeCrEtPaSs" in mcp_api.call("settings_list", {}, who=root)
+
+
+# --- квота TeleZip -------------------------------------------------------------
+
+def test_telezip_quota_counts_and_blocks(alice, monkeypatch):
+    """Платні виклики рахуються в аудиті (paid_requests) і впираються в ліміт ролі."""
+    from analysis.services.mcp_api import registry, telezip
+
+    @registry.tool("tz_fake", group="telezip")
+    def tz_fake():
+        registry.charge(1)
+        return "ok"
+    try:
+        alice.user.mcp_role.telezip_daily_limit = 2
+        alice.user.mcp_role.save()
+        assert mcp_api.call("tz_fake", {}, who=alice) == "ok"
+        assert mcp_api.call("tz_fake", {}, who=alice) == "ok"
+        with pytest.raises(ToolError, match="ліміт TeleZip вичерпано: 2 з 2"):
+            mcp_api.call("tz_fake", {}, who=alice)
+        rows = McpAuditLog.objects.filter(user=alice.user, tool="tz_fake").order_by("id")
+        assert [r.paid_requests for r in rows] == [1, 1, 0]
+        assert rows.last().ok is False
+        # ліміт 0 на ролі = дефолт із Setting; локальний stdio — без ліміту
+        from analysis.models import Setting
+        alice.user.mcp_role.telezip_daily_limit = 0
+        alice.user.mcp_role.save()
+        Setting.objects.create(key="mcp_telezip_daily_limit", value="3")
+        assert mcp_api.call("tz_fake", {}, who=alice) == "ok"
+        with pytest.raises(ToolError, match="3 з 3"):
+            mcp_api.call("tz_fake", {}, who=alice)
+        assert mcp_api.call("tz_fake") == "ok"
+    finally:
+        registry.TOOLS.pop("tz_fake", None)
+
+
+def test_telezip_usage_shown_in_role_admin(alice):
+    from mcpauth.policy import telezip_used
+    McpAuditLog.objects.create(user=alice.user, tool="tz_find", paid_requests=2)
+    McpAuditLog.objects.create(user=alice.user, tool="tz_users", paid_requests=1)
+    assert telezip_used(alice.user) == 3
+
+
+# --- проксі й завдання акаунтів — лише свої ---------------------------------
+
+def test_proxies_scoped_to_visible_accounts(alice, bob):
+    mine = Proxy.objects.create(proxy_string="mine.example.com:1:u:p")
+    free = Proxy.objects.create(proxy_string="free.example.com:2:u:p")
+    foreign = Proxy.objects.create(proxy_string="foreign.example.com:3:u:p")
+    TelegramAccount.objects.create(name="А", phone_number="+70000000011", user=alice.user, proxy=mine)
+    TelegramAccount.objects.create(name="Б", phone_number="+70000000012", user=bob.user, proxy=foreign)
+    out = mcp_api.call("proxies_list", {}, who=alice)
+    assert "mine.example.com" in out and "free.example.com" in out
+    assert "foreign.example.com" not in out
+    with pytest.raises(ToolError, match="немає"):
+        mcp_api.call("proxy_check", {"ref": str(foreign.id), "repair": False}, who=alice)
+    # вільну проксі можна призначити своєму акаунту
+    out = mcp_api.call("account_update", {"ref": "+70000000011", "proxy": str(free.id)}, who=alice)
+    assert f"#{free.id}" in out
+
+
+def test_account_jobs_hide_foreign_accounts(alice, bob):
+    from accounts.models import WarmUpJob
+    a = TelegramAccount.objects.create(name="Алісин", phone_number="+70000000021", user=alice.user)
+    b = TelegramAccount.objects.create(name="Бобів", phone_number="+70000000022", user=bob.user)
+    WarmUpJob.objects.create(account=a, handles=["x"])
+    WarmUpJob.objects.create(account=b, handles=["y"])
+    out = mcp_api.call("account_jobs", {"kind": "warm_up"}, who=alice)
+    assert "Алісин" in out and "Бобів" not in out
+
+
+# --- події: лише свої, зміни лише своїх ------------------------------------
+
+def test_events_visible_and_editable_only_within_own_tasks(alice, bob):
+    from analysis.models import Event
+    mine = TaskFactory(slug="a-ev", owner=alice.user)
+    theirs = TaskFactory(slug="b-ev", owner=bob.user)
+    e1 = Event.objects.create(task=mine, event_date="2026-09-20", summary="моя подія",
+                              review_status=Event.REVIEW_PENDING)
+    e2 = Event.objects.create(task=theirs, event_date="2026-09-20", summary="чужа подія",
+                              review_status=Event.REVIEW_PENDING)
+    out = mcp_api.call("events_list", {"review_status": "pending"}, who=alice)
+    assert "моя подія" in out and "чужа подія" not in out
+    with pytest.raises(ToolError, match="немає"):
+        mcp_api.call("event_update", {"ref": str(e2.id), "review": "approve"}, who=alice)
+    mcp_api.call("event_update", {"ref": str(e1.id), "review": "approve"}, who=alice)
+    e1.refresh_from_db(); e2.refresh_from_db()
+    assert e1.review_status == Event.REVIEW_APPROVED and "alice" in e1.review_notes
+    assert e2.review_status == Event.REVIEW_PENDING
+
+
+def test_source_subscribe_refuses_foreign_task(alice, bob):
+    from .factories import SourceFactory
+    src = SourceFactory()
+    TaskFactory(slug="bob-inf", owner=bob.user)
+    with pytest.raises(ToolError, match="не знайдено|немає"):
+        mcp_api.call("source_subscribe", {"ref": str(src.id), "task": "bob-inf"}, who=alice)
+
+
+def test_account_import_owner_follows_actor(alice, monkeypatch):
+    """Оператор додає акаунт СОБІ; спільний — лише суперюзер."""
+    from accounts.services import tdata_import
+    monkeypatch.setattr(tdata_import, "convert_sqlite_to_string_session", lambda p: "1BVtsOK0Bu_STRSESSION")
+    meta = '{"phone": "79990000001", "app_id": 1, "app_hash": "h", "device": "PC"}'
+    blob = "SQLite format 3\x00" + "x" * 32
+    import base64
+    b64 = base64.b64encode(blob.encode()).decode()
+    with pytest.raises(ToolError, match="суперюзер"):
+        mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64, "shared": True},
+                     who=alice)
+    out = mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64, "tags": "нові"},
+                       who=alice)
+    acc = TelegramAccount.objects.get(phone_number="+79990000001")
+    assert acc.user == alice.user and acc.is_authenticated and acc.session_string == "1BVtsOK0Bu_STRSESSION"
+    assert "STRSESSION" not in out and "+79990000001" not in out     # секрети не в чаті
+    assert [t.name for t in acc.tags.all()] == ["нові"]

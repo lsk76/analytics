@@ -257,3 +257,170 @@ def test_task_update_changes_collection_params_and_shows_old_query():
     assert "run_create task=q-task" in out
 
     assert "нічого не змінено" in mcp_api.call("task_update", {"ref": "q-task"})
+
+
+# --- довідник каналів -------------------------------------------------------
+
+def test_channel_add_is_idempotent_and_merges_topics():
+    out = mcp_api.call("channel_add", {"url": "@NewChan", "title": "Новий", "topics": "новини, політика"})
+    assert "створено" in out
+    ch = Channel.objects.get(username="newchan")
+    assert ch.url == "https://t.me/newchan" and ch.topics == ["новини", "політика"]
+    out = mcp_api.call("channel_add", {"url": "https://t.me/newchan", "topics": "Політика, етнічне"})
+    assert "уже був" in out and "додано теми: етнічне" in out
+    ch.refresh_from_db()
+    assert ch.topics == ["новини", "політика", "етнічне"] and Channel.objects.count() == 1
+
+
+def test_channel_update_tags_region_and_type():
+    from analysis.models import Region
+    Region.objects.create(name="Республіка Дагестан")
+    ch = Channel.objects.create(username="dag", title="Дагестан-чат", topics=["барахолка", "новини"])
+    out = mcp_api.call("channel_update", {"ref": "@dag", "add_topics": "етнічне",
+                                          "remove_topics": "барахолка", "region": "Дагестан",
+                                          "chat_type": "chat"})
+    ch.refresh_from_db()
+    assert ch.topics == ["новини", "етнічне"] and ch.chat_type == "chat"
+    assert ch.region_subject.name == "Республіка Дагестан" and "Республіка Дагестан" in out
+    with pytest.raises(ToolError, match="chat_type"):
+        mcp_api.call("channel_update", {"ref": str(ch.id), "chat_type": "bogus"})
+    with pytest.raises(ToolError, match="channel_add"):
+        mcp_api.call("channel_update", {"ref": "@nonexistent", "add_topics": "x"})
+
+
+# --- джерела: створити й підписати ------------------------------------------
+
+def test_source_add_creates_and_subscribes():
+    task = TaskFactory(slug="inf-1")
+    out = mcp_api.call("source_add", {"url": "https://example.org/news/rss.xml", "task": "inf-1",
+                                      "name": "Новини", "poll_interval_sec": 300})
+    src = Source.objects.get()
+    assert src.kind == Source.KIND_RSS and src.name == "Новини" and src.poll_interval_sec == 300
+    assert src.subscriptions.filter(task=task, is_active=True).exists()
+    assert "створено" in out and "підписка inf-1: додано" in out
+    # повтор — те саме джерело, підписка вже є
+    out = mcp_api.call("source_add", {"url": "https://example.org/news/rss.xml", "task": "inf-1"})
+    assert "уже було" in out and "уже є" in out and Source.objects.count() == 1
+    # telegram — за посиланням
+    mcp_api.call("source_add", {"url": "@some_channel"})
+    assert Source.objects.get(channel__username="some_channel").kind == Source.KIND_TELEGRAM
+
+
+def test_source_subscribe_toggle_and_priority():
+    task = TaskFactory(slug="inf-2")
+    src = SourceFactory()
+    out = mcp_api.call("source_subscribe", {"ref": str(src.id), "task": "inf-2", "priority": 5})
+    sub = src.subscriptions.get(task=task)
+    assert sub.is_active and sub.priority == 5 and "створено" in out
+    mcp_api.call("source_subscribe", {"ref": str(src.id), "task": "inf-2", "active": False})
+    sub.refresh_from_db()
+    assert sub.is_active is False
+
+
+# --- задачі: розширене редагування ------------------------------------------
+
+def test_task_update_extended_fields():
+    TaskFactory(slug="t-ext", description="старий")
+    out = mcp_api.call("task_update", {"ref": "t-ext", "name": "Нова назва", "description": "-",
+                                       "search_comments": False, "geo_enabled": True,
+                                       "dedup_window_days": 9, "classify_prompt": "Класифікуй"})
+    t = AnalysisTask.objects.get(slug="t-ext")
+    assert t.name == "Нова назва" and t.description == "" and t.search_comments is False
+    assert t.geo_enabled is True and t.dedup_window_days == 9
+    assert t.classify_system_prompt == "Класифікуй" and "опис очищено" in out
+    mcp_api.call("task_update", {"ref": "t-ext", "classify_prompt": "-"})
+    assert AnalysisTask.objects.get(slug="t-ext").classify_system_prompt == ""
+
+
+# --- події: список, картка, аудит, теги --------------------------------------
+
+@pytest.fixture
+def events():
+    from analysis.models import Event, Region, Tag, TagCategory
+    task = TaskFactory(slug="ev-task")
+    dag = Region.objects.create(name="Республіка Дагестан")
+    TagCategory.objects.create(key="topic", label="Тема", closed=False)
+    TagCategory.objects.create(key="nationality", label="Національність", closed=True)
+    mig = Tag.objects.create(name="мігранти", category="topic")
+    uz = Tag.objects.create(name="узбек", category="nationality")
+    today = timezone.now().date()
+    e1 = Event.objects.create(task=task, event_date=today, summary="бійка на ринку",
+                              region_subject=dag, channel_count=3, reach=1000,
+                              review_status=Event.REVIEW_APPROVED)
+    e1.tags.add(mig, uz)
+    e2 = Event.objects.create(task=task, event_date=today - timezone.timedelta(days=60),
+                              summary="стара подія", review_status=Event.REVIEW_APPROVED)
+    e3 = Event.objects.create(task=task, event_date=today, summary="на аудит",
+                              review_status=Event.REVIEW_PENDING)
+    return task, e1, e2, e3
+
+
+def test_events_list_filters_like_admin(events):
+    task, e1, e2, e3 = events
+    out = mcp_api.call("events_list", {"task": "ev-task"})           # дефолт: approved, 30 дн
+    assert "бійка" in out and "стара подія" not in out and "на аудит" not in out
+    out = mcp_api.call("events_list", {"task": "ev-task", "days": 400})
+    assert "стара подія" in out
+    out = mcp_api.call("events_list", {"task": "ev-task", "review_status": "pending"})
+    assert "на аудит" in out and "бійка" not in out
+    out = mcp_api.call("events_list", {"task": "ev-task", "review_status": "all", "days": 400,
+                                       "tag": "topic:мігранти, узбек", "region": "Дагестан",
+                                       "min_channels": 2, "min_reach": 500})
+    assert "бійка" in out and "стара" not in out and "Події: 1" in out
+    assert "нічого не знайдено" in mcp_api.call("events_list", {"task": "ev-task", "tag": "topic:немає"})
+    with pytest.raises(ToolError, match="review_status"):
+        mcp_api.call("events_list", {"review_status": "bogus"})
+    with pytest.raises(ToolError, match="order"):
+        mcp_api.call("events_list", {"order": "bogus"})
+
+
+def test_event_show_and_update(events):
+    from analysis.models import Event, Tag
+    task, e1, e2, e3 = events
+    out = mcp_api.call("event_show", {"ref": str(e1.id)})
+    assert "topic:мігранти" in out and "nationality:узбек" in out and "Дагестан" in out
+
+    out = mcp_api.call("event_update", {"ref": str(e3.id), "review": "reject", "notes": "дубль"})
+    e3.refresh_from_db()
+    assert e3.review_status == Event.REVIEW_REJECTED and e3.review_notes == "дубль" \
+        and e3.reviewed_at is not None and "відхилено" in out
+
+    mcp_api.call("event_update", {"ref": str(e3.id), "review": "pending"})
+    e3.refresh_from_db()
+    assert e3.review_status == Event.REVIEW_PENDING and e3.reviewed_at is None
+
+    # теги: наявний — додається; закрита категорія без словника — пропускається з поясненням
+    out = mcp_api.call("event_update", {"ref": str(e2.id), "add_tags": "topic:мігранти, nationality:марсіанин",
+                                        "remove_tags": "nationality:ніщо", "settlement": "Хасавюрт",
+                                        "event_date": "2026-09-01"})
+    e2.refresh_from_db()
+    assert list(e2.tags.values_list("name", flat=True)) == ["мігранти"]
+    assert "НЕ додано" in out and "марсіанин" in out
+    assert e2.settlement == "Хасавюрт" and str(e2.event_date) == "2026-09-01"
+    out = mcp_api.call("event_update", {"ref": str(e1.id), "remove_tags": "узбек"})
+    assert list(e1.tags.values_list("name", flat=True)) == ["мігранти"] and "−nationality:узбек" in out
+    with pytest.raises(ToolError, match="категорія:тег"):
+        mcp_api.call("event_update", {"ref": str(e1.id), "add_tags": "безкатегорії"})
+    with pytest.raises(ToolError, match="review"):
+        mcp_api.call("event_update", {"ref": str(e1.id), "review": "maybe"})
+    assert "нічого не змінено" in mcp_api.call("event_update", {"ref": str(e1.id)})
+
+
+def test_tag_categories_lists_examples(events):
+    out = mcp_api.call("tag_categories", {"task": "ev-task"})
+    assert "topic" in out and "мігранти(1)" in out and "закрита" in out
+
+
+def test_event_add_uses_link_service(events, monkeypatch):
+    from analysis.models import Event
+    from analysis.services import event_by_link
+    task, e1, *_ = events
+    monkeypatch.setattr(event_by_link, "create_event", lambda t, url, user=None: (e1, False))
+    out = mcp_api.call("event_add", {"task": "ev-task", "url": "https://t.me/x/1"})
+    assert "уже була" in out and f"#{e1.id}" in out
+    monkeypatch.setattr(event_by_link, "create_event",
+                        lambda t, url, user=None: (_ for _ in ()).throw(event_by_link.LinkError("закритий канал")))
+    with pytest.raises(ToolError, match="закритий канал"):
+        mcp_api.call("event_add", {"task": "ev-task", "url": "https://t.me/x/2"})
+    with pytest.raises(ToolError, match="посилання"):
+        mcp_api.call("event_add", {"task": "ev-task", "url": ""})

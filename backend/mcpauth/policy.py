@@ -34,3 +34,35 @@ def granted_scopes(user, requested) -> list[str]:
     if not asked:
         return allowed          # клієнт не звузив запит — даємо все, що дає роль
     return [s for s in allowed if s in asked]
+
+
+# --------------------------------------------------------------------------- TeleZip
+# Один виклик TeleZip ≈ $0.10, і платить власник, а не той, хто питає. Тому
+# платні запити рахуються на користувача за добу (за paid_requests в аудиті),
+# стеля — на ролі (0 = спільний дефолт із Setting).
+TELEZIP_PAID_TOOLS = ("tz_find", "tz_channels", "tz_users")
+TELEZIP_DEFAULT_DAILY_LIMIT = 30
+TELEZIP_LIMIT_SETTING = "mcp_telezip_daily_limit"
+
+
+def telezip_daily_limit(role) -> int:
+    """Стеля платних запитів/добу для ролі. 0 = без ліміту."""
+    if role and role.telezip_daily_limit:
+        return int(role.telezip_daily_limit)
+    from analysis.models import Setting
+    raw = Setting.get(TELEZIP_LIMIT_SETTING, str(TELEZIP_DEFAULT_DAILY_LIMIT))
+    try:
+        return max(0, int(str(raw).strip()))
+    except ValueError:
+        return TELEZIP_DEFAULT_DAILY_LIMIT
+
+
+def telezip_used(user, days: int = 1) -> int:
+    """Скільки платних запитів зробив користувач за останні `days` діб (сьогодні = 1)."""
+    from django.db.models import Sum
+    from django.utils import timezone
+    from .models import McpAuditLog
+    start = timezone.localdate() - timedelta(days=days - 1)
+    agg = McpAuditLog.objects.filter(user=user, created_at__date__gte=start) \
+        .aggregate(n=Sum("paid_requests"))
+    return int(agg["n"] or 0)

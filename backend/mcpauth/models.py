@@ -54,6 +54,12 @@ class McpRole(models.Model):
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=READER,
                             verbose_name="Роль")
     is_active = models.BooleanField(default=True, verbose_name="Активний")
+    # Платні виклики TeleZip (≈$0.10 кожен) рахуються на користувача за добу;
+    # 0 = взяти дефолт із Setting `mcp_telezip_daily_limit`. Редагується прямо
+    # у списку ролей.
+    telezip_daily_limit = models.PositiveIntegerField(
+        default=0, verbose_name="TeleZip: ліміт запитів/добу",
+        help_text="0 = дефолт із налаштування mcp_telezip_daily_limit.")
     notes = models.CharField(max_length=200, blank=True, verbose_name="Нотатки")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
@@ -226,6 +232,9 @@ class McpAuditLog(models.Model):
     ok = models.BooleanField(default=True, verbose_name="Успіх")
     error = models.CharField(max_length=300, blank=True, verbose_name="Помилка")
     duration_ms = models.PositiveIntegerField(default=0, verbose_name="Тривалість, мс")
+    # скільки платних запитів до TeleZip зробив цей виклик (tz_users може 2)
+    paid_requests = models.PositiveSmallIntegerField(
+        default=0, verbose_name="Платних запитів TeleZip")
     client = models.ForeignKey(McpClient, on_delete=models.SET_NULL, null=True, blank=True,
                                related_name="calls", verbose_name="Клієнт")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True,

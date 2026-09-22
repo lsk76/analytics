@@ -135,15 +135,27 @@ make live-logs-mcp | grep '\[mcp\]'    # [mcp] 33 інструментів; issu
 |------|--------|--------|
 | `reader` | `mcp:read` | лише перегляд стану |
 | `operator` | `+ mcp:write` | збори, правки чатів/джерел/акаунтів |
-| `admin` | `+ mcp:admin` | налаштування (`setting_set`) |
+| `admin` | `+ mcp:admin` | налаштування (`setting_set`), креденшали у виводі без маски |
+
+**Платні виклики TeleZip лімітуються на користувача.** `tz_find` / `tz_channels` /
+`tz_users` (≈$0.10 кожен) доступні читачу, але рахуються: кожен виклик пише
+`paid_requests` в аудит, а стеля на добу — колонка «TeleZip: ліміт запитів/добу»
+у списку **Ролі у MCP** (правиться прямо в таблиці; `0` = спільний дефолт із
+`Setting` `mcp_telezip_daily_limit`, з коду — 30). Там же видно витрату
+«сьогодні / 30 днів». Перевищення — відмова ДО запиту, з підказкою, хто
+підіймає ліміт. Локальний stdio без обліку й ліміту. `tz_status` безкоштовний.
 
 **Видимість даних — рівно як в адмінці:** свої задачі (`owner`), свої або спільні
 Telegram-акаунти (`visible_to`), джерела — ті, що живлять твої задачі. Суперюзер
 бачить усе. Чужу задачу не дістати навіть за прямим id — інструмент відповість
 «немає», не зізнаючись, що вона існує.
 
-**Секрети маскуються:** пароль проксі видно лише адміну — вивід інструмента
-потрапляє в чат і їде до провайдера моделі.
+**Секрети маскуються:** пароль проксі, креденшали в URL-налаштуваннях
+(`settings_list`: `http://user:***@host`), ключі/токени в `Setting` — видно
+лише адміну: вивід інструмента потрапляє в чат і їде до провайдера моделі.
+Проксі й черги завдань (`proxies_list`, `proxy_check`, `account_jobs`) теж
+обмежені видимими акаунтами: чужу проксі не побачити й не «полагодити»,
+вільну — можна призначити своєму акаунту.
 
 **Docker-інструментів у мережевому режимі НЕМА** (`service_ps`, `service_logs`,
 `service_restart`, `worker_once`): сокет усередину не прокидається, тож рестарт
@@ -264,6 +276,7 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 | `account_repair` **[пише]** | ремонт через gateway: живість → новий session-id проксі → стан | ref (`problem` = cooldown/needs_proxy) |
 | `account_spam_check` **[пише]** | статус через @SpamBot | ref, pause=2.0 |
 | `account_update` **[пише]** | активність / проксі / теги | ref, is_active, proxy, add_tags, remove_tags |
+| `account_import` **[пише]** | додати акаунт із tdata-експорту (`<phone>.json` + `.session`) — як адмінка «Додати акаунт через файли»; сесія base64 або шлях у контейнері; оператор додає собі, спільний — лише суперюзер | meta_json, session_b64 / session_path, tags, proxy, shared |
 | `account_warm_up` **[пише]** | у чергу прогріву (підписка на канали) | ref, channels=0 |
 | `account_dialogs` | на що акаунт підписаний (наживо) | ref, limit=40, kind='' |
 | `account_jobs` | черги `warm_up` / `test_bot` | kind='all', status='', limit=20 |
@@ -303,7 +316,7 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | інструмент | що робить | параметри |
 |------------|-----------|-----------|
 | `tasks_list` | задачі: конвеєр, обсяги, що підключено | pipeline='', active_only=False |
-| `task_update` **[пише]** | параметри збору задачі: запит TeleZip, мови, unique, чанк | ref, telezip_query, languages, unique, chunk_days, is_active, min_subscribers, llm_model |
+| `task_update` **[пише]** | параметри задачі: збір (запит TeleZip, мови, unique, чанк), назва/опис, прапорці стадій, вікно дедупу, промпт класифікації | ref, telezip_query, languages, unique, chunk_days, is_active, min_subscribers, llm_model, display_name, name, description, search_posts, search_comments, geo_enabled, review_enabled, dedup_window_days, classify_prompt |
 | `task_show` | картка моніторингу (конфіг стадій, черги, події, збори) | ref |
 | `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
 | `run_show` | збір детально (аналог «Збори → Статус») | run_id |
@@ -313,8 +326,17 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет | chat, is_active, stream_enabled, account, priority, forward_media |
 | `sources_list` | джерела інформпростору: розклад, health, якість | task='', kind='', problems_only=False, limit=60 |
 | `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account |
+| `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |
+| `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет | ref, task, active=True, priority=0 |
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
+| `events_list` | список подій із фільтрами адмінки (період/свіжість, статус аудиту, регіон, нас. пункт, теги-фасети, канал, к-сть каналів, охоплення); дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
+| `event_show` | картка події: опис, регіон, теги, аудит, пости-джерела | ref |
+| `event_update` **[пише]** | схвалити / відхилити / повернути в чергу (= дії адмінки), теги `кат:тег` (+/−), регіон, нас. пункт, дата, опис, нотатка аудиту | ref, review, notes, add_tags, remove_tags, region, settlement, event_date, summary |
+| `event_add` **[пише]** | подія за посиланням (= «Додати подію» в адмінці: fetch → скрін-промпт → Event approved; виклик LLM) | task, url |
+| `tag_categories` | категорії тегів (закриті/відкриті) з прикладами — для `tag=` і `add_tags=` | task='' |
 | `channels_find` | знайти канал/чат у довіднику | query, limit=20 |
+| `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language |
+| `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems |
 
 ## 6. Типові сценарії
 
@@ -348,6 +370,10 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
   можна й піпою (`echo '{…}' | … mcp_rpc account_show`). Раніше команда без піпи
   чекала EOF на відкритому stdin — у фоновій оболонці це зависання назавжди
   (ловили на 11.5 годин).
+- **Платні `tz_*` у мережевому режимі впираються в добову квоту користувача**
+  (§4a): перевищення — відмова до запиту. Інструмент, що робить платний запит,
+  зобов'язаний викликати `registry.charge(n)` ПЕРЕД ним — інакше він не
+  лімітується й не рахується (`tz_users` робить два запити — два `charge`).
 - **Кожен запит до TeleZip ≈ $0.10** (за виклик, не за обсяг). `tz_find(stats=true)` — 1
   виклик, кожна сторінка пошуку — ще один; збір = 1 запит на
   чанк, тому `run_create` показує оцінку ціни до запуску. Деталі —
@@ -379,10 +405,16 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 
 ## 8. Тести
 
-`backend/analysis/tests/test_mcp_api.py` (20 тестів): реєстр і манифест,
-резолви посилань, ідемпотентність `run_create`, скасування збору, правки
-чатів/джерел/налаштувань, рендер без мережі. Запуск:
+`backend/analysis/tests/test_mcp_api.py`: реєстр і манифест, резолви посилань,
+ідемпотентність `run_create`, скасування збору, правки чатів/джерел/задач,
+довідник каналів, події (список із фільтрами, аудит, теги), рендер без мережі.
+`backend/analysis/tests/test_mcp_access.py`: ролі, видимість (задачі, акаунти,
+проксі, завдання, події), маскування секретів, квота TeleZip, аудит.
+`backend/mcpauth/tests/`: OAuth-флоу. Запуск:
 
 ```bash
-docker compose exec -T web pytest analysis/tests/test_mcp_api.py
+docker compose exec -T web pytest analysis/tests/test_mcp_api.py analysis/tests/test_mcp_access.py mcpauth/tests
 ```
+
+Тести OAuth ходять по `http://testserver`, тому `conftest.py` вимикає
+`SECURE_SSL_REDIRECT` (інакше 301 замість відповіді).

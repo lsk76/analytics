@@ -570,6 +570,46 @@ class Channel(models.Model):
     def __str__(self):
         return self.username or self.title or f"channel#{self.tg_id}"
 
+    @classmethod
+    def ensure(cls, url: str, name: str = "", region=None, language: str = "",
+               kind_hint: str = "") -> tuple["Channel", bool]:
+        """Знайти або створити рядок довідника за нормалізованим посиланням
+        → (channel, created). Назва/регіон/мова заповнюють ПОРОЖНІ поля,
+        наявних не перезаписують (довідник спільний, його збагачують інші).
+        Telegram-рядок без url, але з тим самим username, — дозаповнюється."""
+        from analysis.services.directory import normalize_url
+        platform, norm = normalize_url(url, kind_hint=kind_hint)
+        if not norm:
+            raise ValueError(f"посилання не нормалізується: {url!r}")
+        ch = cls.objects.filter(url=norm).order_by("-fetched_at", "-id").first()
+        if ch is None:
+            m = re.match(r"^https://t\.me/([a-z0-9_]+)$", norm)
+            if m:
+                ch = cls.objects.filter(username__iexact=m.group(1)) \
+                    .order_by("-fetched_at", "-id").first()
+                if ch is not None and not ch.url:
+                    ch.url = norm
+                    ch.save(update_fields=["url"])
+        if ch is None:
+            ch = cls.objects.create(
+                platform=platform, url=norm, title=(name or "")[:512],
+                region_subject=region, language=language or "",
+                username=(norm.removeprefix("https://t.me/") if platform == "telegram"
+                          and not norm.startswith(("https://t.me/c/", "https://t.me/+")) else ""),
+                chat_type="channel" if platform == "telegram" else "",
+            )
+            return ch, True
+        changed = []
+        if name and not ch.title:
+            ch.title, changed = name[:512], changed + ["title"]
+        if region is not None and ch.region_subject_id is None:
+            ch.region_subject, changed = region, changed + ["region_subject"]
+        if language and not ch.language:
+            ch.language, changed = language, changed + ["language"]
+        if changed:
+            ch.save(update_fields=changed)
+        return ch, False
+
 
 # ---------------------------------------------------------------------------
 # Керовані довідники (відкриті + авто-мапінг аліасів -> без дублів за сенсом)
@@ -1209,37 +1249,8 @@ class Source(models.Model):
         довідника береться/створюється за url, джерело — за рядком довідника.
         → (source, created). Назва/регіон/мова заповнюють ПОРОЖНІ поля довідника,
         наявних не перезаписують (довідник спільний, його збагачують інші)."""
-        from analysis.services.directory import normalize_url
-        platform, norm = normalize_url(url, kind_hint=kind)
-        if not norm:
-            raise ValueError(f"посилання не нормалізується: {url!r}")
-        ch = Channel.objects.filter(url=norm).order_by("-fetched_at", "-id").first()
-        if ch is None:
-            m = re.match(r"^https://t\.me/([a-z0-9_]+)$", norm)
-            if m:
-                ch = Channel.objects.filter(username__iexact=m.group(1)) \
-                    .order_by("-fetched_at", "-id").first()
-                if ch is not None and not ch.url:
-                    ch.url = norm
-                    ch.save(update_fields=["url"])
-        if ch is None:
-            ch = Channel.objects.create(
-                platform=platform, url=norm, title=(name or "")[:512],
-                region_subject=region, language=language or "",
-                username=(norm.removeprefix("https://t.me/") if platform == "telegram"
-                          and not norm.startswith(("https://t.me/c/", "https://t.me/+")) else ""),
-                chat_type="channel" if platform == "telegram" else "",
-            )
-        else:
-            changed = []
-            if name and not ch.title:
-                ch.title, changed = name[:512], changed + ["title"]
-            if region is not None and ch.region_subject_id is None:
-                ch.region_subject, changed = region, changed + ["region_subject"]
-            if language and not ch.language:
-                ch.language, changed = language, changed + ["language"]
-            if changed:
-                ch.save(update_fields=changed)
+        ch, _ = Channel.ensure(url, name=name, region=region, language=language,
+                               kind_hint=kind)
         src = cls.objects.filter(channel=ch).first()
         if src is not None:
             return src, False

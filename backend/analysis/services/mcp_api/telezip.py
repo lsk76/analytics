@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from analysis.models import AnalysisTask, Channel, CollectChunk, Post, TelezipSlot
 from analysis.services.mcp_api import common, fmt
+from analysis.services.mcp_api import registry
 from analysis.services.mcp_api.registry import SCOPE_ADMIN, ToolError, tool
 from analysis.services.telezip import TelezipClient
 
@@ -448,6 +449,7 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
         async def go_stats():
             async with _client(timeout) as tz:
                 return await tz.search_stats(crit)
+        registry.charge(1)
         st = _run(go_stats())
         total = st.get("messageCount", 0)
         buckets = {}
@@ -482,6 +484,7 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
             return await tz.search(crit, limit=0 if page_size else max(1, int(limit)),
                                    page_size=int(page_size), page_token=page_token,
                                    sample_only=bool(sample))
+    registry.charge(1)
     res = _run(go())
     rows = res["messages"]
     parts = [fmt.section("Пошук — повідомлення", fmt.kv(head_common + [
@@ -547,6 +550,7 @@ def tz_channels(term: str = "", name: str = "", title: str = "", about: str = ""
                 channel_ids=ids, channel_names=names, title=title, about=about,
                 channel_term=term, source=source, page_size=int(page_size),
                 page_token=page_token)
+    registry.charge(1)
     data = _run(go())
     rows = data.get("channels") or []
     known = {c.tg_id: c for c in Channel.objects.filter(
@@ -606,6 +610,7 @@ def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = No
         async def by_name():
             async with _client(timeout) as tz:
                 return await tz.users_by_username(names)
+        registry.charge(1)
         found = _run_soft(by_name()) or {}
         parts.append(fmt.section("Юзернейм → TelegramID", fmt.table(
             ["username", "id"],
@@ -617,6 +622,8 @@ def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = No
         async with _client(timeout) as tz:
             return await tz.search_users(user_ids=ids, term=term, is_bot=is_bot,
                                          is_active=is_active, page_size=int(page_size))
+    if ids or term:
+        registry.charge(1)
     data = _run_soft(profiles()) if (ids or term) else None
     users = (data or {}).get("users") or []
     if users:

@@ -7,12 +7,15 @@ from django.contrib import admin, messages
 from django.utils import timezone
 
 from .models import McpAuditLog, McpAuthCode, McpClient, McpRole, McpToken
+from .policy import telezip_daily_limit, telezip_used
 
 
 @admin.register(McpRole)
 class McpRoleAdmin(admin.ModelAdmin):
     list_display = ("user", "role", "is_active", "scopes_display", "tokens_count",
-                    "last_call", "updated_at")
+                    "telezip_daily_limit", "telezip_usage", "last_call", "updated_at")
+    # ліміт TeleZip правиться прямо в таблиці — це ціна, її крутять часто
+    list_editable = ("telezip_daily_limit",)
     list_filter = ("role", "is_active")
     search_fields = ("user__username", "user__email", "notes")
     autocomplete_fields = ("user",)
@@ -24,6 +27,12 @@ class McpRoleAdmin(admin.ModelAdmin):
     @admin.display(description="Токенів")
     def tokens_count(self, obj):
         return obj.user.mcp_tokens.filter(revoked_at__isnull=True).count()
+
+    @admin.display(description="TeleZip сьогодні / 30 дн")
+    def telezip_usage(self, obj):
+        limit = telezip_daily_limit(obj)
+        today, month = telezip_used(obj.user, 1), telezip_used(obj.user, 30)
+        return f"{today} з {limit or '∞'} / {month}"
 
     @admin.display(description="Останній виклик")
     def last_call(self, obj):
@@ -87,7 +96,7 @@ class McpAuthCodeAdmin(admin.ModelAdmin):
 @admin.register(McpAuditLog)
 class McpAuditLogAdmin(admin.ModelAdmin):
     list_display = ("created_at", "user", "role", "tool", "ok", "duration_ms",
-                    "payload_short", "error")
+                    "paid_requests", "payload_short", "error")
     list_filter = ("ok", "tool", "role", "user")
     search_fields = ("tool", "error", "user__username")
     readonly_fields = [f.name for f in McpAuditLog._meta.fields]

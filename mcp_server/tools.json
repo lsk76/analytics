@@ -55,6 +55,58 @@
   ]
  },
  {
+  "name": "account_import",
+  "group": "accounts",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.\n\nТе саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,\ndevice-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається\nавторизованою; далі — `account_check` (жива?) і `account_spam_check`.\nСекрети (session, 2FA) у відповідь не потрапляють.",
+  "summary": "Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.",
+  "params": [
+   {
+    "name": "meta_json",
+    "type": "str",
+    "doc": "ВМІСТ файлу <phone>.json з tdata-експорту (JSON-текст як є: phone, app_id, app_hash, device, sdk, app_version, lang_pack, twoFA…).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "session_b64",
+    "type": "str",
+    "doc": "ВМІСТ файлу <phone>.session (Telethon SQLiteSession) у base64. Альтернатива — session_path.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "session_path",
+    "type": "str",
+    "doc": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/media/import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "doc": "Теги акаунта через кому (створяться, якщо немає).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "proxy",
+    "type": "str",
+    "doc": "Проксі: id або частина рядка. Порожньо = призначить воркер/gateway. Без проксі акаунт не працює.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "shared",
+    "type": "bool",
+    "doc": "true — спільний акаунт (бачать усі); false = власник — ти. Суперюзер за замовчуванням додає спільний, решта — свій.",
+    "default": null,
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "account_jobs",
   "group": "accounts",
   "mutates": false,
@@ -292,6 +344,131 @@
   ]
  },
  {
+  "name": "channel_add",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.\n\nДовідник спільний: рядок ідентифікує посилання, тож повторний виклик не\nдублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал\nще й ОПИТУВАВСЯ, потрібне джерело: `source_add` (воно саме створить рядок\nдовідника, якщо його нема). У whitelist моніторингу — через адмінку.",
+  "summary": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.",
+  "params": [
+   {
+    "name": "url",
+    "type": "str",
+    "doc": "Посилання або @username: https://t.me/name, @name, https://vk.com/club…, https://site/розділ. Ключ довідника — нормалізоване посилання, дубль не створиться.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Назва (заповнює лише порожню).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "region",
+    "type": "str",
+    "doc": "Субʼєкт РФ канонічною назвою або аліасом із довідника регіонів (заповнює лише порожній).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "topics",
+    "type": "str",
+    "doc": "Теми/теги через кому (новини, етнічне, політика, локал-чат…). Додаються до наявних.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "chat_type",
+    "type": "str",
+    "doc": "channel | chat | discussion | unknown. Порожньо = за платформою.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "language",
+    "type": "str",
+    "doc": "Код мови (ru, uk…).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "channel_update",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Змінити рядок довідника: теми (теги), назву, регіон, населений пункт, тип, фокус.\n\nТеми — це поле `Channel.topics` (список), те саме, що править агент\nкласифікації директорії; підписники/активність/доступ пише лише код.",
+  "summary": "Змінити рядок довідника: теми (теги), назву, регіон, населений пункт, тип, фокус.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Канал довідника: id рядка (#123 із channels_find), @username, посилання або частина назви (має бути однозначною).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "add_topics",
+    "type": "str",
+    "doc": "Теми/теги додати (через кому).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "remove_topics",
+    "type": "str",
+    "doc": "Теми/теги прибрати (через кому).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Нова назва. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "region",
+    "type": "str",
+    "doc": "Субʼєкт РФ (канонічна назва/аліас). Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "settlement",
+    "type": "str",
+    "doc": "Населений пункт. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "chat_type",
+    "type": "str",
+    "doc": "channel | chat | discussion | unknown. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "focus",
+    "type": "str",
+    "doc": "Фокус каналу одним реченням. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "discusses_problems",
+    "type": "bool",
+    "doc": "Чи обговорює суспільні проблеми РФ. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "channels_find",
   "group": "monitoring",
   "mutates": false,
@@ -408,6 +585,228 @@
     "type": "int",
     "doc": "Скільки рядків показати.",
     "default": 60,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "event_add",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Додати подію за посиланням — як «Додати подію» в списку подій адмінки.\n\nТекст поста/статті → скрін-промпт дослідження (relevant/summary/region/tags)\n→ Post(done) → Event(approved). Це виклик LLM і fetch сторінки; закритий\nканал або нерелевантний текст → зрозуміла помилка. Якщо пост із таким URL\nу дослідженні вже має подію — повернеться вона, дубля не буде.",
+  "summary": "Додати подію за посиланням — як «Додати подію» в списку подій адмінки.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача (дослідження): id, slug або частина назви — лише своя.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "url",
+    "type": "str",
+    "doc": "Посилання на пост Telegram (https://t.me/name/123, відкритий канал) або статтю на сайті.",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "event_show",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
+  "summary": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "id події (з events_list).",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "event_update",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Схвалити/відхилити/повернути в чергу, тегувати, поправити регіон/дату/опис події.\n\nСхвалення/відхилення — те саме, що дії «✅ Схвалити» / «🚫 Відхилити» в\nадмінці (нотатка `manual: … by <user>`, claim-lock аудиту знімається).\nВідхилена подія зникає з дефолтних списків і графіків і згодом видаляється\nчисткою — це не «м'яке приховування».",
+  "summary": "Схвалити/відхилити/повернути в чергу, тегувати, поправити регіон/дату/опис події.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "id події (з events_list).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "review",
+    "type": "str",
+    "doc": "approve — схвалити; reject — відхилити (буде видалено чисткою); pending — повернути в чергу аудиту. Порожньо = не чіпати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "notes",
+    "type": "str",
+    "doc": "Нотатка аудиту (чому). Пишеться разом із review або окремо.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "add_tags",
+    "type": "str",
+    "doc": "Теги додати: `категорія:тег` через кому (напр. `topic:мігранти, attacker_nationality:узбек`). Категорія обовʼязкова; у закритій категорії тег має бути зі словника, у відкритій — канонізується (можливий виклик LLM) або створюється.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "remove_tags",
+    "type": "str",
+    "doc": "Теги прибрати: `категорія:тег` або `тег` через кому.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "region",
+    "type": "str",
+    "doc": "Субʼєкт РФ (канонічна назва/аліас). Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "settlement",
+    "type": "str",
+    "doc": "Населений пункт. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "event_date",
+    "type": "str",
+    "doc": "Дата події YYYY-MM-DD. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "summary",
+    "type": "str",
+    "doc": "Новий опис події. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "events_list",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,\nрегіон, теги (фасети), канал, кількість каналів, охоплення.\n\nДефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;\n`review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).\nКатегорії тегів для фільтра `tag` — `tag_categories`; id події — для\n`event_show`/`event_update`.",
+  "summary": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту, регіон, теги (фасети), канал, кількість каналів, охоплення.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача (id/slug/назва — лише своя). Порожньо = усі свої.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "Останні N днів за датою події (як «Свіжість» в адмінці). Ігнорується, якщо задано date_from/date_to.",
+    "default": 30,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Дата події від, YYYY-MM-DD (як фільтр «Період»).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Дата події до, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "review_status",
+    "type": "str",
+    "doc": "approved (дефолт, як в адмінці) | pending | rejected | all.",
+    "default": "approved",
+    "required": false
+   },
+   {
+    "name": "region",
+    "type": "str",
+    "doc": "Субʼєкт РФ (канонічна назва/аліас) — фільтр «Субʼєкт РФ».",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "settlement",
+    "type": "str",
+    "doc": "Населений пункт (частина назви).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tag",
+    "type": "str",
+    "doc": "Теги: `категорія:тег` або просто `тег`; кілька через кому = ВСІ мають бути (як фасети в адмінці). Категорії: tag_categories або task_show.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Текст в описі події (icontains).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channel",
+    "type": "str",
+    "doc": "@username каналу/джерела, який писав про подію (фільтр «Канал/Джерело»).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "min_channels",
+    "type": "int",
+    "doc": "Мінімум унікальних каналів події (фільтр «Кількість каналів»). 0 = без обмеження.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "min_reach",
+    "type": "int",
+    "doc": "Мінімальне охоплення. 0 = без обмеження.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "order",
+    "type": "str",
+    "doc": "newest (дефолт) | oldest | reach | channels.",
+    "default": "newest",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки подій показати.",
+    "default": 30,
     "required": false
    }
   ]
@@ -582,6 +981,110 @@
   ]
  },
  {
+  "name": "source_add",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.\n\nДжерело = рядок довідника (`Channel`, створюється/знаходиться за посиланням)\n+ розклад/курсор/акаунт. Без підписки активної infospace-задачі\n`info_collect` його НЕ бере в роботу — тож зазвичай передавай `task`.\nПовторний виклик з тим самим посиланням віддає наявне джерело.",
+  "summary": "Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.",
+  "params": [
+   {
+    "name": "url",
+    "type": "str",
+    "doc": "Посилання: https://t.me/name або @name (Telegram), https://site/section або RSS-адреса (сайт/RSS), https://vk.com/… (VK).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "telegram | rss | web | vk. Порожньо = за посиланням (t.me → telegram, vk.com → vk, інакше web; '.xml'/'/rss'/'/feed' → rss).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Одразу підписати задачу (id/slug/назва — лише свою). Порожньо = джерело без підписок (воркер його не опитуватиме).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "name",
+    "type": "str",
+    "doc": "Назва (заповнює лише порожню в довіднику).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "region",
+    "type": "str",
+    "doc": "Субʼєкт РФ канонічною назвою/аліасом.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "language",
+    "type": "str",
+    "doc": "Код мови (ru, uk…).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "poll_interval_sec",
+    "type": "int",
+    "doc": "Інтервал полінгу в секундах. 0 = дефолт моделі.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Telegram-акаунт для читання (id/номер/назва) — лише для kind=telegram.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "source_subscribe",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Підписати задачу на джерело (або вимкнути підписку) — `SourceSubscription`.\n\nСаме підписка робить джерело «робочим» для `info_collect`. Вимкнення не\nвидаляє ні джерело, ні зібране — лише виключає з наступних зборів.",
+  "summary": "Підписати задачу на джерело (або вимкнути підписку) — `SourceSubscription`.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Джерело: id, посилання або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача (id/slug/назва — лише своя).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "active",
+    "type": "bool",
+    "doc": "true — підписати/увімкнути; false — вимкнути підписку (історія лишається).",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "priority",
+    "type": "int",
+    "doc": "Пріоритет підписки (менше = вище). 0 = не змінювати.",
+    "default": 0,
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "source_update",
   "group": "monitoring",
   "mutates": true,
@@ -672,6 +1175,23 @@
   ]
  },
  {
+  "name": "tag_categories",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Категорії тегів (`TagCategory`) і приклади тегів — щоб правильно писати\n`tag=` у events_list і `add_tags=` в event_update. Закрита категорія =\nлише словникові теги.",
+  "summary": "Категорії тегів (`TagCategory`) і приклади тегів — щоб правильно писати `tag=` у events_list і `add_tags=` в event_update. Закрита категорія = лише словникові теги.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача — показати лише її категорії (порожньо = усі) і по 12 найчастіших тегів кожної.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "task_show",
   "group": "monitoring",
   "mutates": false,
@@ -693,8 +1213,8 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
-  "doc": "Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.\n\nЗамикає маршрут розвідки: `tz_find(stats=true)` показав, що обсяг здоровий →\nфіксуємо його в задачі → `run_create` збирає ним period. Старий запит\nдрукується у відповіді — щоб було куди відкотитись.",
-  "summary": "Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.",
+  "doc": "Змінити параметри задачі: збір (запит TeleZip, мови, unique, чанк), назву/опис,\nпрапорці стадій (пости/коментарі, гео, аудит), вікно дедупу, промпт класифікації.\n\nЗамикає маршрут розвідки: `tz_find(stats=true)` показав, що обсяг здоровий →\nфіксуємо його в задачі → `run_create` збирає ним period. Старий запит\nдрукується у відповіді — щоб було куди відкотитись.",
+  "summary": "Змінити параметри задачі: збір (запит TeleZip, мови, unique, чанк), назву/опис, прапорці стадій (пости/коментарі, гео, аудит), вікно дедупу, промпт класифікації.",
   "params": [
    {
     "name": "ref",
@@ -756,6 +1276,62 @@
     "name": "display_name",
     "type": "str",
     "doc": "Людська назва секції для простого інтерфейсу (/app/), напр. «Інформпростір регіонів». Порожньо = не змінювати; '-' = очистити (показуватиметься технічна назва).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "name",
+    "type": "str",
+    "doc": "Технічна назва задачі. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "description",
+    "type": "str",
+    "doc": "Опис задачі (для людей). Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "search_posts",
+    "type": "bool",
+    "doc": "Збирати пости каналів. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "search_comments",
+    "type": "bool",
+    "doc": "Збирати коментарі/повідомлення чатів. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "geo_enabled",
+    "type": "bool",
+    "doc": "Визначати регіон подій (гео-стадія). Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "review_enabled",
+    "type": "bool",
+    "doc": "Авто-аудит подій LLM після створення. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_window_days",
+    "type": "int",
+    "doc": "Вікно дедупу подій у днях. 0 = не змінювати.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "classify_prompt",
+    "type": "str",
+    "doc": "System-промпт класифікації постів (повний текст). Порожньо = не змінювати; '-' = повернути дефолт із коду. Перед зміною подивись поточний: task_show.",
     "default": "",
     "required": false
    }

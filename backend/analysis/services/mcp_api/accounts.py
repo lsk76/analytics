@@ -14,7 +14,7 @@ from accounts.models import AccountTag, Proxy, TelegramAccount, TestBotJob, Warm
 from accounts.services import registry
 from accounts.services.managed import gw_result
 from analysis.services.mcp_api import common, fmt
-from analysis.services.mcp_api.registry import ToolError, tool
+from analysis.services.mcp_api.registry import ToolError, actor, tool
 
 SPAM_ICON = {"free": "✓", "limited": "⚠", "frozen": "🧊", "unknown": "?"}
 
@@ -228,6 +228,94 @@ def account_update(ref: str, is_active: bool = None, proxy: str = "",
     return f"#{a.id} {a.name}: " + "; ".join(changed)
 
 
+@tool("account_import", group="accounts", mutates=True, params={
+      "meta_json": "ВМІСТ файлу <phone>.json з tdata-експорту (JSON-текст як є: phone, app_id, app_hash, device, sdk, app_version, lang_pack, twoFA…).",
+      "session_b64": "ВМІСТ файлу <phone>.session (Telethon SQLiteSession) у base64. Альтернатива — session_path.",
+      "session_path": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/media/import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
+      "tags": "Теги акаунта через кому (створяться, якщо немає).",
+      "proxy": "Проксі: id або частина рядка. Порожньо = призначить воркер/gateway. Без проксі акаунт не працює.",
+      "shared": "true — спільний акаунт (бачать усі); false = власник — ти. Суперюзер за замовчуванням додає спільний, решта — свій."})
+def account_import(meta_json: str, session_b64: str = "", session_path: str = "",
+                   tags: str = "", proxy: str = "", shared: bool = None):
+    """Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.
+
+    Те саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,
+    device-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається
+    авторизованою; далі — `account_check` (жива?) і `account_spam_check`.
+    Секрети (session, 2FA) у відповідь не потрапляють.
+    """
+    import base64
+    import binascii
+    import json
+    import os
+    import tempfile
+    from django.db import IntegrityError
+    from accounts.services.tdata_import import import_tdata_account
+
+    if bool(session_b64) == bool(session_path):
+        raise ToolError("дай рівно одне: session_b64 (вміст .session у base64) "
+                        "або session_path (шлях у контейнері)")
+    try:
+        meta = json.loads(meta_json)
+    except (TypeError, ValueError) as e:
+        raise ToolError(f"meta_json не розбирається як JSON: {e}")
+    if not isinstance(meta, dict) or not str(meta.get("phone") or "").strip():
+        raise ToolError("meta_json має бути обʼєктом із полем phone (tdata-експорт)")
+
+    who = actor()
+    if shared is None:
+        shared = who.is_superuser
+    owner = None if shared else who.user
+    if owner is None and not who.is_superuser:
+        raise ToolError("спільний акаунт (shared=true) може додати лише суперюзер")
+    tag_names = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    p = common.resolve_proxy(proxy) if proxy else None
+
+    tmp_path = ""
+    try:
+        if session_b64:
+            try:
+                blob = base64.b64decode(session_b64, validate=True)
+            except (binascii.Error, ValueError) as e:
+                raise ToolError(f"session_b64 — не base64: {e}")
+            if not blob.startswith(b"SQLite format 3"):
+                raise ToolError("session_b64 не схожий на .session (SQLite Telethon)")
+            with tempfile.NamedTemporaryFile(suffix=".session", delete=False) as tmp:
+                tmp.write(blob)
+                tmp_path = tmp.name
+            path = tmp_path
+        else:
+            path = session_path
+            if not os.path.isfile(path):
+                raise ToolError(f"файлу {path} у контейнері немає")
+        try:
+            a = import_tdata_account(meta, path, owner, tag_names)
+        except IntegrityError:
+            raise ToolError(f"акаунт із номером {meta.get('phone')} уже є в базі")
+        except Exception as e:  # noqa: BLE001 — модель має бачити причину
+            raise ToolError(f"не вдалось імпортувати: {type(e).__name__}: {e}")
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+    if p is not None:
+        a.proxy = p
+        a.save(update_fields=["proxy"])
+    return fmt.joinsec(
+        # назва без імені в JSON = номер телефону — у заголовок він не йде
+        fmt.section(f"Акаунт #{a.id} {'' if a.name == a.phone_number else a.name} додано", fmt.kv([
+            ("телефон", common.mask_secret(a.phone_number, 5)),
+            ("власник", "спільний" if a.user_id is None else a.user.username),
+            ("проксі", f"#{p.id} {common.mask_proxy(p.proxy_string)}" if p else "— (призначить gateway)"),
+            ("теги", ", ".join(tag_names) or "—"),
+            ("пристрій", f"{a.device_model} / {a.system_version} / {a.app_version}"),
+            ("2FA", "є" if a.two_fa_password else "нема"),
+        ])),
+        f"Далі: account_check ref={a.id} → account_spam_check ref={a.id}")
+
+
 @tool("account_warm_up", group="accounts", mutates=True, params={
       "ref": 'Акаунт: числовий id, номер телефону або частина назви. Для групових дій — ключові слова: all (усі), active (активні), problem (не авторизовані, обмежені SpamBot, без проксі або з мертвою).',
       "channels": "На скільки каналів підписати. 0 = випадково 5-10."})
@@ -312,7 +400,8 @@ def account_jobs(kind: str = "all", status: str = "", limit: int = 20):
     """Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота)."""
     parts = []
     if kind in ("all", "warm_up"):
-        qs = WarmUpJob.objects.select_related("account").order_by("-created_at")
+        qs = common.scope_jobs(WarmUpJob.objects).select_related("account") \
+            .order_by("-created_at")
         if status:
             qs = qs.filter(status=status)
         rows = [[f"#{j.id}", f"#{j.account_id} {fmt.trunc(j.account.name, 18)}", j.status,
@@ -323,7 +412,8 @@ def account_jobs(kind: str = "all", status: str = "", limit: int = 20):
             ["job", "акаунт", "статус", "каналів", "спроб", "результат", "коли"], rows)
             if rows else "завдань немає"))
     if kind in ("all", "test_bot"):
-        qs = TestBotJob.objects.select_related("account").order_by("-created_at")
+        qs = common.scope_jobs(TestBotJob.objects).select_related("account") \
+            .order_by("-created_at")
         if status:
             qs = qs.filter(status=status)
         rows = [[f"#{j.id}", j.batch_id, f"#{j.account_id} {fmt.trunc(j.account.name, 16)}",
@@ -340,7 +430,7 @@ def account_jobs(kind: str = "all", status: str = "", limit: int = 20):
       "limit": "Скільки проксі показати."})
 def proxies_list(problems_only: bool = False, limit: int = 60):
     """Пул проксі: хто живий, скільки збоїв, кому призначені."""
-    qs = (Proxy.objects.annotate(n_acc=Count("accounts"))
+    qs = (common.scope_proxies(Proxy.objects).annotate(n_acc=Count("accounts"))
           .order_by("-is_active", "fail_count", "id"))
     if problems_only:
         qs = qs.filter(Q(is_working=False) | Q(fail_count__gt=0))
@@ -349,7 +439,7 @@ def proxies_list(problems_only: bool = False, limit: int = 60):
              fmt.ago(p.last_tested_at)] for p in qs[:limit]]
     if not rows:
         return "проксі за цим фільтром немає"
-    free = Proxy.objects.filter(is_active=True, accounts__isnull=True).count()
+    free = common.scope_proxies(Proxy.objects.filter(is_active=True, accounts__isnull=True)).count()
     return (fmt.table(["id", "акт", "жива", "тип", "рядок", "збоїв", "акаунтів", "перевірено"],
                       rows) + f"\n\nвільних (без акаунтів): {free}")
 
@@ -363,10 +453,11 @@ def proxy_check(ref: str, repair: bool = True):
     ref — id/частина рядка, або `all` / `broken`. repair=False — лише діагноз.
     """
     ref_l = str(ref).strip().lower()
+    pool = common.scope_proxies(Proxy.objects.filter(is_active=True))
     if ref_l in ("all", "усі", "*"):
-        proxies = list(Proxy.objects.filter(is_active=True).order_by("id"))
+        proxies = list(pool.order_by("id"))
     elif ref_l in ("broken", "мертві"):
-        proxies = list(Proxy.objects.filter(is_active=True, is_working=False).order_by("id"))
+        proxies = list(pool.filter(is_working=False).order_by("id"))
     else:
         proxies = [common.resolve_proxy(ref)]
     if len(proxies) > 30:
@@ -375,7 +466,8 @@ def proxy_check(ref: str, repair: bool = True):
     for p in proxies:
         # перевірка йде РЕАЛЬНОЮ сесією акаунта через gateway (repair): проксі без
         # акаунта перевірити нічим — так і кажемо
-        acc = TelegramAccount.objects.filter(proxy=p, is_active=True, is_authenticated=True) \
+        acc = common.scope_accounts(
+            TelegramAccount.objects.filter(proxy=p, is_active=True, is_authenticated=True)) \
             .order_by("id").first()
         if acc is None:
             p.refresh_from_db()

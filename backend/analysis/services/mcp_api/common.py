@@ -86,15 +86,56 @@ def resolve_source(ref):
 
 
 def resolve_proxy(ref):
+    """Proxy за id / частиною рядка — лише з видимого пулу (`scope_proxies`)."""
     from accounts.models import Proxy
     ref = str(ref).strip()
     if ref.lstrip("#").isdigit():
-        p = Proxy.objects.filter(pk=int(ref.lstrip("#"))).first()
+        p = scope_proxies(Proxy.objects).filter(pk=int(ref.lstrip("#"))).first()
         if not p:
             raise ToolError(f"проксі #{ref} немає")
         return p
-    qs = Proxy.objects.filter(proxy_string__icontains=ref).order_by("id")
-    return _pick(qs, ref, "проксі", lambda p: f"#{p.id} {p.proxy_string}")
+    qs = scope_proxies(Proxy.objects.filter(proxy_string__icontains=ref)).order_by("id")
+    return _pick(qs, ref, "проксі", lambda p: f"#{p.id} {mask_proxy(p.proxy_string)}")
+
+
+def resolve_channel(ref):
+    """Рядок довідника `Channel` за id / @username / посиланням / частиною назви."""
+    from analysis.models import Channel
+    from analysis.services.directory import normalize_url
+    ref = str(ref).strip()
+    if ref.lstrip("#").isdigit():
+        c = Channel.objects.filter(pk=int(ref.lstrip("#"))).first()
+        if not c:
+            raise ToolError(f"каналу #{ref} у довіднику немає")
+        return c
+    if ref.startswith("@") or "://" in ref or "t.me/" in ref:
+        _, norm = normalize_url(ref)
+        c = Channel.objects.filter(url=norm).order_by("-fetched_at", "-id").first() if norm else None
+        if c is None and norm.startswith("https://t.me/"):
+            c = Channel.objects.filter(username__iexact=norm.removeprefix("https://t.me/")) \
+                .order_by("-fetched_at", "-id").first()
+        if not c:
+            raise ToolError(f"каналу «{ref}» у довіднику немає — додати: channel_add")
+        return c
+    qs = Channel.objects.filter(title__icontains=ref).order_by("-subscribers", "id")
+    return _pick(qs, ref, "канал довідника",
+                 lambda c: f"#{c.id} @{c.username or '—'} {c.title}")
+
+
+def resolve_region(ref):
+    """Region за канонічною назвою / аліасом (без LLM — лише те, що вже в довіднику)."""
+    from analysis.models import Region, RegionAlias
+    ref = str(ref).strip()
+    if not ref:
+        return None
+    r = Region.objects.filter(name__iexact=ref).first()
+    if r:
+        return r
+    alias = RegionAlias.objects.filter(raw__iexact=ref).select_related("region").first()
+    if alias:
+        return alias.region
+    qs = Region.objects.filter(name__icontains=ref).order_by("name")
+    return _pick(qs, ref, "регіон", lambda r: r.name)
 
 
 def resolve_chat(ref):
@@ -161,6 +202,28 @@ def scope_accounts(qs):
     return qs if who.is_superuser else qs.visible_to(who.user)
 
 
+def scope_proxies(qs):
+    """Проксі, з якими користувач має справу: вільні або призначені його акаунтам.
+
+    Чужу проксі не можна ні побачити, ні «полагодити» (`proxy_check` лагодить
+    сесії реальних акаунтів на ній), а вільну — можна призначити своєму акаунту.
+    """
+    from django.db.models import Q
+    from accounts.models import TelegramAccount
+    from analysis.services.mcp_api.registry import actor
+    who = actor()
+    if who.is_superuser:
+        return qs
+    mine = TelegramAccount.objects.visible_to(who.user).values("proxy_id")
+    return qs.filter(Q(accounts__isnull=True) | Q(id__in=mine)).distinct()
+
+
+def scope_jobs(qs):
+    """Завдання акаунтів (прогрів, тест-бот) — лише по видимих акаунтах."""
+    from accounts.models import TelegramAccount
+    return qs.filter(account__in=scope_accounts(TelegramAccount.objects))
+
+
 def mask_proxy(proxy_string: str) -> str:
     """`host:port:user:pass` → пароль сховано для не-адміна.
 
@@ -175,6 +238,25 @@ def mask_proxy(proxy_string: str) -> str:
     if len(parts) >= 4:
         parts[3] = "***"
     return ":".join(parts)
+
+
+_SECRET_KEY_HINT = ("token", "secret", "password", "passwd", "api_key", "apikey", "key")
+
+
+def mask_setting(key: str, value: str) -> str:
+    """Значення `Setting` для не-адміна: креденшали в URL і секретні ключі сховано.
+
+    Промпти й прапорці — відкриті, а `infospace_proxy_url` виду
+    `http://user:pass@host` без цього віддавав пароль будь-якому читачу.
+    """
+    import re
+    from analysis.services.mcp_api.registry import SCOPE_ADMIN, actor
+    text = str(value or "")
+    if not text or actor().can(SCOPE_ADMIN):
+        return text
+    if any(h in key.lower() for h in _SECRET_KEY_HINT):
+        return mask_secret(text)
+    return re.sub(r"(://[^/@:\s]+:)[^/@\s]+@", r"\1***@", text)
 
 
 def mask_secret(value: str, keep: int = 6) -> str:

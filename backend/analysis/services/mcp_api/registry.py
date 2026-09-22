@@ -20,6 +20,8 @@ TOOLS = {}
 # користувача (повні права — доступ до машини вже все вирішив), мережевий
 # прод-сервер завжди підставляє реального Django-юзера з токена.
 _actor: contextvars.ContextVar = contextvars.ContextVar("mcp_actor", default=None)
+# Скільки платних запитів TeleZip зробив поточний виклик — лягає в аудит.
+_charged: contextvars.ContextVar = contextvars.ContextVar("mcp_charged", default=0)
 
 SCOPE_READ = "mcp:read"
 SCOPE_WRITE = "mcp:write"
@@ -96,6 +98,30 @@ class Tool:
         return self.fn(**{k: v for k, v in payload.items() if v is not None})
 
 
+def charge(n_requests: int = 1) -> None:
+    """Платний запит до TeleZip: звірити добову квоту користувача й зарахувати.
+
+    Викликати ПЕРЕД самим запитом: перевищення ліміту має зупинити виклик, а не
+    констатувати його постфактум. Локальний stdio без обмежень і без обліку.
+    Стеля — на ролі (`McpRole.telezip_daily_limit`, 0 = Setting
+    `mcp_telezip_daily_limit`); витрату видно в адмінці ролей і в аудиті.
+    """
+    who = actor()
+    if not who.unrestricted:
+        from mcpauth.models import McpRole
+        from mcpauth.policy import telezip_daily_limit, telezip_used
+        role = McpRole.objects.filter(user=who.user, is_active=True).first()
+        limit = telezip_daily_limit(role)
+        used = telezip_used(who.user) + _charged.get()
+        if limit and used + n_requests > limit:
+            raise ToolError(
+                f"добовий ліміт TeleZip вичерпано: {used} з {limit} платних запитів "
+                f"(≈${used * 0.10:.2f}). Ліміт піднімає власник в адмінці (Ролі у MCP, "
+                "колонка «TeleZip: ліміт запитів/добу») або налаштуванням "
+                "mcp_telezip_daily_limit.")
+    _charged.set(_charged.get() + n_requests)
+
+
 def readonly() -> bool:
     return os.environ.get("MCP_READONLY", "").strip().lower() in ("1", "true", "yes")
 
@@ -124,6 +150,7 @@ def call(name: str, payload: dict | None = None, who: "Actor | None" = None) -> 
     """
     started = time.monotonic()
     token = _actor.set(who) if who is not None else None
+    charged = _charged.set(0)
     t = TOOLS.get(name)
     try:
         if not t:
@@ -135,6 +162,7 @@ def call(name: str, payload: dict | None = None, who: "Actor | None" = None) -> 
         _audit(name, payload, who, False, str(e)[:300], started)
         raise
     finally:
+        _charged.reset(charged)
         if token is not None:
             _actor.reset(token)
 
@@ -147,7 +175,7 @@ def _audit(tool_name, payload, who, ok, error, started):
         McpAuditLog.objects.create(
             user=who.user, role=who.role, tool=tool_name,
             payload={k: v for k, v in (payload or {}).items() if v is not None},
-            ok=ok, error=error, client=who.client,
+            ok=ok, error=error, client=who.client, paid_requests=_charged.get(),
             duration_ms=int((time.monotonic() - started) * 1000))
     except Exception:  # noqa: BLE001 — журнал не має права валити виклик
         pass

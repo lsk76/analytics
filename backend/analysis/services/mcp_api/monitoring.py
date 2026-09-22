@@ -499,6 +499,261 @@ def events_stats(task: str = "", days: int = 14, group_by: str = "day",
     return fmt.section(head, fmt.table(["період", "подій", "постів", "охоплення"], rows))
 
 
+# --------------------------------------------------------------------------- події
+EVENT_FILTER_DOCS = {
+    "task": "Задача (id/slug/назва — лише своя). Порожньо = усі свої.",
+    "days": "Останні N днів за датою події (як «Свіжість» в адмінці). Ігнорується, якщо задано date_from/date_to.",
+    "date_from": "Дата події від, YYYY-MM-DD (як фільтр «Період»).",
+    "date_to": "Дата події до, YYYY-MM-DD.",
+    "review_status": "approved (дефолт, як в адмінці) | pending | rejected | all.",
+    "region": "Субʼєкт РФ (канонічна назва/аліас) — фільтр «Субʼєкт РФ».",
+    "settlement": "Населений пункт (частина назви).",
+    "tag": "Теги: `категорія:тег` або просто `тег`; кілька через кому = ВСІ мають бути (як фасети в адмінці). Категорії: tag_categories або task_show.",
+    "query": "Текст в описі події (icontains).",
+    "channel": "@username каналу/джерела, який писав про подію (фільтр «Канал/Джерело»).",
+    "min_channels": "Мінімум унікальних каналів події (фільтр «Кількість каналів»). 0 = без обмеження.",
+    "min_reach": "Мінімальне охоплення. 0 = без обмеження.",
+}
+
+
+def _event_filters(task="", days=0, date_from="", date_to="", review_status="approved",
+                   region="", settlement="", tag="", query="", channel="",
+                   min_channels=0, min_reach=0):
+    """Спільний набір фільтрів для events_list/events_stats — дзеркало
+    list_filter адмінки подій (Період, Свіжість, Дослідження, Статус аудиту,
+    Субʼєкт РФ, фасети тегів, Канал/Джерело, Кількість каналів, Охоплення)."""
+    qs = common.scope_by_task(Event.objects.all())
+    desc = []
+    if task:
+        t = common.resolve_task(task)
+        qs, desc = qs.filter(task=t), desc + [f"задача {t.slug}"]
+    if review_status and review_status != "all":
+        if review_status not in dict(Event.REVIEW_CHOICES):
+            raise ToolError("review_status: approved | pending | rejected | all")
+        qs, desc = qs.filter(review_status=review_status), desc + [f"аудит {review_status}"]
+    if date_from or date_to:
+        if date_from:
+            qs = qs.filter(event_date__gte=common.parse_date(date_from, "date_from"))
+        if date_to:
+            qs = qs.filter(event_date__lte=common.parse_date(date_to, "date_to"))
+        desc.append(f"період {date_from or '…'} … {date_to or '…'}")
+    elif days:
+        since = timezone.now().date() - timedelta(days=max(1, int(days)))
+        qs, desc = qs.filter(event_date__gte=since), desc + [f"за {days} дн (з {since})"]
+    if region:
+        r = common.resolve_region(region)
+        qs, desc = qs.filter(region_subject=r), desc + [f"регіон {r.name}"]
+    if settlement:
+        qs, desc = qs.filter(settlement__icontains=settlement), desc + [f"нас. пункт ~{settlement}"]
+    for spec in _split_csv(tag):
+        cat, _, name = spec.rpartition(":")
+        tq = Q(tags__name__iexact=name.strip())
+        if cat:
+            tq &= Q(tags__category=cat.strip())
+        qs = qs.filter(tq)
+        desc.append(f"тег {spec}")
+    if query:
+        qs, desc = qs.filter(summary__icontains=query), desc + [f"текст ~{query}"]
+    if channel:
+        qs = qs.filter(posts__channel__username__iexact=channel.lstrip("@"))
+        desc.append(f"канал @{channel.lstrip('@')}")
+    if min_channels:
+        qs, desc = qs.filter(channel_count__gte=int(min_channels)), desc + [f"каналів ≥{min_channels}"]
+    if min_reach:
+        qs, desc = qs.filter(reach__gte=int(min_reach)), desc + [f"охоплення ≥{min_reach}"]
+    return qs.distinct(), desc
+
+
+def _tags_short(ev, n=6):
+    return ", ".join(f"{t.category}:{t.name}" for t in ev.tags.all()[:n])
+
+
+@tool("events_list", group="monitoring", params={**EVENT_FILTER_DOCS,
+      "order": "newest (дефолт) | oldest | reach | channels.",
+      "limit": "Скільки подій показати."})
+def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: str = "",
+                review_status: str = "approved", region: str = "", settlement: str = "",
+                tag: str = "", query: str = "", channel: str = "", min_channels: int = 0,
+                min_reach: int = 0, order: str = "newest", limit: int = 30):
+    """Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,
+    регіон, теги (фасети), канал, кількість каналів, охоплення.
+
+    Дефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;
+    `review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).
+    Категорії тегів для фільтра `tag` — `tag_categories`; id події — для
+    `event_show`/`event_update`.
+    """
+    qs, desc = _event_filters(task, days, date_from, date_to, review_status, region,
+                              settlement, tag, query, channel, min_channels, min_reach)
+    ordering = {"newest": ("-event_date", "-id"), "oldest": ("event_date", "id"),
+                "reach": ("-reach", "-id"), "channels": ("-channel_count", "-id")}.get(order)
+    if not ordering:
+        raise ToolError("order: newest | oldest | reach | channels")
+    total = qs.count()
+    rows = [[f"#{e.id}", str(e.event_date or "—"), e.task.slug if not task else "",
+             {"approved": "✓", "pending": "?", "rejected": "✗"}.get(e.review_status, e.review_status),
+             fmt.trunc(e.region_subject.name if e.region_subject_id else (e.region or "—"), 18),
+             fmt.trunc(e.settlement, 14), e.channel_count, e.reach,
+             fmt.trunc(_tags_short(e), 40), fmt.trunc(e.summary, 90)]
+            for e in qs.select_related("task", "region_subject")
+                        .prefetch_related("tags").order_by(*ordering)[:limit]]
+    headers = ["id", "дата", "задача", "аудит", "регіон", "нас. пункт", "кан.", "охопл.", "теги", "опис"]
+    if task:
+        rows = [r[:2] + r[3:] for r in rows]
+        headers = headers[:2] + headers[3:]
+    return fmt.joinsec(
+        fmt.section(f"Події: {total} (показано {len(rows)})", "; ".join(desc) or "без фільтрів"),
+        fmt.table(headers, rows) if rows else "нічого не знайдено",
+        "Фільтри: days/date_from/date_to, review_status, region, settlement, tag (кат:тег, кома = І), "
+        "query, channel, min_channels, min_reach; order=newest|oldest|reach|channels.")
+
+
+@tool("event_show", group="monitoring", params={"ref": "id події (з events_list)."})
+def event_show(ref: str):
+    """Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями."""
+    ev = _resolve_event(ref)
+    posts = ev.posts.select_related("channel").order_by("posted_at")[:15]
+    return fmt.joinsec(
+        fmt.section(f"Подія #{ev.id} · {ev.event_date} · {ev.task.slug}", fmt.kv([
+            ("аудит", f"{ev.review_status}" + (f" ({fmt.trunc(ev.review_notes, 80)})" if ev.review_notes else "")
+                      + (f", {fmt.ago(ev.reviewed_at)}" if ev.reviewed_at else "")),
+            ("регіон", (ev.region_subject.name if ev.region_subject_id else "—")
+                       + (f" (сирий: {ev.region})" if ev.region else "")),
+            ("нас. пункт", ev.settlement or "—"),
+            ("теги", ", ".join(f"{t.category}:{t.name}" for t in ev.tags.all()) or "—"),
+            ("постів/каналів/охоплення", f"{ev.post_count}/{ev.channel_count}/{ev.reach}"),
+            ("опис", ev.summary or "—"),
+            ("правити", f"/admin/analysis/event/{ev.id}/change/?task={ev.task_id}"),
+        ])),
+        fmt.section("Пости", fmt.table(
+            ["коли", "канал", "посилання"],
+            [[str(p.posted_at)[:16], fmt.trunc(p.channel_name or (p.channel.title if p.channel_id else ""), 24),
+              p.url] for p in posts])) if posts else "")
+
+
+def _resolve_event(ref):
+    if not str(ref).strip().lstrip("#").isdigit():
+        raise ToolError("подія — за числовим id (з events_list)")
+    ev = common.scope_by_task(Event.objects.select_related("task", "region_subject")) \
+        .filter(pk=common.as_int(ref, "ref")).first()
+    if not ev:
+        raise ToolError(f"події #{ref} немає")
+    return ev
+
+
+@tool("event_update", group="monitoring", mutates=True, params={
+      "ref": "id події (з events_list).",
+      "review": "approve — схвалити; reject — відхилити (буде видалено чисткою); pending — повернути в чергу аудиту. Порожньо = не чіпати.",
+      "notes": "Нотатка аудиту (чому). Пишеться разом із review або окремо.",
+      "add_tags": "Теги додати: `категорія:тег` через кому (напр. `topic:мігранти, attacker_nationality:узбек`). Категорія обовʼязкова; у закритій категорії тег має бути зі словника, у відкритій — канонізується (можливий виклик LLM) або створюється.",
+      "remove_tags": "Теги прибрати: `категорія:тег` або `тег` через кому.",
+      "region": "Субʼєкт РФ (канонічна назва/аліас). Порожньо = не змінювати; '-' = очистити.",
+      "settlement": "Населений пункт. Порожньо = не змінювати; '-' = очистити.",
+      "event_date": "Дата події YYYY-MM-DD. Порожньо = не змінювати.",
+      "summary": "Новий опис події. Порожньо = не змінювати."})
+def event_update(ref: str, review: str = "", notes: str = "", add_tags: str = "",
+                 remove_tags: str = "", region: str = "", settlement: str = "",
+                 event_date: str = "", summary: str = ""):
+    """Схвалити/відхилити/повернути в чергу, тегувати, поправити регіон/дату/опис події.
+
+    Схвалення/відхилення — те саме, що дії «✅ Схвалити» / «🚫 Відхилити» в
+    адмінці (нотатка `manual: … by <user>`, claim-lock аудиту знімається).
+    Відхилена подія зникає з дефолтних списків і графіків і згодом видаляється
+    чисткою — це не «м'яке приховування».
+    """
+    from analysis.models import Tag
+    from analysis.services import tags as tag_svc
+    ev = _resolve_event(ref)
+    who = registry.actor()
+    changed, fields = [], []
+    if review:
+        status = {"approve": Event.REVIEW_APPROVED, "approved": Event.REVIEW_APPROVED,
+                  "reject": Event.REVIEW_REJECTED, "rejected": Event.REVIEW_REJECTED,
+                  "pending": Event.REVIEW_PENDING}.get(review.strip().lower())
+        if not status:
+            raise ToolError("review: approve | reject | pending")
+        ev.review_status = status
+        ev.review_notes = notes or f"manual: {status} by {who}"
+        ev.reviewed_at = timezone.now() if status != Event.REVIEW_PENDING else None
+        ev.review_locked_at = None
+        fields += ["review_status", "review_notes", "reviewed_at", "review_locked_at"]
+        changed.append({"approved": "✅ схвалено", "rejected": "🚫 відхилено",
+                        "pending": "↩ у чергу аудиту"}[status])
+    elif notes:
+        ev.review_notes, fields = notes, fields + ["review_notes"]
+        changed.append("нотатка аудиту оновлена")
+    if region:
+        ev.region_subject = None if region.strip() == "-" else common.resolve_region(region)
+        fields.append("region_subject")
+        changed.append(f"регіон={ev.region_subject.name if ev.region_subject_id else '—'}")
+    if settlement:
+        ev.settlement = "" if settlement.strip() == "-" else settlement.strip()[:160]
+        fields.append("settlement")
+        changed.append(f"нас. пункт={ev.settlement or '—'}")
+    if event_date:
+        ev.event_date, fields = common.parse_date(event_date, "event_date"), fields + ["event_date"]
+        changed.append(f"дата={ev.event_date}")
+    if summary:
+        ev.summary, fields = summary.strip(), fields + ["summary"]
+        changed.append(f"опис ({len(ev.summary)} симв)")
+    added, dropped, skipped = [], [], []
+    for spec in _split_csv(add_tags):
+        cat, _, name = spec.rpartition(":")
+        if not cat or not name.strip():
+            raise ToolError(f"add_tags: «{spec}» — потрібно `категорія:тег`")
+        cat, name = cat.strip(), name.strip()
+        t = Tag.objects.filter(category=cat, name__iexact=name).first() \
+            or tag_svc.resolve(cat, name)
+        if t is None:
+            skipped.append(spec)
+            continue
+        if not ev.tags.filter(pk=t.pk).exists():
+            ev.tags.add(t)
+            added.append(f"{t.category}:{t.name}")
+    for spec in _split_csv(remove_tags):
+        cat, _, name = spec.rpartition(":")
+        qs = ev.tags.filter(name__iexact=name.strip())
+        if cat:
+            qs = qs.filter(category=cat.strip())
+        for t in list(qs):
+            ev.tags.remove(t)
+            dropped.append(f"{t.category}:{t.name}")
+    if added:
+        changed.append("теги +" + ", ".join(added))
+    if dropped:
+        changed.append("теги −" + ", ".join(dropped))
+    if skipped:
+        changed.append("НЕ додано (закрита категорія, немає у словнику або категорії не існує): "
+                       + ", ".join(skipped))
+    if not fields and not added and not dropped and not skipped:
+        return f"подія #{ev.id}: нічого не змінено (жоден параметр не передано)"
+    if fields:
+        ev.save(update_fields=fields)
+    return fmt.section(f"Подія #{ev.id} · {ev.event_date} · {ev.task.slug}",
+                       "\n".join(changed) + f"\nтеги тепер: {_tags_short(ev, 20) or '—'}")
+
+
+@tool("tag_categories", group="monitoring", params={
+      "task": "Задача — показати лише її категорії (порожньо = усі) і по 12 найчастіших тегів кожної."})
+def tag_categories(task: str = ""):
+    """Категорії тегів (`TagCategory`) і приклади тегів — щоб правильно писати
+    `tag=` у events_list і `add_tags=` в event_update. Закрита категорія =
+    лише словникові теги."""
+    from analysis.models import Tag, TagCategory
+    cats = TagCategory.objects.order_by("order", "key")
+    t = common.resolve_task(task) if task else None
+    if t is not None and t.tag_categories.exists():
+        cats = cats.filter(pk__in=t.tag_categories.values("pk"))
+    rows = []
+    for c in cats:
+        top = (Tag.objects.filter(category=c.key).order_by()
+               .annotate(n=Count("events", filter=Q(events__task=t) if t else None))
+               .order_by("-n", "name")[:12])
+        rows.append([c.key, fmt.trunc(c.label, 22), "закрита" if c.closed else "відкрита",
+                     fmt.trunc(", ".join(f"{x.name}({x.n})" if x.n else x.name for x in top), 90)])
+    return fmt.table(["ключ", "назва", "тип", "теги (події)"], rows) if rows else "категорій немає"
+
+
 @tool("channels_find", group="monitoring", params={
       "query": "@username або частина назви каналу в НАШОМУ довіднику. Пошук у базі TeleZip — це tz_channels.",
       "limit": "Скільки каналів показати."})
@@ -520,6 +775,264 @@ def channels_find(query: str, limit: int = 20):
                      rows) if rows else f"каналів за «{query}» немає"
 
 
+@tool("channel_add", group="monitoring", mutates=True, params={
+      "url": "Посилання або @username: https://t.me/name, @name, https://vk.com/club…, https://site/розділ. Ключ довідника — нормалізоване посилання, дубль не створиться.",
+      "title": "Назва (заповнює лише порожню).",
+      "region": "Субʼєкт РФ канонічною назвою або аліасом із довідника регіонів (заповнює лише порожній).",
+      "topics": "Теми/теги через кому (новини, етнічне, політика, локал-чат…). Додаються до наявних.",
+      "chat_type": "channel | chat | discussion | unknown. Порожньо = за платформою.",
+      "language": "Код мови (ru, uk…)."})
+def channel_add(url: str, title: str = "", region: str = "", topics: str = "",
+                chat_type: str = "", language: str = ""):
+    """Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.
+
+    Довідник спільний: рядок ідентифікує посилання, тож повторний виклик не
+    дублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал
+    ще й ОПИТУВАВСЯ, потрібне джерело: `source_add` (воно саме створить рядок
+    довідника, якщо його нема). У whitelist моніторингу — через адмінку.
+    """
+    reg = common.resolve_region(region) if region else None
+    try:
+        ch, created = Channel.ensure(url, name=title, region=reg, language=language)
+    except ValueError as e:
+        raise ToolError(str(e))
+    changed = []
+    if chat_type:
+        if chat_type not in dict(Channel.CHAT_TYPE_CHOICES):
+            raise ToolError(f"chat_type: очікується одне з "
+                            f"{', '.join(dict(Channel.CHAT_TYPE_CHOICES))}")
+        ch.chat_type, changed = chat_type, changed + ["chat_type"]
+    added = _merge_topics(ch, topics, "")
+    if added:
+        changed.append("topics")
+    if changed:
+        ch.save(update_fields=changed)
+    return fmt.section(
+        f"Довідник: #{ch.id} {'створено' if created else 'уже був'}",
+        _channel_card(ch) + (f"\nдодано теми: {', '.join(added)}" if added else ""))
+
+
+@tool("channel_update", group="monitoring", mutates=True, params={
+      "ref": "Канал довідника: id рядка (#123 із channels_find), @username, посилання або частина назви (має бути однозначною).",
+      "add_topics": "Теми/теги додати (через кому).",
+      "remove_topics": "Теми/теги прибрати (через кому).",
+      "title": "Нова назва. Порожньо = не змінювати.",
+      "region": "Субʼєкт РФ (канонічна назва/аліас). Порожньо = не змінювати; '-' = очистити.",
+      "settlement": "Населений пункт. Порожньо = не змінювати; '-' = очистити.",
+      "chat_type": "channel | chat | discussion | unknown. Порожньо = не змінювати.",
+      "focus": "Фокус каналу одним реченням. Порожньо = не змінювати; '-' = очистити.",
+      "discusses_problems": "Чи обговорює суспільні проблеми РФ. Не передавати = не змінювати."})
+def channel_update(ref: str, add_topics: str = "", remove_topics: str = "", title: str = "",
+                   region: str = "", settlement: str = "", chat_type: str = "",
+                   focus: str = "", discusses_problems: bool = None):
+    """Змінити рядок довідника: теми (теги), назву, регіон, населений пункт, тип, фокус.
+
+    Теми — це поле `Channel.topics` (список), те саме, що править агент
+    класифікації директорії; підписники/активність/доступ пише лише код.
+    """
+    ch = common.resolve_channel(ref)
+    changed, notes = [], []
+    if title:
+        ch.title, changed = title.strip()[:512], changed + ["title"]
+        notes.append(f"назва={ch.title}")
+    if region:
+        ch.region_subject = None if region.strip() == "-" else common.resolve_region(region)
+        changed.append("region_subject")
+        notes.append(f"регіон={ch.region_subject.name if ch.region_subject_id else '—'}")
+    if settlement:
+        ch.settlement = "" if settlement.strip() == "-" else settlement.strip()[:160]
+        changed.append("settlement")
+        notes.append(f"нас. пункт={ch.settlement or '—'}")
+    if chat_type:
+        if chat_type not in dict(Channel.CHAT_TYPE_CHOICES):
+            raise ToolError(f"chat_type: очікується одне з "
+                            f"{', '.join(dict(Channel.CHAT_TYPE_CHOICES))}")
+        ch.chat_type, changed = chat_type, changed + ["chat_type"]
+        notes.append(f"тип={chat_type}")
+    if focus:
+        ch.directory_focus = "" if focus.strip() == "-" else focus.strip()[:300]
+        changed.append("directory_focus")
+        notes.append("фокус оновлено")
+    if discusses_problems is not None:
+        ch.discusses_problems = bool(discusses_problems)
+        changed.append("discusses_problems")
+        notes.append(f"обговорює проблеми={fmt.flag(ch.discusses_problems)}")
+    added = _merge_topics(ch, add_topics, remove_topics)
+    if add_topics or remove_topics:
+        changed.append("topics")
+        notes.append(f"теми={', '.join(ch.topics) or '—'}")
+    if not changed:
+        return f"#{ch.id} {ch}: нічого не змінено (жоден параметр не передано)"
+    ch.save(update_fields=changed)
+    return fmt.section(f"Довідник: #{ch.id} {ch}", "\n".join(notes) + "\n\n" + _channel_card(ch))
+
+
+def _split_csv(spec: str) -> list[str]:
+    return [x.strip() for x in (spec or "").split(",") if x.strip()]
+
+
+def _merge_topics(ch, add: str, remove: str) -> list[str]:
+    """Оновити `Channel.topics` на місці (без збереження) → список доданих."""
+    topics = [t for t in (ch.topics or []) if isinstance(t, str)]
+    low = {t.lower() for t in topics}
+    added = []
+    for t in _split_csv(add):
+        if t.lower() not in low:
+            topics.append(t)
+            low.add(t.lower())
+            added.append(t)
+    drop = {t.lower() for t in _split_csv(remove)}
+    ch.topics = [t for t in topics if t.lower() not in drop]
+    return added
+
+
+def _channel_card(ch) -> str:
+    return fmt.kv([
+        ("посилання", ch.url or "—"),
+        ("username", f"@{ch.username}" if ch.username else "—"),
+        ("назва", ch.title or "—"),
+        ("платформа/тип", f"{ch.platform}/{ch.chat_type or '—'}"),
+        ("регіон", ch.region_subject.name if ch.region_subject_id else "—"),
+        ("нас. пункт", ch.settlement or "—"),
+        ("теми", ", ".join(ch.topics or []) or "—"),
+        ("підписників", ch.subscribers or "—"),
+        ("джерело", f"#{ch.source.id}" if hasattr(ch, "source") else "нема (source_add)"),
+    ])
+
+
+@tool("event_add", group="monitoring", mutates=True, params={
+      "task": "Задача (дослідження): id, slug або частина назви — лише своя.",
+      "url": "Посилання на пост Telegram (https://t.me/name/123, відкритий канал) або статтю на сайті."})
+def event_add(task: str, url: str):
+    """Додати подію за посиланням — як «Додати подію» в списку подій адмінки.
+
+    Текст поста/статті → скрін-промпт дослідження (relevant/summary/region/tags)
+    → Post(done) → Event(approved). Це виклик LLM і fetch сторінки; закритий
+    канал або нерелевантний текст → зрозуміла помилка. Якщо пост із таким URL
+    у дослідженні вже має подію — повернеться вона, дубля не буде.
+    """
+    from analysis.services.event_by_link import LinkError, create_event
+    t = common.resolve_task(task)
+    url = (url or "").strip()
+    if not url:
+        raise ToolError("дай посилання на пост або статтю")
+    try:
+        ev, created = create_event(t, url, registry.actor().user)
+    except LinkError as e:
+        raise ToolError(str(e))
+    except Exception as e:  # noqa: BLE001 — модель має бачити причину
+        raise ToolError(f"не вдалося створити подію: {type(e).__name__}: {e}")
+    tags = ", ".join(f"{x.category}:{x.name}" for x in ev.tags.all()[:8])
+    return fmt.section(
+        f"Подія #{ev.id} {'створена' if created else 'уже була — повернуто наявну'}",
+        fmt.kv([("задача", t.slug), ("дата", ev.event_date),
+                ("регіон", ev.region_subject.name if ev.region_subject_id else ev.region or "—"),
+                ("нас. пункт", ev.settlement or "—"), ("теги", tags or "—"),
+                ("статус", ev.review_status),
+                ("опис", fmt.trunc(ev.summary, 300)),
+                ("правити", f"/admin/analysis/event/{ev.id}/change/?task={t.id}")]))
+
+
+@tool("source_add", group="monitoring", mutates=True, params={
+      "url": "Посилання: https://t.me/name або @name (Telegram), https://site/section або RSS-адреса (сайт/RSS), https://vk.com/… (VK).",
+      "kind": "telegram | rss | web | vk. Порожньо = за посиланням (t.me → telegram, vk.com → vk, інакше web; '.xml'/'/rss'/'/feed' → rss).",
+      "task": "Одразу підписати задачу (id/slug/назва — лише свою). Порожньо = джерело без підписок (воркер його не опитуватиме).",
+      "name": "Назва (заповнює лише порожню в довіднику).",
+      "region": "Субʼєкт РФ канонічною назвою/аліасом.",
+      "language": "Код мови (ru, uk…).",
+      "poll_interval_sec": "Інтервал полінгу в секундах. 0 = дефолт моделі.",
+      "account": "Telegram-акаунт для читання (id/номер/назва) — лише для kind=telegram."})
+def source_add(url: str, kind: str = "", task: str = "", name: str = "", region: str = "",
+               language: str = "", poll_interval_sec: int = 0, account: str = ""):
+    """Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.
+
+    Джерело = рядок довідника (`Channel`, створюється/знаходиться за посиланням)
+    + розклад/курсор/акаунт. Без підписки активної infospace-задачі
+    `info_collect` його НЕ бере в роботу — тож зазвичай передавай `task`.
+    Повторний виклик з тим самим посиланням віддає наявне джерело.
+    """
+    url = (url or "").strip()
+    if not url:
+        raise ToolError("дай посилання")
+    kind = (kind or _guess_kind(url)).strip().lower()
+    if kind not in dict(Source.KIND_CHOICES):
+        raise ToolError(f"kind: очікується одне з {', '.join(dict(Source.KIND_CHOICES))}")
+    reg = common.resolve_region(region) if region else None
+    t = common.resolve_task(task) if task else None
+    acc = common.resolve_account(account) if account else None
+    if acc is not None and kind != Source.KIND_TELEGRAM:
+        raise ToolError("акаунт має сенс лише для kind=telegram")
+    extra = {}
+    if poll_interval_sec:
+        extra["poll_interval_sec"] = max(60, int(poll_interval_sec))
+    if acc is not None:
+        extra["tg_account"] = acc
+    try:
+        src, created = Source.ensure(kind, url, name=name, region=reg, language=language,
+                                     **extra)
+    except ValueError as e:
+        raise ToolError(str(e))
+    notes = [f"джерело #{src.id} {'створено' if created else 'уже було'}: {src.name} ({src.url}), "
+             f"тип {src.kind}, інтервал {src.poll_interval_sec} с"]
+    if not created and extra:
+        for k, v in extra.items():
+            setattr(src, k, v)
+        src.save(update_fields=list(extra))
+        notes.append("оновлено: " + ", ".join(extra))
+    if t is not None:
+        sub, sub_created = SourceSubscription.objects.get_or_create(
+            task=t, source=src, defaults={"is_active": True})
+        if not sub_created and not sub.is_active:
+            sub.is_active = True
+            sub.save(update_fields=["is_active"])
+            sub_created = True
+        notes.append(f"підписка {t.slug}: {'додано' if sub_created else 'уже є'}")
+    else:
+        notes.append("підписок нема — воркер не опитуватиме; підписати: source_subscribe")
+    return fmt.section("Джерело", "\n".join(notes))
+
+
+def _guess_kind(url: str) -> str:
+    u = url.strip().lower()
+    if u.startswith("@") or "t.me/" in u:
+        return Source.KIND_TELEGRAM
+    if "vk.com/" in u:
+        return Source.KIND_VK
+    if u.endswith((".xml", ".rss", "/rss", "/feed", "/rss/", "/feed/")) or "rss" in u.rsplit("/", 1)[-1]:
+        return Source.KIND_RSS
+    return Source.KIND_WEB
+
+
+@tool("source_subscribe", group="monitoring", mutates=True, params={
+      "ref": "Джерело: id, посилання або частина назви.",
+      "task": "Задача (id/slug/назва — лише своя).",
+      "active": "true — підписати/увімкнути; false — вимкнути підписку (історія лишається).",
+      "priority": "Пріоритет підписки (менше = вище). 0 = не змінювати."})
+def source_subscribe(ref: str, task: str, active: bool = True, priority: int = 0):
+    """Підписати задачу на джерело (або вимкнути підписку) — `SourceSubscription`.
+
+    Саме підписка робить джерело «робочим» для `info_collect`. Вимкнення не
+    видаляє ні джерело, ні зібране — лише виключає з наступних зборів.
+    """
+    src = common.resolve_source(ref)
+    t = common.resolve_task(task)
+    sub, created = SourceSubscription.objects.get_or_create(
+        task=t, source=src, defaults={"is_active": bool(active)})
+    changed = []
+    if not created and sub.is_active != bool(active):
+        sub.is_active = bool(active)
+        changed.append("is_active")
+    if priority:
+        sub.priority = int(priority)
+        changed.append("priority")
+    if changed:
+        sub.save(update_fields=changed)
+    state = "активна" if sub.is_active else "вимкнена"
+    return (f"підписка {t.slug} → #{src.id} {src.name}: "
+            f"{'створено' if created else ('оновлено' if changed else 'без змін')}, "
+            f"{state}, пріоритет {sub.priority}")
+
+
 @tool("task_update", group="monitoring", mutates=True, params={
       "ref": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
       "telezip_query": "Новий пошуковий запит задачі. Порожньо = не змінювати; щоб ОЧИСТИТИ запит, передай '-'. УВАГА, ДІАЛЕКТ ІНШИЙ, НІЖ У tz_find: збір ходить у v3, де ПРОБІЛ = АБО, а І — це `+` перед групою (`тема +(дія) -(шум)`). У tz_find (v4) навпаки. Запит, перенесений звідси в tz_find без переписування, тихо дасть 0 збігів, і навпаки.",
@@ -529,11 +1042,24 @@ def channels_find(query: str, limit: int = 20):
       "is_active": "Увімкнути/вимкнути задачу. Не передавати = не змінювати.",
       "min_subscribers": "Відсівати канали, менші за це число підписників. -1 = не змінювати, 0 = вимкнути фільтр.",
       "llm_model": "Перевизначити модель LLM для задачі. Порожньо = не змінювати; повернути дефолт із коду звідси не можна — це робиться в адмінці задачі.",
-      "display_name": "Людська назва секції для простого інтерфейсу (/app/), напр. «Інформпростір регіонів». Порожньо = не змінювати; '-' = очистити (показуватиметься технічна назва)."})
+      "display_name": "Людська назва секції для простого інтерфейсу (/app/), напр. «Інформпростір регіонів». Порожньо = не змінювати; '-' = очистити (показуватиметься технічна назва).",
+      "name": "Технічна назва задачі. Порожньо = не змінювати.",
+      "description": "Опис задачі (для людей). Порожньо = не змінювати; '-' = очистити.",
+      "search_posts": "Збирати пости каналів. Не передавати = не змінювати.",
+      "search_comments": "Збирати коментарі/повідомлення чатів. Не передавати = не змінювати.",
+      "geo_enabled": "Визначати регіон подій (гео-стадія). Не передавати = не змінювати.",
+      "review_enabled": "Авто-аудит подій LLM після створення. Не передавати = не змінювати.",
+      "dedup_window_days": "Вікно дедупу подій у днях. 0 = не змінювати.",
+      "classify_prompt": "System-промпт класифікації постів (повний текст). Порожньо = не змінювати; '-' = повернути дефолт із коду. Перед зміною подивись поточний: task_show."})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
-                min_subscribers: int = -1, llm_model: str = "", display_name: str = ""):
-    """Змінити параметри збору задачі: запит TeleZip, мови, unique, розмір чанка.
+                min_subscribers: int = -1, llm_model: str = "", display_name: str = "",
+                name: str = "", description: str = "", search_posts: bool = None,
+                search_comments: bool = None, geo_enabled: bool = None,
+                review_enabled: bool = None, dedup_window_days: int = 0,
+                classify_prompt: str = ""):
+    """Змінити параметри задачі: збір (запит TeleZip, мови, unique, чанк), назву/опис,
+    прапорці стадій (пости/коментарі, гео, аудит), вікно дедупу, промпт класифікації.
 
     Замикає маршрут розвідки: `tz_find(stats=true)` показав, що обсяг здоровий →
     фіксуємо його в задачі → `run_create` збирає ним period. Старий запит
@@ -570,6 +1096,26 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
     if display_name:
         t.display_name = "" if display_name.strip() == "-" else display_name.strip()[:120]
         changed.append(f"назва для користувача: «{t.human_name}»")
+    if name:
+        t.name = name.strip()[:200]
+        changed.append(f"назва={t.name}")
+    if description:
+        t.description = "" if description.strip() == "-" else description.strip()
+        changed.append("опис " + ("очищено" if not t.description else f"({len(t.description)} симв)"))
+    for flag_name, value, label in (("search_posts", search_posts, "пости"),
+                                    ("search_comments", search_comments, "коментарі"),
+                                    ("geo_enabled", geo_enabled, "гео"),
+                                    ("review_enabled", review_enabled, "аудит LLM")):
+        if value is not None:
+            setattr(t, flag_name, bool(value))
+            changed.append(f"{label}={fmt.flag(bool(value))}")
+    if dedup_window_days:
+        t.dedup_window_days = max(1, int(dedup_window_days))
+        changed.append(f"вікно дедупу={t.dedup_window_days} дн")
+    if classify_prompt:
+        t.classify_system_prompt = "" if classify_prompt.strip() == "-" else classify_prompt
+        changed.append("промпт класифікації " + ("→ дефолт із коду" if not t.classify_system_prompt
+                                                 else f"({len(t.classify_system_prompt)} симв)"))
     if not changed:
         return f"#{t.id} {t.slug}: нічого не змінено (жоден параметр не передано)"
     t.save()

@@ -241,8 +241,9 @@ def settings_list(prefix: str = ""):
     qs = Setting.objects.all()
     if prefix:
         qs = qs.filter(key__icontains=prefix)
+    # креденшали в значеннях (proxy_url з паролем, ключі) — лише адміну
     rows = [[s.key, fmt.trunc(s.description, 60), len(s.value or ""),
-             fmt.trunc(s.value, 80), fmt.ago(s.updated_at)]
+             fmt.trunc(common.mask_setting(s.key, s.value), 80), fmt.ago(s.updated_at)]
             for s in qs.order_by("key")]
     return fmt.table(["ключ", "опис", "симв.", "значення", "оновлено"], rows) \
         if rows else "налаштувань немає"
