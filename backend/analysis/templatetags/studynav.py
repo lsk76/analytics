@@ -1,5 +1,6 @@
-"""Навігація адмінки «для людей»: верхній навбар (Дослідження · Канали · Акаунти)
-і панель дослідження з вкладками (Події · Графіки · Налаштування · Збори/Джерела/Чати).
+"""Навігація адмінки «для людей»: верхній навбар (Дослідження · Канали · Акаунти ·
+Публікації) і панель дослідження з вкладками (Події · Налаштування ·
+Збори/Джерела/Чати · Публікації).
 
 Активна вкладка визначається лише за адресою й параметрами запиту — ніякого
 стану в сесії. Дослідження береться з ?task= / ?task__id__exact= або з адреси
@@ -36,13 +37,18 @@ def study_topnav(context):
     p = request.path
     user = request.user
     tabs = [{"label": "Дослідження", "url": "/admin/",
-             "active": p == "/admin/" or p.startswith("/admin/analysis/") and not p.startswith("/admin/analysis/channel/")}]
+             "active": p == "/admin/" or p.startswith("/admin/analysis/")
+             and not p.startswith(("/admin/analysis/channel/", "/admin/analysis/publish"))}]
     if user.has_perm("analysis.view_channel"):
         tabs.append({"label": "Канали", "url": "/admin/analysis/channel/",
                      "active": p.startswith("/admin/analysis/channel/")})
     if user.has_perm("accounts.view_telegramaccount"):
         tabs.append({"label": "Акаунти", "url": "/admin/accounts/telegramaccount/",
                      "active": p.startswith("/admin/accounts/")})
+    if user.has_perm("analysis.view_publishconfig"):
+        # профілі публікації в Telegram-чат (свої, за owner) + журнал опублікованого
+        tabs.append({"label": "Публікації", "url": "/admin/analysis/publishconfig/",
+                     "active": p.startswith("/admin/analysis/publish")})
     return {"tabs": tabs, "is_superuser": user.is_superuser}
 
 
@@ -86,4 +92,7 @@ def study_links(task):
         if task.pipeline != AnalysisTask.PIPELINE_TGSEARCH:
             links.append({"label": "Збори", "url": f"/admin/analysis/researchrun/?task__id__exact={tid}",
                           "prefix": "/admin/analysis/researchrun/", "perm": "analysis.view_researchrun"})
+    # профілі публікації подій цього дослідження в Telegram-чат (будь-який конвеєр)
+    links.append({"label": "Публікації", "url": f"/admin/analysis/publishconfig/?task__id__exact={tid}",
+                  "prefix": "/admin/analysis/publishconfig/", "perm": "analysis.view_publishconfig"})
     return links

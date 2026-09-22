@@ -82,11 +82,18 @@ class TaskSingleFilter(admin.SimpleListFilter):
             self.template = "admin/filters/hidden.html"   # фільтр застосовується, але не малюється
 
     def lookups(self, request, model_admin):
-        return [(str(t.id), t.human_name) for t in AnalysisTask.objects.order_by("name")]
+        return [(str(t.id), t.human_name) for t in visible_tasks(request).order_by("name")]
 
     def queryset(self, request, queryset):
         v = self.value()
         return queryset.filter(task_id=v) if v else queryset
+
+
+def visible_tasks(request):
+    """Дослідження, які цей користувач бачить: суперюзер — усі, решта — свої (owner).
+    Для фільтрів списків — щоб не світити чужі назви."""
+    qs = AnalysisTask.objects.all()
+    return qs if request.user.is_superuser else qs.filter(owner=request.user)
 
 
 def facet_base(changelist, request, exclude_spec):
@@ -292,7 +299,7 @@ class StudyTaskFilter(admin.SimpleListFilter):
             self.template = "admin/filters/hidden.html"
 
     def lookups(self, request, model_admin):
-        return [(str(t.id), t.human_name) for t in AnalysisTask.objects.order_by("name")]
+        return [(str(t.id), t.human_name) for t in visible_tasks(request).order_by("name")]
 
     def queryset(self, request, queryset):
         v = self.value()
@@ -754,11 +761,21 @@ class OwnedAdminMixin:
 
 
 @admin.register(PublishConfig)
-class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
+class PublishConfigAdmin(StudyOwnedAdminMixin, OwnedAdminMixin, admin.ModelAdmin):
+    """Вкладка «Публікації» дослідження (і розділ «Публікації» в навбарі):
+    профілі публікації подій у Telegram-чат. Свої — за owner; «Додати» з
+    вкладки підставляє дослідження; коли дослідження обране, колонка
+    «Дослідження» схована (її показує панель зверху)."""
     list_display = ("name", "owner", "is_active", "task", "regions_display",
                     "review_status", "publish_from", "chat_id", "max_per_pass",
                     "published_count")
-    list_filter = ("is_active", "task", "review_status", "regions")
+    list_filter = (StudyTaskFilter, "is_active", "review_status", "regions")
+    actions = ("make_inactive", "make_active")
+
+    def get_actions(self, request):
+        # профіль — власна річ користувача, стокове видалення лишаємо
+        # (StudyOwnedAdminMixin прибирає його для підписок/чатів)
+        return admin.ModelAdmin.get_actions(self, request)
     search_fields = ("name", "chat_id")
     autocomplete_fields = ("task", "tags")
     filter_horizontal = ("tags", "require_tags", "exclude_tags", "allow_null_region_tags", "regions")
@@ -790,7 +807,9 @@ class PublishConfigAdmin(OwnedAdminMixin, admin.ModelAdmin):
 
     @admin.display(description="Опубліковано")
     def published_count(self, obj):
-        return obj.published.filter(status=PublishedEvent.STATUS_PUBLISHED).count()
+        n = obj.published.filter(status=PublishedEvent.STATUS_PUBLISHED).count()
+        return format_html('<a href="/admin/analysis/publishedevent/?config__id__exact={}">{}</a>',
+                           obj.id, n)
 
 
 class OwnedConfigListFilter(admin.RelatedFieldListFilter):
