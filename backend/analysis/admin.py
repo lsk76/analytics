@@ -299,13 +299,32 @@ class StudyTaskFilter(admin.SimpleListFilter):
         return queryset.filter(task_id=v) if v else queryset
 
 
+def study_from_changelist_filters(request):
+    """id дослідження з ?task= / ?task__id__exact= або з _changelist_filters
+    (так Django передає фільтри списку на форму «Додати»)."""
+    from urllib.parse import parse_qs
+    g = request.GET
+    tid = g.get("task") or g.get("task__id__exact")
+    if not tid and g.get("_changelist_filters"):
+        tid = (parse_qs(g["_changelist_filters"]).get("task__id__exact") or [None])[0]
+    return int(tid) if tid and str(tid).isdigit() else None
+
+
 class StudyOwnedAdminMixin:
     """Список сутностей, що належать дослідженню (підписки, чати, збори):
     коли дослідження обране (?task__id__exact=), колонка «Дослідження» зникає —
     її показує панель зверху. Стокове «Видалити» прибране: замість нього
-    зрозумілі дії, які не чіпають спільні довідники."""
+    зрозумілі дії, які не чіпають спільні довідники. «Додати» з вкладки
+    дослідження підставляє це дослідження у форму."""
     task_column = "task"
     study_actions = ("make_inactive", "make_active", "remove_from_study")
+
+    def get_changeform_initial_data(self, request):
+        data = super().get_changeform_initial_data(request)
+        tid = study_from_changelist_filters(request)
+        if tid and "task" not in data:
+            data["task"] = tid
+        return data
 
     def get_list_display(self, request):
         ld = list(super().get_list_display(request))
@@ -426,12 +445,27 @@ class ResearchRunAdmin(admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
                     "chunk_progress", "stage_progress", "posts_collected", "created_at")
     list_filter = (StudyTaskFilter, "status")
+    fieldsets = (
+        (None, {"fields": ("task", "date_from", "date_to", "title", "chunk_days")}),
+        ("Службове", {"classes": ("collapse",),
+                      "fields": ("min_chunk_days", "status", "error", "started_at", "finished_at",
+                                 "stage_progress", "posts_collected", "posts_relevant",
+                                 "events_total", "events_corroborated", "params", "stats",
+                                 "created_at")}),
+    )
 
     def get_list_display(self, request):
         ld = list(super().get_list_display(request))
         if request.GET.get("task__id__exact"):   # дослідження показує панель зверху
             ld.remove("task")
         return ld
+
+    def get_changeform_initial_data(self, request):
+        data = super().get_changeform_initial_data(request)
+        tid = study_from_changelist_filters(request)
+        if tid and "task" not in data:
+            data["task"] = tid
+        return data
     search_fields = ("title", "task__name")
     actions = [enqueue_job_action, reprocess_period_action, recollect_fresh_action]
     readonly_fields = ("started_at", "finished_at", "stage_progress", "params", "stats",
@@ -1282,6 +1316,12 @@ class MonitorChatAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
     actions = StudyOwnedAdminMixin.study_actions
     search_fields = ("channel__username", "channel__title", "notes")
     autocomplete_fields = ("task", "channel", "tg_account")
+    fieldsets = (
+        (None, {"fields": ("task", "channel", "is_active", "stream_enabled", "forward_media",
+                           "is_critical_source", "priority", "notes")}),
+        ("Службове", {"classes": ("collapse",),
+                      "fields": ("tg_account", "stream_last_msg_id", "added_by")}),
+    )
     list_editable = ("is_active", "stream_enabled", "is_critical_source", "priority")
     list_select_related = ("task", "channel", "channel__region_subject", "tg_account")
     ordering = ("channel__region_subject__name", "-channel__subscribers")

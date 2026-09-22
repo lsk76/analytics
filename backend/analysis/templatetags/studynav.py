@@ -17,14 +17,14 @@ _TASK_PATH = re.compile(r"^/admin/analysis/analysistask/(\d+)/")
 
 
 def _current_task(request):
-    g = request.GET
-    tid = g.get("task") or g.get("task__id__exact") or g.get("task__id")
+    from analysis.admin import study_from_changelist_filters
+    tid = study_from_changelist_filters(request)
     if not tid:
         m = _TASK_PATH.match(request.path)
-        tid = m.group(1) if m else None
-    if not tid or not str(tid).isdigit():
+        tid = int(m.group(1)) if m else None
+    if not tid:
         return None
-    qs = AnalysisTask.objects.filter(pk=int(tid))
+    qs = AnalysisTask.objects.filter(pk=tid)
     if not request.user.is_superuser:
         qs = qs.filter(owner=request.user)
     return qs.first()
