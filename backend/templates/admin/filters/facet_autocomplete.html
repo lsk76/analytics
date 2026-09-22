@@ -58,7 +58,7 @@ if (!document.getElementById('select2-css-loaded')) {
     display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 2px 8px; line-height: 1.4; }
 .select2-container--default .select2-selection--multiple .select2-selection__choice__display { padding: 0; }
 .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
-    position: static; order: -1; border: 0; background: none; padding: 0; margin: 0;
+    position: static; order: 2; border: 0; background: none; padding: 0; margin: 0;
     color: var(--primary-fg, #fff); font-weight: 700; line-height: 1; }
 .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
     background: none; color: var(--primary-fg, #fff); opacity: .8; }
@@ -68,8 +68,8 @@ if (!document.getElementById('select2-css-loaded')) {
     color: var(--body-fg, #333); margin: 0; padding: 0 2px; height: 26px; line-height: 26px;
     min-width: 60px; width: 100% !important; font: inherit; }
 .select2-container--default .select2-search--inline .select2-search__field::placeholder { color: var(--body-quiet-color, #666); }
-.select2-container--default .select2-selection--multiple .select2-selection__clear {
-    position: static; order: 2; margin: 0 0 0 auto; padding: 0 4px; height: auto; color: var(--body-quiet-color, #666); }
+/* Загальний хрестик «очистити все» не потрібен — є кнопка «Очистити». */
+.select2-container--default .select2-selection--multiple .select2-selection__clear { display: none; }
 </style>
 
 <ul>
@@ -113,7 +113,7 @@ if (!document.getElementById('select2-css-loaded')) {
         var param = $sel.data('filter-param');
         $sel.select2({
             placeholder: '{{ spec.placeholder|default:"Пошук..."|escapejs }}',
-            allowClear: true, width: '100%', closeOnSelect: false
+            allowClear: false, width: '100%', closeOnSelect: false
         });
         $('#apply_{{ spec.parameter_name }}').on('click', function() {
             var url = new URL(window.location);
