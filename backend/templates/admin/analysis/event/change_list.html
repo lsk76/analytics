@@ -9,11 +9,54 @@
   </li>
   {% if has_add_permission %}
   <li>
-    {# «Додати подію» = лише посилання, решту заповнює програма; дослідження береться з ?task= #}
-    <a href="{% url 'admin:analysis_event_add_by_link' %}{% if request.GET.task %}?task={{ request.GET.task }}{% endif %}"
-       class="addlink">Додати подію</a>
+    {# «Додати подію» = попап з одним полем «Посилання»; дослідження береться з ?task=.
+       Без обраного дослідження — окрема сторінка з вибором. #}
+    {% if request.GET.task %}
+      <a href="#" class="addlink" onclick="document.getElementById('abl-dialog').showModal();return false;">Додати подію</a>
+    {% else %}
+      <a href="{% url 'admin:analysis_event_add_by_link' %}" class="addlink">Додати подію</a>
+    {% endif %}
   </li>
   {% endif %}
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+{% if has_add_permission and request.GET.task %}
+<dialog id="abl-dialog" class="abl-dialog">
+  <form method="post" action="{% url 'admin:analysis_event_add_by_link' %}?task={{ request.GET.task }}">
+    {% csrf_token %}
+    <input type="hidden" name="task" value="{{ request.GET.task }}">
+    <input type="hidden" name="_from" value="list">
+    <h2>Додати подію</h2>
+    <p class="abl-lead">Вставте посилання на пост у Telegram або новину на сайті. Програма сама
+      прочитає текст, напише опис, визначить регіон і теми, далі відкриє картку події.</p>
+    <input type="url" name="url" required autofocus
+           placeholder="https://t.me/канал/12345 або https://сайт/новина">
+    <div class="abl-hint">Telegram — лише відкриті канали. Обробка до пів хвилини.</div>
+    <div class="abl-actions">
+      <button type="button" class="button" onclick="document.getElementById('abl-dialog').close()">Скасувати</button>
+      <input type="submit" class="default" value="Створити подію" id="abl-submit">
+    </div>
+  </form>
+</dialog>
+<style>
+  .abl-dialog { border: 1px solid var(--hairline-color); border-radius: 10px; padding: 0; width: min(640px, calc(100% - 32px));
+                background: var(--body-bg); color: var(--body-fg); }
+  .abl-dialog::backdrop { background: rgba(0,0,0,.45); }
+  .abl-dialog form { padding: 20px 22px 18px; margin: 0; }
+  .abl-dialog h2 { margin: 0 0 8px; }
+  .abl-dialog .abl-lead { color: var(--body-quiet-color); margin: 0 0 12px; }
+  .abl-dialog input[type=url] { width: 100%; box-sizing: border-box; font-size: 15px; padding: 9px 11px; }
+  .abl-dialog .abl-hint { color: var(--body-quiet-color); font-size: 12px; margin-top: 6px; }
+  .abl-dialog .abl-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+</style>
+<script>
+  document.querySelector('#abl-dialog form').addEventListener('submit', function () {
+    var b = document.getElementById('abl-submit'); b.value = 'Читаємо і заповнюємо…'; b.disabled = true;
+  });
+</script>
+{% endif %}
 {% endblock %}
 
 {% block extrahead %}

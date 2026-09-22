@@ -2425,7 +2425,11 @@ class EventAdmin(admin.ModelAdmin):
                 except Exception as e:  # noqa: BLE001
                     logger.exception("add_by_link: %s", url)
                     error = f"Не вдалося створити подію: {type(e).__name__}: {e}"
-                else:
+                if error and request.POST.get("_from") == "list" and task is not None:
+                    # попап зі списку подій: помилку показуємо там же, а не на окремій сторінці
+                    self.message_user(request, error, level=messages.ERROR)
+                    return HttpResponseRedirect(f"/admin/analysis/event/?task={task.id}")
+                if not error:
                     self.message_user(
                         request,
                         ("Подію створено з посилання — перевірте опис, регіон і теми."
