@@ -24,6 +24,12 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from rangefilter.filters import DateRangeFilterBuilder, DateRangeFilter
 
+# Кнопка «Показати кількість» (Django 5 facets) у всій адмінці вимкнена: наші
+# фасетні фільтри (теги, суб'єкт, джерело) і так показують лічильники, а стоковий
+# підрахунок по кожній опції на таблицях у сотні тисяч рядків — повільний і
+# для користувача це незрозуміла кнопка.
+admin.ModelAdmin.show_facets = admin.ShowFacets.NEVER
+
 
 # --- date range filter that speaks YYYY-MM-DD (not the uk-locale DD.MM.YYYY) ---
 # The whole app standardises on ISO dates: chart drill-down URLs build
@@ -1136,22 +1142,16 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
             path("<path:object_id>/run-now/",
                  self.admin_site.admin_view(self.run_now_view),
                  name="analysis_analysistask_run_now"),
-            path("<path:object_id>/rescreen/",
-                 self.admin_site.admin_view(self.rescreen_view),
-                 name="analysis_analysistask_rescreen"),
         ]
         return my + super().get_urls()
 
     def run_now_view(self, request, object_id):
-        """Кнопка «Запустити зараз (тест)» — полінг нових→скрін→події У ФОНІ."""
+        """Кнопка «Оновити зараз» — полінг нових→скрін→події У ФОНІ.
+        Кнопки «Перепрогнати фільтр» (rescreen_task_now: видаляє ВСІ події
+        дослідження й перескрінює всі пости) в адмінці більше нема — це
+        експертна операція, її роблять свідомо через асистента/команду."""
         return self._kick_bg(request, object_id, "run_task_now",
-                             "Тест-прогін", "run_now")
-
-    def rescreen_view(self, request, object_id):
-        """Кнопка «Перепрогнати фільтр» — скинути й застосувати ПОТОЧНИЙ промпт
-        до вже зібраних постів (тюнінг фільтра) У ФОНІ. Події перебудовуються."""
-        return self._kick_bg(request, object_id, "rescreen_task_now",
-                             "Перепрогін фільтра", "rescreen")
+                             "Оновлення", "run_now")
 
     def _kick_bg(self, request, object_id, fn_name, label, log_tag):
         """Спільний запуск infospace-операції у фоновому потоці (без таймауту)."""
