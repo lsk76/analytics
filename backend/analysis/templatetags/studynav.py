@@ -72,8 +72,6 @@ def study_links(task):
     links = [
         {"label": "Події", "url": f"/admin/analysis/event/?task={tid}",
          "prefix": "/admin/analysis/event/", "perm": "analysis.view_event"},
-        {"label": "Графіки", "url": f"/admin/analysis/event/?task={tid}#charts",
-         "prefix": "", "perm": "analysis.view_event"},
         {"label": "Налаштування", "url": f"/admin/analysis/analysistask/{tid}/change/",
          "prefix": "/admin/analysis/analysistask/", "perm": "analysis.view_analysistask"},
     ]

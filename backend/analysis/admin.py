@@ -73,11 +73,16 @@ class TaskSingleFilter(admin.SimpleListFilter):
     """Задача: ОДИНОЧНИЙ вибір (стокові лінки — клік на іншу задачу замінює
     вибір). Параметр лишається ?task=<id>, тож усі наявні посилання
     (матриця, графіки, закладки) працюють без змін."""
-    title = "Задача"
+    title = "Дослідження"
     parameter_name = "task"
 
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        if self.value():   # дослідження вже обране → його показує панель зверху,
+            self.template = "admin/filters/hidden.html"   # фільтр застосовується, але не малюється
+
     def lookups(self, request, model_admin):
-        return [(str(t.id), t.name) for t in AnalysisTask.objects.order_by("name")]
+        return [(str(t.id), t.human_name) for t in AnalysisTask.objects.order_by("name")]
 
     def queryset(self, request, queryset):
         v = self.value()
@@ -3081,18 +3086,33 @@ class EventAdmin(admin.ModelAdmin):
             return True
         return super().lookup_allowed(lookup, value, *args, **kwargs)
 
+    _NATIONALITY_CATS = {"nationality", "attacker_nationality", "victim_nationality"}
+
     def get_list_filter(self, request):
         # build one faceted multiselect per tag category, dynamically from the registry
-        cat_filters = [tag_category_filter(c.key, c.label)
-                       for c in TagCategory.objects.all()]
+        cats = list(TagCategory.objects.all())
+        ethnic_filters = (InterEthnicFilter, RosMinorityClashFilter)
+        task_id = request.GET.get("task")
+        if task_id and str(task_id).isdigit():
+            # Дослідження обране → лише доречні фільтри: категорії тегів цього
+            # дослідження (або ті, що реально є на його подіях), етнічні
+            # спецфільтри — лише коли є категорії національностей.
+            task = AnalysisTask.objects.filter(pk=int(task_id)).first()
+            keys = set(task.tag_categories.values_list("key", flat=True)) if task else set()
+            if not keys:
+                keys = set(Tag.objects.filter(events__task_id=task_id)
+                           .values_list("category", flat=True).distinct())
+            cats = [c for c in cats if c.key in keys]
+            if not keys & self._NATIONALITY_CATS:
+                ethnic_filters = ()
+        cat_filters = [tag_category_filter(c.key, c.label) for c in cats]
         return (
             ("event_date", ISODateRangeFilterBuilder(title="Період")),
             RecentWindowFilter,
             TaskSingleFilter,
             ReviewStatusDefaultFilter,
             ReviewSourceFilter,
-            InterEthnicFilter,
-            RosMinorityClashFilter,
+            *ethnic_filters,
             SubjectFilter,
             *cat_filters,
             ChannelFilter,

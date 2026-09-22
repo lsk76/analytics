@@ -1,9 +1,9 @@
 from django.contrib import admin
 from django.urls import path, include
 
-admin.site.site_header = "Аналіз подій у Telegram"
-admin.site.site_title = "Аналіз подій"
-admin.site.index_title = "Адміністрування"
+admin.site.site_header = "Delta4Аналітик"
+admin.site.site_title = "Delta4Аналітик"
+admin.site.index_title = "Дослідження"
 
 urlpatterns = [
     path("admin/", admin.site.urls),
