@@ -25,8 +25,8 @@
 .studies-count { color: var(--body-quiet-color); font-weight: 500; margin-left: 6px; }
 .study-card-desc { color: var(--body-quiet-color); font-size: 13px; line-height: 1.35; margin: 0 0 10px;
                    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.studies-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-.study-card { background: var(--body-bg); border: 1px solid var(--hairline-color); border-left: 5px solid #8a8f98; border-radius: 10px; padding: 14px 16px; }
+.studies-grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch; }
+.study-card { flex: 1 1 320px; max-width: 460px; box-sizing: border-box; background: var(--body-bg); border: 1px solid var(--hairline-color); border-left: 5px solid #8a8f98; border-radius: 10px; padding: 14px 16px; }
 .study-card.live { border-left-color: #2e7d32; } .study-card.problem { border-left-color: #c26a00; }
 .study-card-name { font-size: 17px; font-weight: 650; text-decoration: none; display: block; margin-bottom: 6px; }
 .study-card-status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--body-quiet-color); }
