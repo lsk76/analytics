@@ -82,9 +82,55 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ 2
     def _sources(self):
-        """Після кроку 2 джерело без рядка довідника неможливе (FK NOT NULL):
-        зв'язування робилося міграцією 0084→0085. Лишаємо лише звіт."""
-        return 0, 0, Source.objects.filter(channel__isnull=True).count()
+        """Звʼязати джерела з довідником. Працює у ПРОМІЖНОМУ стані БД (після
+        0084, до 0085): колонки name/url/region_subject_id/language ще є в
+        таблиці, але вже не в моделі — читаємо їх сирим SQL. Після 0085 колонок
+        нема, джерело без довідника неможливе — лише звіт."""
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute("SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name='analysis_source' AND column_name='url'")
+            legacy = cur.fetchone() is not None
+        if not legacy:
+            return 0, 0, Source.objects.filter(channel__isnull=True).count()
+        with connection.cursor() as cur:
+            cur.execute("SELECT id, kind, url, name, region_subject_id, language "
+                        "FROM analysis_source WHERE channel_id IS NULL ORDER BY id")
+            rows = cur.fetchall()
+        linked = new = missing = 0
+        by_url = {}
+        for sid, kind, raw_url, name, region_id, language in rows:
+            platform, url = d.normalize_url(raw_url or "", kind_hint=kind)
+            if not url:
+                missing += 1
+                self.stderr.write(f"  source #{sid} {kind} «{raw_url}»: не нормалізується")
+                continue
+            ch = by_url.get(url) or Channel.objects.filter(url=url).order_by("-fetched_at", "-id").first()
+            if ch is None and platform == "telegram":
+                m = re.match(r"^https://t\.me/([a-z0-9_]+)$", url)
+                if m:
+                    ch = Channel.objects.filter(username__iexact=m.group(1)).order_by("-fetched_at", "-id").first()
+            if ch is None:
+                ch = Channel.objects.create(
+                    platform=platform, url=url, title=(name or "")[:512],
+                    region_subject_id=region_id, language=language or "",
+                    username=(url.removeprefix("https://t.me/") if platform == "telegram"
+                              and not url.startswith(("https://t.me/c/", "https://t.me/+")) else ""),
+                    chat_type="channel" if platform == "telegram" else "",
+                )
+                new += 1
+            else:
+                changed = []
+                if not ch.url:
+                    ch.url, changed = url, changed + ["url"]
+                if ch.region_subject_id is None and region_id:
+                    ch.region_subject_id, changed = region_id, changed + ["region_subject"]
+                if changed:
+                    ch.save(update_fields=changed)
+            by_url[url] = ch
+            Source.objects.filter(id=sid).update(channel=ch)
+            linked += 1
+        return linked, new, missing
 
     # ------------------------------------------------------------------ 3
     def _posts(self) -> int:
