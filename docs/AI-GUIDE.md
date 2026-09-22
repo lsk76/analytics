@@ -9,12 +9,12 @@ Django 5.2 + Postgres (`tg_events`, усе в Docker, адмінка на **:800
 російський Telegram (джерело даних — пошуковий API **TeleZip**) по нацреспубліках РФ.
 Два типи сигналу: **події-інциденти** (репортажі каналів: етнічні сутички, корупція,
 протести) і **критика-думки** (коментарі людей у чатах). Після уніфікації 2026-07-05
-**обидва типи матеріалізуються в модель `Event`** — вся аналітика (графіки, матриця,
+**обидва типи матеріалізуються в модель `Event`** — вся аналітика (графіки,
 звіти) читає ТІЛЬКИ Event.
 
 ## 1. ГОЛОВНІ ІНВАРІАНТИ (порушиш — зламаєш аналітику)
 
-1. **Event — єдина одиниця аналітики.** Графіки/матриця будуються лише по Event.
+1. **Event — єдина одиниця аналітики.** Графіки будуються лише по Event.
 2. **Дві природи Event, розрізняються `task.pipeline`:**
    - `events`-конвеєр: **N постів → 1 подія** (дедуп; інцидент один — описів багато);
    - `monitor`-конвеєр: **1 коментар → 1 подія, БЕЗ дедупу** — коментар = думка окремої
@@ -151,9 +151,6 @@ PostSource сам додає краї: `is_relevant=True`, `exclude(is_channel_r
   топ каналів, **тег×республіки** (стек), **тег×час** (лінії), **% від усіх
   повідомлень** (знаменник `ChannelDailyStat`, рендериться лише для monitor-задач).
   Один контрол «Категорії» керує всіма трьома тег-секціями.
-- **`matrix/`** — матриця 8 республік × індикатори (ФУР/ГЕР/ПОЛ, порядок як у
-  Google-таблиці замовника); всі числа наживо з БД, кожне — лінк на відфільтрований
-  changelist. Клас-конфіг: `EventAdmin.MATRIX_SECTIONS`.
 - **`conflicts/`** — ко-оквіренс матриця національностей (task=1).
 - **Фільтри:** «Задача» — одиночний вибір (`?task=<id>`); «Статус аудиту» — дефолт
   «Схвалено» (`ReviewStatusDefaultFilter`); тег-фасети `?tag_<category>=<tag_id>`
@@ -166,7 +163,7 @@ PostSource сам додає краї: `is_relevant=True`, `exclude(is_channel_r
 ```
 backend/analysis/
   models.py                 # уся модель даних (коментарі в docstring — актуальні)
-  admin.py                  # EventAdmin/PostAdmin: charts_view, matrix_view, фільтри
+  admin.py                  # EventAdmin/PostAdmin: charts_view, фільтри, навігація досліджень
   services/metrics.py       # MetricSource — ЄДИНЕ місце формул агрегацій
   services/monitor_stages.py# monitor-стадії + sync_comment_event (Event 1:1)
   services/stages.py        # events-стадії воркерів
@@ -177,7 +174,7 @@ backend/analysis/
   management/commands/mcp_rpc.py  # транспорт MCP у контейнер
   multiselect_filter.py     # бази кастомних фільтрів (+filter_is_active)
 backend/templates/admin/analysis/event/
-  _charts_body.html         # ВЕСЬ JS графіків (Chart.js), matrix.html — матриця
+  _charts_body.html         # ВЕСЬ JS графіків (Chart.js)
 backend/_dir/               # host-only (gitignored): ad-hoc скрипти, кеші, батчі
 docs/                       # ARCHITECTURE, comments-…, ethnic-…, econ-… pipelines
 ```
