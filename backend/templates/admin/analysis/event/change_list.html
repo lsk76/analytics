@@ -7,7 +7,13 @@
        data-show="📊 Графіки" data-hide="📋 Список"
        class="addlink" style="background-image:none">📊 Графіки</a>
   </li>
-  {{ block.super }}
+  {% if has_add_permission %}
+  <li>
+    {# «Додати подію» = лише посилання, решту заповнює програма; дослідження береться з ?task= #}
+    <a href="{% url 'admin:analysis_event_add_by_link' %}{% if request.GET.task %}?task={{ request.GET.task }}{% endif %}"
+       class="addlink">Додати подію</a>
+  </li>
+  {% endif %}
 {% endblock %}
 
 {% block extrahead %}

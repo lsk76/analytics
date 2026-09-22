@@ -2354,6 +2354,8 @@ class EventAdmin(admin.ModelAdmin):
         custom = [
             path("charts/", self.admin_site.admin_view(self.charts_view),
                  name="analysis_event_charts"),
+            path("add-by-link/", self.admin_site.admin_view(self.add_by_link_view),
+                 name="analysis_event_add_by_link"),
             path("conflicts/", self.admin_site.admin_view(self.conflicts_view),
                  name="analysis_event_conflicts"),
             path("<int:event_id>/posts/", self.admin_site.admin_view(self.event_posts_view),
@@ -2392,6 +2394,52 @@ class EventAdmin(admin.ModelAdmin):
         "Бурятія", "Саха (Якутія)", "Тива", "Татарстан",
         "Башкортостан", "Чечня", "Інгушетія", "Дагестан",
     ]
+
+    def add_by_link_view(self, request):
+        """«Додати подію»: користувач вставляє лише посилання, дослідження вже
+        обране (?task=), решту полів заповнює програма
+        (services/event_by_link.py); далі — звичайна форма події для правок."""
+        from django.http import HttpResponseRedirect
+        from django.template.response import TemplateResponse
+        from analysis.services.event_by_link import LinkError, create_event
+        if not self.has_add_permission(request):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        tid = study_from_changelist_filters(request) or (
+            request.POST.get("task") if request.POST.get("task", "").isdigit() else None)
+        tasks = AnalysisTask.objects.all()
+        if not request.user.is_superuser:
+            tasks = tasks.filter(owner=request.user)
+        task = tasks.filter(pk=int(tid)).first() if tid else None
+        error, url = "", (request.POST.get("url") or "").strip()
+        if request.method == "POST":
+            if task is None:
+                error = "Оберіть дослідження."
+            elif not url:
+                error = "Вставте посилання на пост або статтю."
+            else:
+                try:
+                    ev, created = create_event(task, url, request.user)
+                except LinkError as e:
+                    error = str(e)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("add_by_link: %s", url)
+                    error = f"Не вдалося створити подію: {type(e).__name__}: {e}"
+                else:
+                    self.message_user(
+                        request,
+                        ("Подію створено з посилання — перевірте опис, регіон і теми."
+                         if created else "Така подія вже є в дослідженні — відкрито її."),
+                        level=messages.SUCCESS if created else messages.INFO)
+                    return HttpResponseRedirect(
+                        f"/admin/analysis/event/{ev.id}/change/?task={task.id}")
+        ctx = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta, "title": "Додати подію",
+            "task": task, "tasks": tasks.order_by("name") if task is None else None,
+            "url": url, "error": error,
+        }
+        return TemplateResponse(request, "admin/analysis/event/add_by_link.html", ctx)
 
     def conflicts_view(self, request):
         """Inter-ethnic tension explorer. Builds a co-occurrence matrix of

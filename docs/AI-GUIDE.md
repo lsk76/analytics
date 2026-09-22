@@ -260,6 +260,10 @@ docker compose exec -T web python manage.py shell -c \
   «моніторинг інформпростору» (RSS/сайти/TG-акаунти → Post → AI-скрін → живі Event).
 - `docs/telezip-api.md` — **повний контракт TeleZip API** (v3+v4): ендпоінти,
   поля запиту, межі, глибина індексу, граблі промацування.
+- **«Додати подію» в адмінці** = лише посилання (`event/add-by-link/?task=`,
+  `services/event_by_link.py`): t.me через публічний embed (без gateway) або
+  сайт через trafilatura → скрін-промпт дослідження (фолбек `FILL_PROMPT`, якщо
+  скрін відсіяв «не тему») → Post(done) → `stages._create_event` → approved.
 - `docs/simple-ui-design.md` — **простий інтерфейс `/app/`** (`backend/simpleui/`):
   секція = задача людською назвою (`AnalysisTask.display_name`), світлофор стану,
   4 графіки, стрічка, шухляда налаштувань лише для читання. Адмінка = експертний режим.
