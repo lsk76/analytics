@@ -106,17 +106,6 @@
     }
   }
 
-  // 2b) підписки на джерела (infospace) — під етап «Джерела (полінг)»
-  const subs = document.getElementById('source_subscriptions-group');
-  const sourcesFs = document.querySelector('fieldset.info-sources-fs');
-  if (subs) {
-    if (saved === 'infospace' && sourcesFs) {
-      sourcesFs.after(subs);          // підписки одразу під етапом джерел
-    } else if (saved !== 'infospace') {
-      subs.style.display = 'none';    // для інших конвеєрів не потрібні
-    }
-  }
-
   // 3) каскад рубрик: тег події показує лише теги обраної серії (категорії).
   //    Кожна опція тегу має data-cat; ховаємо ті, чия серія ≠ обраної.
   function syncTagOptions(catSel) {

@@ -831,7 +831,9 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     prepopulated_fields = {"slug": ("name",)}
     search_fields = ("name", "slug")
     filter_horizontal = ("tag_categories",)
-    inlines = [MonitorChatInline, ResearchRubricInline, SourceSubscriptionInline]
+    # Підписки на джерела (infospace) з форми прибрано: вони живуть на вкладці
+    # «Джерела» дослідження (список підписок з фільтрами й діями).
+    inlines = [MonitorChatInline, ResearchRubricInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
     # мови, які реально трапляються в наших джерелах TeleZip
@@ -960,8 +962,8 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     _FS_INFOSPACE = (
         ("🛰 Етап 1 — Джерела (полінг)", {
             "classes": ("info-sources-fs",),
-            "description": "Безперервний полінг підписаних джерел (нижче, блок "
-                           "«Підписки на джерела»). Розклад/health — у списку Джерел. "
+            "description": "Безперервний полінг підписаних джерел — їх список, стан і "
+                           "дії на вкладці «Джерела» цього дослідження. "
                            "info_max_age_days — брати лише новини свіжіші за N діб.",
             "fields": ("info_max_age_days",),
         }),
