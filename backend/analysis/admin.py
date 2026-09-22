@@ -1403,6 +1403,38 @@ class SubscriptionSourceActiveFilter(admin.SimpleListFilter):
         return qs.filter(source__is_active=(v == "1")) if v in ("0", "1") else qs
 
 
+class SubscriptionSubjectFilter(SubjectFilter):
+    """Суб'єкт РФ джерела — той самий select2-мультиселект з фасетами, що на
+    подіях і каналах; регіон береться з джерела (source__region_subject)."""
+
+    def filter_queryset(self, queryset, values):
+        return queryset.filter(source__region_subject_id__in=values)
+
+    def lookups(self, request, model_admin):
+        return [(str(r.id), r.name) for r in
+                Region.objects.filter(sources__isnull=False).distinct().order_by("name")]
+
+    def choices(self, changelist):
+        selected = self.request.GET.getlist(self.parameter_name)
+        yield {"selected": len(selected) == 0,
+               "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+               "display": _("All"), "value": "__all__"}
+        base = facet_base(changelist, self.request, self)
+        rows = (base.filter(source__region_subject__isnull=False)
+                .values("source__region_subject__id", "source__region_subject__name")
+                .annotate(n=Count("pk")).order_by())
+        present = {str(r["source__region_subject__id"]): (r["source__region_subject__name"], r["n"])
+                   for r in rows}
+        for rid in selected:
+            if rid not in present:
+                r = Region.objects.filter(id=rid).first()
+                if r:
+                    present[rid] = (r.name, 0)
+        for rid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
+            yield {"selected": rid in selected, "query_string": "",
+                   "display": f"{name} ({n})", "value": rid}
+
+
 @admin.register(SourceSubscription)
 class SourceSubscriptionAdmin(admin.ModelAdmin):
     """Вкладка «Джерела» дослідження: що ми опитуємо для цієї теми, зі станом
@@ -1410,8 +1442,7 @@ class SourceSubscriptionAdmin(admin.ModelAdmin):
     list_display = ("task", "source_link", "kind", "region", "health", "last_ok",
                     "is_active", "priority")
     list_filter = (SubscriptionTaskFilter, "source__kind", SubscriptionSourceHealthFilter,
-                   "is_active", SubscriptionSourceActiveFilter,
-                   ("source__region_subject", admin.RelatedOnlyFieldListFilter))
+                   "is_active", SubscriptionSourceActiveFilter, SubscriptionSubjectFilter)
     search_fields = ("source__name", "source__url", "notes")
     autocomplete_fields = ("task", "source")
     list_editable = ("is_active", "priority")
