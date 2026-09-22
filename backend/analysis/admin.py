@@ -273,6 +273,65 @@ class RegionAliasInline(admin.TabularInline):
     extra = 0
 
 
+from rangefilter.filters import NumericRangeFilterBuilder as _NRFB
+SubscribersRangeFilter = _NRFB(title="Підписники")
+MsgsPerDayRangeFilter = _NRFB(title="Повідомлень за добу")
+
+
+class StudyTaskFilter(admin.SimpleListFilter):
+    """«Дослідження» для списків, що належать йому (підписки, чати, збори): той
+    самий параметр, що в стоковому FK-фільтрі (?task__id__exact=), але коли
+    дослідження обране — не малюється (його показує панель зверху), лише
+    застосовується."""
+    title = "Дослідження"
+    parameter_name = "task__id__exact"
+
+    def __init__(self, request, params, model, model_admin):
+        super().__init__(request, params, model, model_admin)
+        if self.value():
+            self.template = "admin/filters/hidden.html"
+
+    def lookups(self, request, model_admin):
+        return [(str(t.id), t.human_name) for t in AnalysisTask.objects.order_by("name")]
+
+    def queryset(self, request, queryset):
+        v = self.value()
+        return queryset.filter(task_id=v) if v else queryset
+
+
+class StudyOwnedAdminMixin:
+    """Список сутностей, що належать дослідженню (підписки, чати, збори):
+    коли дослідження обране (?task__id__exact=), колонка «Дослідження» зникає —
+    її показує панель зверху. Стокове «Видалити» прибране: замість нього
+    зрозумілі дії, які не чіпають спільні довідники."""
+    task_column = "task"
+    study_actions = ("make_inactive", "make_active", "remove_from_study")
+
+    def get_list_display(self, request):
+        ld = list(super().get_list_display(request))
+        if request.GET.get("task__id__exact") and self.task_column in ld:
+            ld.remove(self.task_column)
+        return ld
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    @admin.action(description="Зробити неактивними (не збирати, дані лишаються)")
+    def make_inactive(self, request, queryset):
+        self.message_user(request, f"Неактивних: {queryset.update(is_active=False)}.")
+
+    @admin.action(description="Зробити активними")
+    def make_active(self, request, queryset):
+        self.message_user(request, f"Активних: {queryset.update(is_active=True)}.")
+
+    @admin.action(description="Прибрати з дослідження (запис у довіднику лишається)")
+    def remove_from_study(self, request, queryset):
+        n, _ = queryset.delete()
+        self.message_user(request, f"Прибрано з дослідження: {n}. Довідник не чіпався.")
+
+
 @admin.register(Region)
 class RegionAdmin(admin.ModelAdmin):
     list_display = ("name", "kind")
@@ -366,7 +425,13 @@ class FastDeleteAdminMixin:
 class ResearchRunAdmin(admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
                     "chunk_progress", "stage_progress", "posts_collected", "created_at")
-    list_filter = ("task", "status")
+    list_filter = (StudyTaskFilter, "status")
+
+    def get_list_display(self, request):
+        ld = list(super().get_list_display(request))
+        if request.GET.get("task__id__exact"):   # дослідження показує панель зверху
+            ld.remove("task")
+        return ld
     search_fields = ("title", "task__name")
     actions = [enqueue_job_action, reprocess_period_action, recollect_fresh_action]
     readonly_fields = ("started_at", "finished_at", "stage_progress", "params", "stats",
@@ -833,7 +898,8 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     filter_horizontal = ("tag_categories",)
     # Підписки на джерела (infospace) з форми прибрано: вони живуть на вкладці
     # «Джерела» дослідження (список підписок з фільтрами й діями).
-    inlines = [MonitorChatInline, ResearchRubricInline]
+    # Чати моніторингу теж прибрано з форми — вкладка «Чати» дослідження.
+    inlines = [ResearchRubricInline]
     change_form_template = "admin/analysis/analysistask/change_form.html"
 
     # мови, які реально трапляються в наших джерелах TeleZip
@@ -900,7 +966,7 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     _FS_MONITOR = (
         ("💬 Етап 1 — Збір (TeleZip + канали)", {
             "classes": ("mon-collect-fs",),
-            "description": "Збір коментарів із обраних Telegram-каналів (нижче). "
+            "description": "Збір коментарів із чатів дослідження (вкладка «Чати»). "
                            "Репости завжди згортаються (унікальні). "
                            "Запит '*' = усі повідомлення каналу за період.",
             "fields": ("telezip_query", "collect_chunk_days", "languages"),
@@ -925,7 +991,7 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     _FS_RESEARCH = (
         ("🔬 Етап 1 — Збір (канали республік)", {
             "classes": ("mon-collect-fs",),
-            "description": "Збір УСІХ повідомлень з обраних локальних каналів "
+            "description": "Збір УСІХ повідомлень з чатів дослідження (вкладка «Чати») "
                            "(нижче, блок «Чати моніторингу» = список каналів). "
                            "Репости згортаються.",
             "fields": ("collect_chunk_days", "languages"),
@@ -1167,9 +1233,41 @@ class ChatStreamHealthFilter(admin.SimpleListFilter):
         return qs
 
 
+class ChatSubjectFilter(SubjectFilter):
+    """Суб'єкт РФ чату — той самий select2-мультиселект з фасетами, що на подіях
+    і джерелах; регіон береться з каналу (channel__region_subject)."""
+
+    def filter_queryset(self, queryset, values):
+        return queryset.filter(channel__region_subject_id__in=values)
+
+    def lookups(self, request, model_admin):
+        return [(str(r.id), r.name) for r in
+                Region.objects.filter(channels__enrolled_in__isnull=False).distinct().order_by("name")]
+
+    def choices(self, changelist):
+        selected = self.request.GET.getlist(self.parameter_name)
+        yield {"selected": len(selected) == 0,
+               "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+               "display": _("All"), "value": "__all__"}
+        base = facet_base(changelist, self.request, self)
+        rows = (base.filter(channel__region_subject__isnull=False)
+                .values("channel__region_subject__id", "channel__region_subject__name")
+                .annotate(n=Count("pk")).order_by())
+        present = {str(r["channel__region_subject__id"]): (r["channel__region_subject__name"], r["n"])
+                   for r in rows}
+        for rid in selected:
+            if rid not in present:
+                r = Region.objects.filter(id=rid).first()
+                if r:
+                    present[rid] = (r.name, 0)
+        for rid, (name, n) in sorted(present.items(), key=lambda kv: kv[1][0]):
+            yield {"selected": rid in selected, "query_string": "",
+                   "display": f"{name} ({n})", "value": rid}
+
+
 @admin.register(MonitorChat)
-class MonitorChatAdmin(admin.ModelAdmin):
-    """Standalone-сторінка чатів моніторингу (для bulk-операцій і вибірок).
+class MonitorChatAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
+    """Вкладка «Чати» дослідження (і standalone-список для bulk-операцій).
 
     Колонки й фільтри зроблені під питання «що ми реально слухаємо в цьому
     регіоні» — тому тут розмір аудиторії і стан збору, а не лише прапорці.
@@ -1177,10 +1275,11 @@ class MonitorChatAdmin(admin.ModelAdmin):
     list_display = ("chat_link", "task", "region", "subscribers", "chat_kind",
                     "is_active", "stream_enabled", "stream_state", "tg_account",
                     "is_critical_source", "priority")
-    list_filter = ("task", "is_active", "stream_enabled",
-                   ("channel__region_subject", admin.RelatedOnlyFieldListFilter),
+    list_filter = (StudyTaskFilter, "is_active", "stream_enabled", ChatSubjectFilter,
+                   ("channel__subscribers", SubscribersRangeFilter),
                    ChatKindFilter, ChatStreamHealthFilter,
                    "is_critical_source", "forward_media")
+    actions = StudyOwnedAdminMixin.study_actions
     search_fields = ("channel__username", "channel__title", "notes")
     autocomplete_fields = ("task", "channel", "tg_account")
     list_editable = ("is_active", "stream_enabled", "is_critical_source", "priority")
@@ -1359,26 +1458,6 @@ class SourceAdmin(admin.ModelAdmin):
         self.message_user(request, f"{queryset.update(is_active=False)} деактивовано.")
 
 
-class SubscriptionTaskFilter(admin.SimpleListFilter):
-    """Дослідження для підписок: той самий параметр, що в стоковому FK-фільтрі
-    (?task__id__exact=), але коли дослідження обране — не малюється (його
-    показує панель зверху), лише застосовується."""
-    title = "Дослідження"
-    parameter_name = "task__id__exact"
-
-    def __init__(self, request, params, model, model_admin):
-        super().__init__(request, params, model, model_admin)
-        if self.value():
-            self.template = "admin/filters/hidden.html"
-
-    def lookups(self, request, model_admin):
-        return [(str(t.id), t.human_name) for t in AnalysisTask.objects.order_by("name")]
-
-    def queryset(self, request, queryset):
-        v = self.value()
-        return queryset.filter(task_id=v) if v else queryset
-
-
 class SubscriptionSourceHealthFilter(SourceHealthFilter):
     """Стан джерела для списку підписок (через source__)."""
     def queryset(self, request, qs):
@@ -1438,45 +1517,19 @@ class SubscriptionSubjectFilter(SubjectFilter):
 
 
 @admin.register(SourceSubscription)
-class SourceSubscriptionAdmin(admin.ModelAdmin):
+class SourceSubscriptionAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
     """Вкладка «Джерела» дослідження: що ми опитуємо для цієї теми, зі станом
     самого джерела (health/last_ok — з Source, підписка їх не дублює)."""
     list_display = ("task", "source_link", "kind", "region", "health", "last_ok",
                     "is_active", "priority")
-    list_filter = (SubscriptionTaskFilter, "source__kind", SubscriptionSourceHealthFilter,
+    list_filter = (StudyTaskFilter, "source__kind", SubscriptionSourceHealthFilter,
                    "is_active", SubscriptionSourceActiveFilter, SubscriptionSubjectFilter)
     search_fields = ("source__name", "source__url", "notes")
     autocomplete_fields = ("task", "source")
     list_editable = ("is_active", "priority")
     list_select_related = ("task", "source", "source__region_subject")
     list_per_page = 100
-    # Стокове «Видалити» прибрано: воно лякає сторінкою підтвердження, хоч
-    # джерело з довідника не чіпає. Замість нього — три зрозумілі дії.
-    actions = ("make_inactive", "make_active", "remove_from_study")
-
-    def get_actions(self, request):
-        actions = super().get_actions(request)
-        actions.pop("delete_selected", None)
-        return actions
-
-    @admin.action(description="Зробити неактивними (не збирати, дані лишаються)")
-    def make_inactive(self, request, queryset):
-        self.message_user(request, f"Неактивних: {queryset.update(is_active=False)}.")
-
-    @admin.action(description="Зробити активними")
-    def make_active(self, request, queryset):
-        self.message_user(request, f"Активних: {queryset.update(is_active=True)}.")
-
-    @admin.action(description="Прибрати з дослідження (джерело лишається в довіднику)")
-    def remove_from_study(self, request, queryset):
-        n, _ = queryset.delete()
-        self.message_user(request, f"Прибрано з дослідження: {n}. Самі джерела не видалені.")
-
-    def get_list_display(self, request):
-        ld = list(super().get_list_display(request))
-        if request.GET.get("task__id__exact"):   # дослідження показує панель зверху
-            ld.remove("task")
-        return ld
+    actions = StudyOwnedAdminMixin.study_actions
 
     @admin.display(description="Джерело", ordering="source__name")
     def source_link(self, obj):
@@ -1500,9 +1553,6 @@ class SourceSubscriptionAdmin(admin.ModelAdmin):
         return obj.source.last_ok_at.strftime("%d.%m %H:%M") if obj.source.last_ok_at else "—"
 
 
-from rangefilter.filters import NumericRangeFilterBuilder as _NRFB
-SubscribersRangeFilter = _NRFB(title="Підписники")
-MsgsPerDayRangeFilter = _NRFB(title="Повідомлень за добу")
 
 
 class MultiExcludeFilter(MultiSelectFilter):

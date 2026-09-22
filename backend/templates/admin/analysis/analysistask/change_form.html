@@ -86,18 +86,9 @@
   sel.addEventListener('change', apply);
   apply();
 
-  // 2) канали моніторингу — одразу під розділ «Етап 1 — Збір (TeleZip + канали)»
-  const chats = document.getElementById('monitor_chats-group');
+  // 2) рубрики дослідження — під свій етап (чати моніторингу живуть на вкладці «Чати»)
   const rubrics = document.getElementById('rubrics-group');
-  const collectFs = document.querySelector('fieldset.mon-collect-fs');
   const rubricsFs = document.querySelector('fieldset.rubrics-fs');
-  if (chats) {
-    if ((saved === 'monitor' || saved === 'research') && collectFs) {
-      collectFs.after(chats);        // канали одразу під розділом збору
-    } else {
-      chats.style.display = 'none';   // events/infospace — канали не потрібні
-    }
-  }
   if (rubrics) {
     if (saved === 'research' && rubricsFs) {
       rubricsFs.after(rubrics);       // рубрики під своїм етапом

@@ -698,8 +698,8 @@ class ResearchRun(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:
-        verbose_name = "Збір (job)"
-        verbose_name_plural = "Збори (jobs)"
+        verbose_name = "Збір"
+        verbose_name_plural = "Збори"
         ordering = ["-created_at"]
 
     def __str__(self):
