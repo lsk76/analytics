@@ -46,11 +46,26 @@ if (!document.getElementById('select2-css-loaded')) {
     background: var(--darkened-bg, #f8f8f8); color: var(--body-fg, #333);
     border: 1px solid var(--hairline-color, #ccc); border-radius: 4px; padding: 5px 8px;
 }
-.select2-container--default .select2-selection--multiple .select2-selection__rendered { padding: 2px 4px; }
+/* Обрані значення: чіп = рядок «× назва» без абсолютного позиціювання
+   (у select2 4.1 хрестик абсолютний і в адмінці зʼїжджав у кут). Порожній
+   стан — без зайвого відступу зверху. */
+.select2-container--default .select2-selection--multiple { min-height: 34px; }
+.select2-container--default .select2-selection--multiple .select2-selection__rendered {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 6px; margin: 0; }
+.select2-container--default .select2-selection--multiple .select2-selection__choice {
+    display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 2px 8px; line-height: 1.4; }
+.select2-container--default .select2-selection--multiple .select2-selection__choice__display { padding: 0; }
+.select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+    position: static; order: -1; border: 0; background: none; padding: 0; margin: 0;
+    color: var(--primary-fg, #fff); font-weight: 700; line-height: 1; }
+.select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
+    background: none; color: var(--primary-fg, #fff); opacity: .8; }
+.select2-container--default .select2-search--inline { flex: 1; min-width: 60px; }
 .select2-container--default .select2-search--inline .select2-search__field {
-    color: var(--body-fg, #333); margin: 4px 4px 0; }
+    color: var(--body-fg, #333); margin: 0; height: 26px; min-width: 60px; width: 100% !important; }
 .select2-container--default .select2-search--inline .select2-search__field::placeholder { color: var(--body-quiet-color, #666); }
-.select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: var(--primary-fg, #fff); margin-right: 4px; }
+.select2-container--default .select2-selection--multiple .select2-selection__clear {
+    position: static; order: 2; margin: 0 0 0 auto; padding: 0 4px; height: auto; color: var(--body-quiet-color, #666); }
 #changelist-filter .facet-autocomplete-wrapper .button { margin: 6px 6px 4px 0; }
 </style>
 
