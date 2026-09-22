@@ -1307,7 +1307,7 @@ class MonitorChatAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
     регіоні» — тому тут розмір аудиторії і стан збору, а не лише прапорці.
     """
     list_display = ("chat_link", "task", "region", "subscribers", "chat_kind",
-                    "is_active", "stream_enabled", "stream_state", "tg_account",
+                    "active_box", "stream_box", "stream_state", "tg_account",
                     "is_critical_source", "priority")
     list_filter = (StudyTaskFilter, "is_active", "stream_enabled", ChatSubjectFilter,
                    ("channel__subscribers", SubscribersRangeFilter),
@@ -1322,8 +1322,16 @@ class MonitorChatAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
         ("Службове", {"classes": ("collapse",),
                       "fields": ("tg_account", "stream_last_msg_id", "added_by")}),
     )
-    list_editable = ("is_active", "stream_enabled", "is_critical_source", "priority")
+    # без list_editable: активність — діями над вибраними, не чекбоксами + «Зберегти»
     list_select_related = ("task", "channel", "channel__region_subject", "tg_account")
+
+    @admin.display(description="Активний", ordering="is_active")
+    def active_box(self, obj):
+        return format_html('<input type="checkbox" disabled {}>', "checked" if obj.is_active else "")
+
+    @admin.display(description="Стрім", ordering="stream_enabled")
+    def stream_box(self, obj):
+        return format_html('<input type="checkbox" disabled {}>', "checked" if obj.stream_enabled else "")
     ordering = ("channel__region_subject__name", "-channel__subscribers")
     list_per_page = 200
 
@@ -1560,16 +1568,24 @@ class SubscriptionSubjectFilter(SubjectFilter):
 class SourceSubscriptionAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
     """Вкладка «Джерела» дослідження: що ми опитуємо для цієї теми, зі станом
     самого джерела (health/last_ok — з Source, підписка їх не дублює)."""
+    # «Пріоритет» підписки ніде не читається (збирач інформпростору йде по
+    # розкладу джерела), тож у списку його нема.
     list_display = ("task", "source_link", "kind", "region", "health", "last_ok",
-                    "is_active", "priority")
+                    "active_box")
     list_filter = (StudyTaskFilter, "source__kind", SubscriptionSourceHealthFilter,
                    "is_active", SubscriptionSourceActiveFilter, SubscriptionSubjectFilter)
     search_fields = ("source__name", "source__url", "notes")
     autocomplete_fields = ("task", "source")
-    list_editable = ("is_active", "priority")
+    fields = ("task", "source", "is_active", "notes")
     list_select_related = ("task", "source", "source__region_subject")
     list_per_page = 100
     actions = StudyOwnedAdminMixin.study_actions
+    # list_editable навмисно нема: активність міняють ДІЇ над вибраними рядками,
+    # а не чекбокси з кнопкою «Зберегти» внизу (випадає з концепту вкладок).
+
+    @admin.display(description="Активна", ordering="is_active")
+    def active_box(self, obj):
+        return format_html('<input type="checkbox" disabled {}>', "checked" if obj.is_active else "")
 
     @admin.display(description="Джерело", ordering="source__name")
     def source_link(self, obj):
