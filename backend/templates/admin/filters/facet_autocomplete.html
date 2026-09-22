@@ -28,6 +28,30 @@ if (!document.getElementById('select2-css-loaded')) {
 .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
     background: var(--primary, #417690); color: var(--primary-fg, #fff);
 }
+/* Випадайка select2 рендериться в <body>, тож стилі глобальні; кольори — зі
+   змінних адмінки, щоб темна тема лишалась читабельною (був білий фон + сірий текст). */
+.select2-container--default .select2-dropdown {
+    background: var(--body-bg, #fff); color: var(--body-fg, #333);
+    border: 1px solid var(--hairline-color, #ccc); border-radius: 4px;
+}
+.select2-container--default .select2-results__option {
+    color: var(--body-fg, #333); padding: 6px 10px; line-height: 1.3;
+}
+.select2-container--default .select2-results__option[aria-selected=true],
+.select2-container--default .select2-results__option--selected {
+    background: var(--selected-row, #ffc); color: var(--body-fg, #333);
+}
+.select2-container--default .select2-search--dropdown { padding: 6px; }
+.select2-container--default .select2-search--dropdown .select2-search__field {
+    background: var(--darkened-bg, #f8f8f8); color: var(--body-fg, #333);
+    border: 1px solid var(--hairline-color, #ccc); border-radius: 4px; padding: 5px 8px;
+}
+.select2-container--default .select2-selection--multiple .select2-selection__rendered { padding: 2px 4px; }
+.select2-container--default .select2-search--inline .select2-search__field {
+    color: var(--body-fg, #333); margin: 4px 4px 0; }
+.select2-container--default .select2-search--inline .select2-search__field::placeholder { color: var(--body-quiet-color, #666); }
+.select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: var(--primary-fg, #fff); margin-right: 4px; }
+#changelist-filter .facet-autocomplete-wrapper .button { margin: 6px 6px 4px 0; }
 </style>
 
 <ul>
