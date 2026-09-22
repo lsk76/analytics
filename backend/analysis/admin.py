@@ -3219,7 +3219,25 @@ class EventAdmin(admin.ModelAdmin):
             self.message_user(request, msg)
             from django.http import HttpResponseRedirect
             return HttpResponseRedirect(request.path)
-        return super().response_change(request, obj)
+        return self._keep_study(request, super().response_change(request, obj))
+
+    def response_add(self, request, obj, post_url_continue=None):
+        return self._keep_study(request, super().response_add(request, obj, post_url_continue))
+
+    def response_delete(self, request, obj_display, obj_id):
+        return self._keep_study(request, super().response_delete(request, obj_display, obj_id))
+
+    @staticmethod
+    def _keep_study(request, response):
+        """Після збереження/видалення повертати у список подій ТОГО САМОГО
+        дослідження (?task=), а не в загальний список: форма відкрита з
+        `?task=`, а не через _changelist_filters, тож Django його не зберігає."""
+        tid = request.GET.get("task")
+        loc = response.get("Location", "") if response.status_code in (301, 302) else ""
+        if tid and str(tid).isdigit() and loc.rstrip("/").endswith("/admin/analysis/event") \
+                and "task=" not in loc:
+            response["Location"] = f"{loc}{'&' if '?' in loc else '?'}task={tid}"
+        return response
 
     actions = ["make_digest_report", "approve_selected", "reject_selected", "copy_links"]
 
