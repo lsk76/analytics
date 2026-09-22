@@ -397,8 +397,8 @@ class AnalysisTask(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
 
     class Meta:
-        verbose_name = "Задача аналізу"
-        verbose_name_plural = "Задачі аналізу"
+        verbose_name = "Дослідження"
+        verbose_name_plural = "Дослідження"
 
     def __str__(self):
         return self.name

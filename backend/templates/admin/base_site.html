@@ -1,0 +1,9 @@
+{% extends "admin/base.html" %}
+{% load static studynav %}
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'analysis/studynav.css' %}">{% endblock %}
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a></div>
+{% endblock %}
+{% block nav-global %}{% if request.user.is_authenticated %}{% study_topnav %}{% endif %}{% endblock %}
+{% block nav-breadcrumbs %}{{ block.super }}{% if request.user.is_authenticated %}{% study_bar %}{% endif %}{% endblock %}

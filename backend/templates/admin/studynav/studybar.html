@@ -1,0 +1,9 @@
+{% if task %}
+<div class="study-bar">
+  <div class="study-bar-name"><span class="study-bar-kicker">Дослідження</span>{{ task.human_name }}</div>
+  <div class="study-bar-tabs">
+    {% for t in tabs %}<a href="{{ t.url }}" class="{% if t.active %}on{% endif %}">{{ t.label }}</a>{% endfor %}
+    {% if collect_url %}<a href="{{ collect_url }}" class="study-bar-cta">⬇ Зібрати за період</a>{% endif %}
+  </div>
+</div>
+{% endif %}

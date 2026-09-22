@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'admin/css/dashboard.css' %}">{% endblock %}
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+{% block nav-breadcrumbs %}{% endblock %}
+{% block nav-sidebar %}{% endblock %}
+
+{% block content %}
+<div id="content-main" class="studies-home">
+  <div class="studies-head">
+    <h1>Дослідження</h1>
+    {% if can_add_study %}<a class="button" href="/admin/analysis/analysistask/add/">+ Нове дослідження</a>{% endif %}
+  </div>
+
+  {% if not studies %}
+    <p class="studies-empty">Для вас поки немає жодного дослідження. Попросіть адміністратора або асистента створити його.</p>
+  {% endif %}
+
+  <div class="studies-grid">
+  {% for r in studies %}
+    <div class="study-card {{ r.status.state }}">
+      {% if r.url %}<a class="study-card-name" href="{{ r.url }}">{{ r.task.human_name }}</a>{% else %}<span class="study-card-name">{{ r.task.human_name }}</span>{% endif %}
+      <div class="study-card-status">
+        <span class="light {{ r.status.state }}">{{ r.status.label }}</span>
+        <span class="study-card-note">{{ r.status.note }}{% if r.status.activity %} · {{ r.status.activity }}{% endif %}</span>
+      </div>
+      {% if r.status.state != "stopped" %}
+      <div class="study-card-nums">
+        <span><b>{{ r.status.today }}</b> сьогодні</span>
+        <span><b>{{ r.status.week }}</b> за тиждень</span>
+      </div>
+      {% endif %}
+      <div class="study-card-links">
+        {% for l in r.links %}<a href="{{ l.url }}">{{ l.label }}</a>{% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+
+  {% if app_list %}
+  <details class="studies-expert">
+    <summary>Усі розділи (експертний режим)</summary>
+    {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+  </details>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block sidebar %}{% endblock %}

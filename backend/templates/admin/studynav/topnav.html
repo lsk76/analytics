@@ -1,0 +1,3 @@
+<nav class="study-topnav" aria-label="Розділи">
+  {% for t in tabs %}<a href="{{ t.url }}" class="{% if t.active %}on{% endif %}">{{ t.label }}</a>{% endfor %}
+</nav>

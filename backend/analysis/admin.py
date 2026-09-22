@@ -843,7 +843,7 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
     # спільні для обох конвеєрів розділи
     _FS_HEAD = (
         ("Задача", {
-            "fields": ("name", "display_name", "slug", "description", "pipeline", "is_active"),
+            "fields": ("display_name", "name", "slug", "description", "pipeline", "is_active"),
         }),
     )
     # 📰 ПОШУК ПОДІЙ: етапи
@@ -3342,3 +3342,38 @@ except admin.sites.NotRegistered:
 @admin.register(_User)
 class UserWithKeyAdmin(_DjangoUserAdmin):
     inlines = [UserProfileInline]
+
+
+# ---------------------------------------------------------------------------
+# Стартова сторінка адмінки = список досліджень (картки зі світлофором) +
+# зона «Спільне» (довідник каналів, акаунти) + звичайний список моделей нижче.
+# Навбар і панель дослідження — templatetags/studynav.py, templates/admin/base_site.html.
+# ---------------------------------------------------------------------------
+
+_orig_admin_index = admin.site.index
+
+
+def _studies_index(request, extra_context=None):
+    from analysis.services.study_status import STOPPED, task_status
+    from analysis.templatetags.studynav import study_links
+    qs = AnalysisTask.objects.all()
+    if not request.user.is_superuser:
+        qs = qs.filter(owner=request.user)
+    now = djtz.now()
+    rows = []
+    for t in qs.order_by("-is_active", "id"):
+        st = task_status(t, now)
+        links = [l for l in study_links(t) if request.user.has_perm(l["perm"])]
+        if t.pipeline not in (t.PIPELINE_INFOSPACE, t.PIPELINE_TGSEARCH) \
+                and request.user.has_perm("analysis.add_researchrun"):
+            links.append({"label": "Зібрати", "url": f"/admin/analysis/researchrun/add/?task={t.id}"})
+        rows.append({"task": t, "status": st, "links": links,
+                     "url": links[0]["url"] if links else ""})
+    rows.sort(key=lambda r: (r["status"].state == STOPPED, -r["status"].week))
+    ctx = dict(extra_context or {})
+    ctx["studies"] = rows
+    ctx["can_add_study"] = request.user.has_perm("analysis.add_analysistask")
+    return _orig_admin_index(request, ctx)
+
+
+admin.site.index = _studies_index
