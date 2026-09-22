@@ -863,7 +863,7 @@ class SourceSubscriptionInline(admin.TabularInline):
     extra = 0
     autocomplete_fields = ("source",)
     fields = ("source", "is_active", "priority", "notes")
-    ordering = ("priority", "source__name")
+    ordering = ("priority", "source__channel__title")
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         ff = super().formfield_for_dbfield(db_field, request, **kwargs)
@@ -1401,20 +1401,22 @@ class SourceHealthFilter(admin.SimpleListFilter):
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
     """Довідник джерел infospace: health, розклад полінгу, дії."""
-    list_select_related = ("channel", "region_subject")
-    list_display = ("name", "kind", "directory_link", "region_subject", "health_badge", "posts_24h",
+    list_select_related = ("channel", "channel__region_subject")
+    list_display = ("name_col", "kind", "directory_link", "region_col", "health_badge", "posts_24h",
                     "is_active", "last_ok_at", "next_poll_at", "subs_count")
-    list_filter = ("kind", SourceHealthFilter, "is_active", "region_subject")
-    search_fields = ("name", "url")
-    autocomplete_fields = ("region_subject", "tg_account")
+    list_filter = ("kind", SourceHealthFilter, "is_active",
+                   ("channel__region_subject", admin.RelatedOnlyFieldListFilter))
+    search_fields = ("channel__title", "channel__url")
+    autocomplete_fields = ("channel", "tg_account")
     list_editable = ("is_active",)
     actions = ("poll_now", "healthcheck_now", "dry_run_fetch", "activate", "deactivate")
     readonly_fields = ("locked_at", "poll_cursor", "last_ok_at", "last_error",
                        "consecutive_failures", "quality_ok", "quality_note",
                        "last_healthcheck_at", "created_at")
     fieldsets = (
-        ("Джерело", {"fields": ("kind", "name", "url", "region_subject",
-                                 "language", "is_active")}),
+        ("Джерело", {"description": "Назва, посилання, регіон і підписники — у рядку "
+                                    "довідника (клік по ньому).",
+                     "fields": ("kind", "channel", "is_active")}),
         ("Полінг", {"fields": ("poll_interval_sec", "next_poll_at")}),
         ("Web-скрапінг", {"classes": ("collapse",),
                           "fields": ("scraper_key", "config")}),
@@ -1430,6 +1432,14 @@ class SourceAdmin(admin.ModelAdmin):
         since = djtz.now() - datetime.timedelta(hours=24)
         return super().get_queryset(request).annotate(
             _posts_24h=Count("posts", filter=Q(posts__created_at__gte=since)))
+
+    @admin.display(description="Назва", ordering="channel__title")
+    def name_col(self, obj):
+        return obj.name
+
+    @admin.display(description="Суб'єкт РФ", ordering="channel__region_subject__name")
+    def region_col(self, obj):
+        return obj.region_subject or "—"
 
     @admin.display(description="Довідник", ordering="channel__url")
     def directory_link(self, obj):
@@ -1539,11 +1549,11 @@ class SubscriptionSubjectFilter(SubjectFilter):
     подіях і каналах; регіон береться з джерела (source__region_subject)."""
 
     def filter_queryset(self, queryset, values):
-        return queryset.filter(source__region_subject_id__in=values)
+        return queryset.filter(source__channel__region_subject_id__in=values)
 
     def lookups(self, request, model_admin):
         return [(str(r.id), r.name) for r in
-                Region.objects.filter(sources__isnull=False).distinct().order_by("name")]
+                Region.objects.filter(channels__source__isnull=False).distinct().order_by("name")]
 
     def choices(self, changelist):
         selected = self.request.GET.getlist(self.parameter_name)
@@ -1551,11 +1561,11 @@ class SubscriptionSubjectFilter(SubjectFilter):
                "query_string": changelist.get_query_string(remove=[self.parameter_name]),
                "display": _("All"), "value": "__all__"}
         base = facet_base(changelist, self.request, self)
-        rows = (base.filter(source__region_subject__isnull=False)
-                .values("source__region_subject__id", "source__region_subject__name")
+        rows = (base.filter(source__channel__region_subject__isnull=False)
+                .values("source__channel__region_subject__id", "source__channel__region_subject__name")
                 .annotate(n=Count("pk")).order_by())
-        present = {str(r["source__region_subject__id"]): (r["source__region_subject__name"], r["n"])
-                   for r in rows}
+        present = {str(r["source__channel__region_subject__id"]):
+                   (r["source__channel__region_subject__name"], r["n"]) for r in rows}
         for rid in selected:
             if rid not in present:
                 r = Region.objects.filter(id=rid).first()
@@ -1576,10 +1586,10 @@ class SourceSubscriptionAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
                     "active_box")
     list_filter = (StudyTaskFilter, "source__kind", SubscriptionSourceHealthFilter,
                    "is_active", SubscriptionSourceActiveFilter, SubscriptionSubjectFilter)
-    search_fields = ("source__name", "source__url", "notes")
+    search_fields = ("source__channel__title", "source__channel__url", "notes")
     autocomplete_fields = ("task", "source")
     fields = ("task", "source", "is_active", "notes")
-    list_select_related = ("task", "source", "source__region_subject")
+    list_select_related = ("task", "source", "source__channel", "source__channel__region_subject")
     list_per_page = 100
     actions = StudyOwnedAdminMixin.study_actions
     # list_editable навмисно нема: активність міняють ДІЇ над вибраними рядками,
@@ -1589,7 +1599,7 @@ class SourceSubscriptionAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
     def active_box(self, obj):
         return format_html('<input type="checkbox" disabled {}>', "checked" if obj.is_active else "")
 
-    @admin.display(description="Джерело", ordering="source__name")
+    @admin.display(description="Джерело", ordering="source__channel__title")
     def source_link(self, obj):
         return format_html('<a href="/admin/analysis/source/{}/change/">{}</a>',
                            obj.source_id, obj.source.name or obj.source.url)
@@ -1598,7 +1608,7 @@ class SourceSubscriptionAdmin(StudyOwnedAdminMixin, admin.ModelAdmin):
     def kind(self, obj):
         return obj.source.get_kind_display()
 
-    @admin.display(description="Регіон", ordering="source__region_subject__name")
+    @admin.display(description="Регіон", ordering="source__channel__region_subject__name")
     def region(self, obj):
         return obj.source.region_subject.name if obj.source.region_subject else "—"
 

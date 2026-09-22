@@ -4,7 +4,7 @@ from django.core.management import call_command
 
 from analysis.models import Channel, Event, Post, Source, SourceSubscription
 from analysis.services import directory as d
-from analysis.tests.factories import TaskFactory
+from analysis.tests.factories import SourceFactory, TaskFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -41,8 +41,8 @@ def test_backfill_links_sources_and_recomputes_reach():
     task = TaskFactory()                                   # infospace
     older = Channel.objects.create(username="kemertop", tg_id=2, subscribers=1)   # дубль за регістром
     ch = Channel.objects.create(username="KemerTop", tg_id=1, subscribers=5000)  # свіжіший — забирає адресу
-    tg = Source.objects.create(kind="telegram", name="Кузбас", url="https://t.me/KemerTop")
-    web = Source.objects.create(kind="web", name="Омськ", url="http://www.newsomsk.ru/news/")
+    tg = SourceFactory(kind="telegram", url="https://t.me/KemerTop", name="Кузбас")
+    web = SourceFactory(kind="web", url="http://www.newsomsk.ru/news/", name="Омськ")
     for s in (tg, web):
         SourceSubscription.objects.create(task=task, source=s)
     ev = Event.objects.create(task=task, summary="x", review_status="approved")

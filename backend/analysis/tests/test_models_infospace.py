@@ -10,13 +10,18 @@ from .factories import SourceFactory, SubscriptionFactory, TaskFactory
 pytestmark = pytest.mark.django_db
 
 
-def test_source_unique_kind_url():
-    SourceFactory(kind=Source.KIND_RSS, url="https://a.example/feed.xml")
+def test_source_one_per_directory_row():
+    """Одне посилання = один рядок довідника = одне джерело (Source.ensure
+    повертає наявне, а не дублює; kind при цьому не змінюється)."""
+    a = SourceFactory(kind=Source.KIND_RSS, url="https://a.example/feed.xml")
+    b = SourceFactory(kind=Source.KIND_RSS, url="http://www.a.example/feed.xml/")
+    assert a.id == b.id and a.channel.url == "https://a.example/feed.xml"
+    c = SourceFactory(kind=Source.KIND_WEB, url="https://a.example/feed.xml")
+    assert c.id == a.id and c.kind == Source.KIND_RSS
+    # прямий дубль по довіднику неможливий (OneToOne)
     with pytest.raises(IntegrityError):
         with transaction.atomic():
-            SourceFactory(kind=Source.KIND_RSS, url="https://a.example/feed.xml")
-    # той самий url з ІНШИМ kind — дозволено (rss-стрічка і web-лістинг)
-    SourceFactory(kind=Source.KIND_WEB, url="https://a.example/feed.xml")
+            Source.objects.create(kind=Source.KIND_WEB, channel=a.channel)
 
 
 def test_source_defaults_ready_to_poll():

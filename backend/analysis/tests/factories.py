@@ -16,12 +16,23 @@ class TaskFactory(factory.django.DjangoModelFactory):
 
 
 class SourceFactory(factory.django.DjangoModelFactory):
+    """Джерело через Source.ensure: name/url/region ідуть у рядок довідника."""
     class Meta:
         model = models.Source
 
     kind = models.Source.KIND_RSS
     name = factory.Sequence(lambda n: f"Джерело {n}")
     url = factory.Sequence(lambda n: f"https://example.org/feed-{n}.xml")
+
+    @classmethod
+    def _create(cls, model_class, *args, **kwargs):
+        name = kwargs.pop("name", "")
+        url = kwargs.pop("url")
+        region = kwargs.pop("region_subject", None)
+        language = kwargs.pop("language", "")
+        src, _ = model_class.ensure(kwargs.pop("kind"), url, name=name, region=region,
+                                    language=language, **kwargs)
+        return src
 
 
 class SubscriptionFactory(factory.django.DjangoModelFactory):

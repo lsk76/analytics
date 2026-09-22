@@ -27,7 +27,7 @@ PLATFORM_RSS = "rss"
 
 _TG_HOSTS = {"t.me", "telegram.me", "telegram.dog"}
 _VK_HOSTS = {"vk.com", "m.vk.com", "vk.ru"}
-_USERNAME = re.compile(r"^[A-Za-z0-9_]{3,64}$")
+_USERNAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
 
 def tg_internal_id(tg_id: int) -> int:

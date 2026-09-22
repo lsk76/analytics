@@ -10,6 +10,8 @@
 
 «Етнічні сутички 2025» — це ОДИН рядок AnalysisTask; ніщо тут не захардкоджено під неї.
 """
+import re
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -1149,12 +1151,15 @@ class MonitorChat(models.Model):
 # ---------------------------------------------------------------------------
 
 class Source(models.Model):
-    """Джерело інформації в глобальному довіднику (Telegram-канал через акаунт,
-    RSS-стрічка, сайт зі скрапінгом; згодом VK).
+    """Джерело = ЩО ми опитуємо і ЯК (розклад, курсор, здоровʼя, конфіг скрапера,
+    акаунт). Що це за місце (назва, адреса, регіон, підписники, мова) — у рядку
+    довідника `channel` (Channel, 1:1); тут ці поля лише властивості-делегати,
+    щоб код читав `source.name`/`source.url` як раніше. Створювати через
+    `Source.ensure(kind, url, name, region)` — він знаходить/створює рядок
+    довідника за нормалізованим посиланням.
 
-    До задач підключається через SourceSubscription (аналог Channel↔MonitorChat).
-    Розклад/health/watermark пише ЛИШЕ стадія info_collect; руками з адмінки
-    правлять тільки конфігурацію (kind/url/config/інтервал/актив).
+    До задач підключається через SourceSubscription. Розклад/health/watermark
+    пише ЛИШЕ стадія info_collect.
     """
     KIND_TELEGRAM = "telegram"
     KIND_RSS = "rss"
@@ -1170,23 +1175,75 @@ class Source(models.Model):
     kind = models.CharField(max_length=12, choices=KIND_CHOICES, db_index=True,
                             verbose_name="Тип")
     channel = models.OneToOneField(
-        "Channel", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="source", verbose_name="Рядок довідника",
-        help_text="Довідник каналів і джерел (1:1): назва, регіон, підписники "
-                  "живуть там. Заповнює directory_backfill / код створення джерела.",
+        "Channel", on_delete=models.PROTECT, related_name="source",
+        verbose_name="Рядок довідника",
+        help_text="Довідник каналів і джерел (1:1): назва, посилання, регіон, "
+                  "підписники, мова живуть там.",
     )
-    name = models.CharField(max_length=200, verbose_name="Назва")
-    url = models.CharField(
-        max_length=500, verbose_name="Ідентифікатор (URL)",
-        help_text="tg: @username або t.me/…; rss: URL стрічки; "
-                  "web: URL лістинг-сторінки розділу.",
-    )
-    region_subject = models.ForeignKey(
-        "Region", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="sources", verbose_name="Суб'єкт РФ",
-        help_text="Регіон джерела; денормалізується в Post при вставці (per-100k).",
-    )
-    language = models.CharField(max_length=16, blank=True, verbose_name="Мова")
+
+    # --- делегати в довідник (читання як раніше: source.name / .url / .region_subject)
+    @property
+    def name(self) -> str:
+        return self.channel.title or self.channel.url
+
+    @property
+    def url(self) -> str:
+        return self.channel.url
+
+    @property
+    def region_subject(self):
+        return self.channel.region_subject
+
+    @property
+    def region_subject_id(self):
+        return self.channel.region_subject_id
+
+    @property
+    def language(self) -> str:
+        return self.channel.language
+
+    @classmethod
+    def ensure(cls, kind: str, url: str, name: str = "", region=None, language: str = "",
+               **fields):
+        """Знайти або створити джерело за нормалізованим посиланням: рядок
+        довідника береться/створюється за url, джерело — за рядком довідника.
+        → (source, created). Назва/регіон/мова заповнюють ПОРОЖНІ поля довідника,
+        наявних не перезаписують (довідник спільний, його збагачують інші)."""
+        from analysis.services.directory import normalize_url
+        platform, norm = normalize_url(url, kind_hint=kind)
+        if not norm:
+            raise ValueError(f"посилання не нормалізується: {url!r}")
+        ch = Channel.objects.filter(url=norm).order_by("-fetched_at", "-id").first()
+        if ch is None:
+            m = re.match(r"^https://t\.me/([a-z0-9_]+)$", norm)
+            if m:
+                ch = Channel.objects.filter(username__iexact=m.group(1)) \
+                    .order_by("-fetched_at", "-id").first()
+                if ch is not None and not ch.url:
+                    ch.url = norm
+                    ch.save(update_fields=["url"])
+        if ch is None:
+            ch = Channel.objects.create(
+                platform=platform, url=norm, title=(name or "")[:512],
+                region_subject=region, language=language or "",
+                username=(norm.removeprefix("https://t.me/") if platform == "telegram"
+                          and not norm.startswith(("https://t.me/c/", "https://t.me/+")) else ""),
+                chat_type="channel" if platform == "telegram" else "",
+            )
+        else:
+            changed = []
+            if name and not ch.title:
+                ch.title, changed = name[:512], changed + ["title"]
+            if region is not None and ch.region_subject_id is None:
+                ch.region_subject, changed = region, changed + ["region_subject"]
+            if language and not ch.language:
+                ch.language, changed = language, changed + ["language"]
+            if changed:
+                ch.save(update_fields=changed)
+        src = cls.objects.filter(channel=ch).first()
+        if src is not None:
+            return src, False
+        return cls.objects.create(kind=kind, channel=ch, **fields), True
 
     # web-скрапінг
     scraper_key = models.CharField(
@@ -1253,10 +1310,7 @@ class Source(models.Model):
     class Meta:
         verbose_name = "Джерело (інформпростір)"
         verbose_name_plural = "Джерела (інформпростір)"
-        ordering = ["kind", "name"]
-        constraints = [
-            models.UniqueConstraint(fields=["kind", "url"], name="uniq_source_kind_url"),
-        ]
+        ordering = ["kind", "channel__title"]
         indexes = [
             models.Index(fields=["is_active", "next_poll_at"]),
         ]
@@ -1295,7 +1349,7 @@ class SourceSubscription(models.Model):
         verbose_name = "Підписка на джерело"
         verbose_name_plural = "Підписки на джерела"
         unique_together = [["task", "source"]]
-        ordering = ["task", "priority", "source__name"]
+        ordering = ["task", "priority", "source__channel__title"]
         indexes = [models.Index(fields=["task", "is_active"])]
 
     def __str__(self):

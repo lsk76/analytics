@@ -140,6 +140,8 @@ def _fanout(source, items):
                 defaults=dict(
                     stage=Post.STAGE_INFO_COLLECTED,
                     source=source, title=it.title[:500],
+                    # Telegram-джерело → канал довідника (для channel_count/reach події)
+                    channel=source.channel if source.kind == "telegram" else None,
                     channel_name=source.name[:128],
                     region_subject=source.region_subject,
                     posted_at=posted, text=it.text,

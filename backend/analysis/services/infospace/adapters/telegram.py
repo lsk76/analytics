@@ -33,8 +33,8 @@ def _channel_or_create(handle: str, source, peer: dict):
     юзернеймів."""
     ch = _channel(handle)
     if ch is None and peer and peer.get("access_hash"):
-        from analysis.models import Channel
-        ch = Channel.objects.create(username=handle, title=(source.name or handle)[:512])
+        # джерело вже має рядок довідника (1:1) — це і є канал
+        ch = source.channel
     return ch
 
 

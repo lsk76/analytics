@@ -23,9 +23,9 @@ def source_autocomplete(request):
     """Джерела інформпростору для фільтра «Джерело» у подіях (Event -> posts -> source)."""
     from .models import Source
     term = (request.GET.get("term") or "").strip()
-    qs = Source.objects.all()
+    qs = Source.objects.select_related("channel")
     if term:
-        qs = qs.filter(Q(name__icontains=term) | Q(url__icontains=term))
-    qs = qs.order_by("name")[:20]
+        qs = qs.filter(Q(channel__title__icontains=term) | Q(channel__url__icontains=term))
+    qs = qs.order_by("channel__title")[:20]
     return JsonResponse({"results": [{"id": s.id, "text": s.name or s.url} for s in qs],
                          "pagination": {"more": False}})

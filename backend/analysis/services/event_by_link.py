@@ -103,8 +103,9 @@ def _fetch_web(url: str) -> Fetched:
         raise LinkError("На сторінці не знайшлося тексту статті. Перевірте посилання "
                         "або вставте посилання на саму новину, а не на розділ.")
     host = urlparse(url).netloc.lower().removeprefix("www.")
-    source = next((s for s in Source.objects.filter(kind__in=(Source.KIND_WEB, Source.KIND_RSS))
-                   if host and host in (s.url or "").lower()), None)
+    source = (Source.objects.filter(kind__in=(Source.KIND_WEB, Source.KIND_RSS),
+                                    channel__url__icontains=host).select_related("channel").first()
+              if host else None)
     posted = d.get("date")
     if posted is not None and posted.tzinfo is None:
         posted = posted.replace(tzinfo=_tz.utc)

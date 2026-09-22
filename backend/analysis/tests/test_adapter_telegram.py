@@ -1,5 +1,7 @@
 """Telegram-адаптер infospace поверх registry/ManagedAccount (gateway замокано)."""
 import pytest
+
+from analysis.tests.factories import SourceFactory
 from django.utils import timezone
 
 from accounts.models import Proxy, TelegramAccount
@@ -52,17 +54,17 @@ def test_handle_parsing():
     ad = TelegramAdapter()
     for url, exp in [("https://t.me/ulan_smi", "ulan_smi"), ("https://t.me/s/ulan_smi", "ulan_smi"),
                      ("@ulan_smi", "ulan_smi"), ("https://t.me/ulan_smi/123", "ulan_smi")]:
-        assert ad._handle(Source(url=url)) == exp
+        assert ad._handle(Source(channel=Channel(url=url))) == exp
 
 
 def test_account_selection_prefers_pinned_then_pool(accounts, fake):
     a1, a2 = accounts
     ad = TelegramAdapter()
-    s = Source(kind="telegram", url="https://t.me/x", id=10)
+    s = Source(kind="telegram", channel=Channel(url="https://t.me/x"), id=10)
     assert ad._account(s).id in (a1.id, a2.id)
     assert ad._account(s).id == ad._account(s).id                  # стабільно
     s.poll_cursor = {"acc_shift": 1}
-    assert ad._account(s).id != ad._account(Source(kind="telegram", url="u", id=10)).id
+    assert ad._account(s).id != ad._account(Source(kind="telegram", channel=Channel(url="u"), id=10)).id
     s.tg_account = a2
     assert ad._account(s).id == a2.id                               # pinned
     a2.state = "deauthorized"; a2.save()
@@ -74,7 +76,7 @@ def test_account_without_resolve_is_skipped_unless_hash_cached(accounts, fake):
     from datetime import timedelta
     a1, a2 = accounts
     ch = Channel.objects.create(username="x", title="x", tg_id=1)
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x")
     ad = TelegramAdapter()
     first = ad._account(s, ch)
     first_row = TelegramAccount.objects.get(pk=first.id)
@@ -91,7 +93,7 @@ def test_account_without_resolve_is_skipped_unless_hash_cached(accounts, fake):
 
 
 def test_no_accounts_is_rate_limited_not_failure(fake):
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x")
     with pytest.raises(RateLimited):
         TelegramAdapter().fetch(s)
 
@@ -100,7 +102,7 @@ def test_fetch_first_poll_then_watermark(accounts, fake):
     now = timezone.now()
     fake.msgs = [{"id": 5, "text": "a", "date": now, "media_kind": "photo"},
                  {"id": 7, "text": "b", "date": now, "media_kind": None}]
-    s = Source.objects.create(kind="telegram", url="https://t.me/ulan_smi", name="u")
+    s = SourceFactory(kind="telegram", url="https://t.me/ulan_smi", name="u")
     items = TelegramAdapter().fetch(s)
     assert [i.external_id for i in items] == ["5", "7"]
     assert items[0].meta["media"] == {"kind": "photo", "chat": "ulan_smi", "mid": 5}
@@ -113,7 +115,7 @@ def test_fetch_first_poll_then_watermark(accounts, fake):
 
 def test_fetch_remembers_peer_per_account_and_reuses_it(accounts, fake):
     Channel.objects.create(username="ulan_smi", title="u")
-    s = Source.objects.create(kind="telegram", url="https://t.me/ulan_smi", name="u")
+    s = SourceFactory(kind="telegram", url="https://t.me/ulan_smi", name="u")
     TelegramAdapter().fetch(s)
     ch = Channel.objects.get(username="ulan_smi")
     acc_id = fake.calls[-1]["id"]
@@ -128,22 +130,25 @@ def test_fetch_remembers_peer_per_account_and_reuses_it(accounts, fake):
     assert fake.calls[-1]["handle"] == "ulan_smi"
 
 
-def test_fetch_creates_channel_row_for_cache(accounts, fake):
-    s = Source.objects.create(kind="telegram", url="https://t.me/newchan", name="Новий")
-    assert not Channel.objects.filter(username="newchan").exists()
-    TelegramAdapter().fetch(s)
+def test_fetch_caches_hash_on_directory_row(accounts, fake):
+    """Рядок довідника існує з моменту створення джерела (1:1); успішний fetch
+    кладе на нього tg_id і хеш доступу; мертвий канал хеша не отримує."""
+    s = SourceFactory(kind="telegram", url="https://t.me/newchan", name="Новий")
     ch = Channel.objects.get(username="newchan")
+    assert ch.id == s.channel_id and ch.url == "https://t.me/newchan" and not ch.raw_meta
+    TelegramAdapter().fetch(s)
+    ch.refresh_from_db()
     assert ch.tg_id == 555 and ch.title == "Новий" and str(fake.calls[-1]["id"]) in ch.raw_meta["access_hash_by_acc"]
     fake.exc = TelegramOpError("ChannelPrivateError")
-    s2 = Source.objects.create(kind="telegram", url="https://t.me/deadchan", name="d")
+    s2 = SourceFactory(kind="telegram", url="https://t.me/deadchan", name="d")
     with pytest.raises(TelegramOpError):
         TelegramAdapter().fetch(s2)
-    assert not Channel.objects.filter(username="deadchan").exists()     # мертвий — не плодимо
+    assert not Channel.objects.get(username="deadchan").raw_meta.get("access_hash_by_acc")
 
 
 def test_account_unavailable_rotates_and_rate_limits(accounts, fake):
     fake.exc = AccountUnavailable("transport", "proxy dead", retry_after=300)
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x")
     with pytest.raises(RateLimited) as ei:
         TelegramAdapter().fetch(s)
     assert ei.value.retry_after == 300
@@ -154,7 +159,7 @@ def test_account_unavailable_rotates_and_rate_limits(accounts, fake):
 
 def test_pinned_account_unavailable_keeps_binding(accounts, fake):
     fake.exc = AccountUnavailable("resolve")
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x",
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x",
                               tg_account=accounts[0])
     with pytest.raises(RateLimited):
         TelegramAdapter().fetch(s)
@@ -164,17 +169,18 @@ def test_pinned_account_unavailable_keeps_binding(accounts, fake):
 
 def test_gateway_rate_limited_passes_seconds(accounts, fake):
     fake.exc = GwRateLimited(77)
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x")
     with pytest.raises(RateLimited) as ei:
         TelegramAdapter().fetch(s)
     assert ei.value.retry_after == 77
 
 
 def test_stale_cached_hash_is_forgotten_and_retried(accounts, fake):
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x",
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x",
                               tg_account=accounts[0])
-    ch = Channel.objects.create(username="x", title="x", tg_id=1,
-                                raw_meta={"access_hash_by_acc": {str(accounts[0].id): 5}})
+    ch = s.channel                                                   # рядок довідника (1:1)
+    ch.tg_id, ch.raw_meta = 1, {"access_hash_by_acc": {str(accounts[0].id): 5}}
+    ch.save(update_fields=["tg_id", "raw_meta"])
     fake.exc = TelegramOpError("ChannelInvalidError: Invalid channel object")
     with pytest.raises(RateLimited):                                # не збій джерела
         TelegramAdapter().fetch(s)
@@ -188,6 +194,6 @@ def test_stale_cached_hash_is_forgotten_and_retried(accounts, fake):
 
 def test_chat_error_is_source_failure(accounts, fake):
     fake.exc = TelegramOpError("ChannelPrivateError: x")
-    s = Source.objects.create(kind="telegram", url="https://t.me/x", name="x")
+    s = SourceFactory(kind="telegram", url="https://t.me/x", name="x")
     with pytest.raises(TelegramOpError):
         TelegramAdapter().fetch(s)

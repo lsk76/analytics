@@ -10,5 +10,4 @@ urlpatterns = [
     path("api/", include("analysis.urls")),
     path("api/accounts/", include("accounts.urls")),
     path("mcp/", include("mcpauth.urls")),      # згода на доступ до MCP-сервера
-    path("app/", include("simpleui.urls")),     # простий інтерфейс (docs/simple-ui-design.md)
 ]

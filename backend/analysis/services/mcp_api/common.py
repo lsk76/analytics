@@ -80,8 +80,8 @@ def resolve_source(ref):
         if not s:
             raise ToolError(f"джерела #{ref} немає")
         return s
-    qs = (Source.objects.filter(url__icontains=ref)
-          | Source.objects.filter(name__icontains=ref)).order_by("id")
+    qs = (Source.objects.filter(channel__url__icontains=ref)
+          | Source.objects.filter(channel__title__icontains=ref)).order_by("id")
     return _pick(qs, ref, "джерело", lambda s: f"#{s.id} {s.name} ({s.url})")
 
 

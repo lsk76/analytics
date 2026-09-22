@@ -70,12 +70,13 @@ class Command(BaseCommand):
                     self.stderr.write(self.style.WARNING(
                         f"регіон '{rname}' не знайдено — джерело {name} без гео"))
 
-            src, created = Source.objects.update_or_create(
-                kind=kind, url=url,
-                defaults=dict(name=name, region_subject=region,
-                              language=(r.get("language") or "").strip(),
-                              scraper_key=(r.get("scraper_key") or "").strip()),
-            )
+            src, created = Source.ensure(
+                kind, url, name=name, region=region,
+                language=(r.get("language") or "").strip(),
+                scraper_key=(r.get("scraper_key") or "").strip())
+            if not created and (r.get("scraper_key") or "").strip():
+                src.scraper_key = r["scraper_key"].strip()
+                src.save(update_fields=["scraper_key"])
             n_src_new += int(created)
             n_src_upd += int(not created)
             if task:

@@ -82,41 +82,9 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ 2
     def _sources(self):
-        linked = new = missing = 0
-        by_url = {}
-        for src in Source.objects.filter(channel__isnull=True).order_by("id"):
-            platform, url = d.normalize_url(src.url, kind_hint=src.kind)
-            if not url:
-                missing += 1
-                self.stderr.write(f"  source #{src.id} {src.kind} «{src.url}»: не нормалізується")
-                continue
-            ch = by_url.get(url) or Channel.objects.filter(url=url).order_by("-fetched_at", "-id").first()
-            if ch is None and platform == "telegram":
-                m = re.match(r"^https://t\.me/([a-z0-9_]+)$", url)
-                if m:
-                    ch = Channel.objects.filter(username__iexact=m.group(1)).order_by("-fetched_at", "-id").first()
-            if ch is None:
-                ch = Channel.objects.create(
-                    platform=platform, url=url, title=src.name[:512],
-                    region_subject=src.region_subject, language=src.language or "",
-                    username=(re.sub(r"^https://t\.me/", "", url) if platform == "telegram"
-                              and not url.startswith("https://t.me/c/") else ""),
-                    chat_type="channel" if platform == "telegram" else "",
-                )
-                new += 1
-            else:
-                changed = []
-                if not ch.url:
-                    ch.url, changed = url, changed + ["url"]
-                if ch.region_subject_id is None and src.region_subject_id:
-                    ch.region_subject_id, changed = src.region_subject_id, changed + ["region_subject"]
-                if changed:
-                    ch.save(update_fields=changed)
-            by_url[url] = ch
-            src.channel = ch
-            src.save(update_fields=["channel"])
-            linked += 1
-        return linked, new, missing
+        """Після кроку 2 джерело без рядка довідника неможливе (FK NOT NULL):
+        зв'язування робилося міграцією 0084→0085. Лишаємо лише звіт."""
+        return 0, 0, Source.objects.filter(channel__isnull=True).count()
 
     # ------------------------------------------------------------------ 3
     def _posts(self) -> int:

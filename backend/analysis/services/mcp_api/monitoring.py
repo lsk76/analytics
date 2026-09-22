@@ -355,9 +355,9 @@ def chat_update(chat: str, is_active: bool = None, stream_enabled: bool = None,
 def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
                  limit: int = 60):
     """Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені."""
-    qs = (Source.objects.select_related("region_subject", "tg_account")
+    qs = (Source.objects.select_related("channel", "channel__region_subject", "tg_account")
           .annotate(n_subs=Count("subscriptions", filter=Q(subscriptions__is_active=True)))
-          .order_by("kind", "name"))
+          .order_by("kind", "channel__title"))
     # джерело саме по собі нічиє, тож видимість успадковується від підписок:
     # не-суперюзер бачить лише ті, що живлять ЙОГО задачі
     if not registry.actor().is_superuser:

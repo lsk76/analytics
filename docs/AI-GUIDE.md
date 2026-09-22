@@ -264,9 +264,11 @@ docker compose exec -T web python manage.py shell -c \
   `services/event_by_link.py`): t.me через публічний embed (без gateway) або
   сайт через trafilatura → скрін-промпт дослідження (фолбек `FILL_PROMPT`, якщо
   скрін відсіяв «не тему») → Post(done) → `stages._create_event` → approved.
-- `docs/simple-ui-design.md` — **простий інтерфейс `/app/`** (`backend/simpleui/`):
-  секція = задача людською назвою (`AnalysisTask.display_name`), світлофор стану,
-  4 графіки, стрічка, шухляда налаштувань лише для читання. Адмінка = експертний режим.
+- **Навігація адмінки «для людей»** (`docs/simple-ui-design.md` — історія рішення):
+  стартова `/admin/` = картки досліджень (світлофор `services/study_status.py`,
+  `AnalysisTask.display_name`), навбар Дослідження·Канали·Акаунти, панель дослідження
+  з вкладками (`templatetags/studynav.py`), списки підписок/чатів/зборів без колонки
+  дослідження (`StudyOwnedAdminMixin`). Окремого UI `/app/` НЕМАЄ — знято 2026-09-22.
 - `docs/mcp-server.md` — **MCP-сервер керування сервісом** (акаунти ТГ, моніторинги,
   збори, черги, контейнери) — чим користуватись замість разових `manage.py shell`.
 - `docs/telemetrio-vs-telezip.md` — Telemetr.io API: клієнт, квоти, чим він НЕ є
