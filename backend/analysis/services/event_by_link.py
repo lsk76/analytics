@@ -78,9 +78,16 @@ def _fetch_telegram(url: str, m: re.Match) -> Fetched:
             posted = None
     mo = re.search(r'tgme_widget_message_owner_name[^>]*>\s*<span[^>]*>(.*?)</span>', page, re.S)
     owner = _strip_html(mo.group(1)) if mo else name
-    channel = Channel.objects.filter(username__iexact=name).first()
+    from analysis.services.directory import telegram_url
+    url_key = telegram_url(name)
+    channel = (Channel.objects.filter(url=url_key).first()
+               or Channel.objects.filter(username__iexact=name).order_by("-fetched_at", "-id").first())
     if channel is None:
-        channel = Channel.objects.create(username=name, title=owner[:512])
+        channel = Channel.objects.create(username=name, title=owner[:512], url=url_key,
+                                         platform="telegram", chat_type="channel")
+    elif not channel.url:
+        channel.url = url_key
+        channel.save(update_fields=["url"])
     return Fetched(url=canonical, title="", text=text, posted_at=posted,
                    channel=channel, channel_name=(channel.title or name)[:128])
 

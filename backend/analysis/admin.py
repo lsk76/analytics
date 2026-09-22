@@ -1401,7 +1401,8 @@ class SourceHealthFilter(admin.SimpleListFilter):
 @admin.register(Source)
 class SourceAdmin(admin.ModelAdmin):
     """Довідник джерел infospace: health, розклад полінгу, дії."""
-    list_display = ("name", "kind", "region_subject", "health_badge", "posts_24h",
+    list_select_related = ("channel", "region_subject")
+    list_display = ("name", "kind", "directory_link", "region_subject", "health_badge", "posts_24h",
                     "is_active", "last_ok_at", "next_poll_at", "subs_count")
     list_filter = ("kind", SourceHealthFilter, "is_active", "region_subject")
     search_fields = ("name", "url")
@@ -1429,6 +1430,13 @@ class SourceAdmin(admin.ModelAdmin):
         since = djtz.now() - datetime.timedelta(hours=24)
         return super().get_queryset(request).annotate(
             _posts_24h=Count("posts", filter=Q(posts__created_at__gte=since)))
+
+    @admin.display(description="Довідник", ordering="channel__url")
+    def directory_link(self, obj):
+        if not obj.channel_id:
+            return "—"
+        return format_html('<a href="/admin/analysis/channel/{}/change/">{}</a>',
+                           obj.channel_id, (obj.channel.url or obj.channel.title).replace("https://", ""))
 
     @admin.display(description="Стан")
     def health_badge(self, obj):
@@ -1808,16 +1816,23 @@ class ClassifiedFilter(admin.SimpleListFilter):
 
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
-    list_display = ("username", "title_link", "subscribers", "region_subject",
+    @admin.display(description="Посилання", ordering="url")
+    def url_short(self, obj):
+        if not obj.url:
+            return "—"
+        label = obj.url.replace("https://", "")
+        return format_html('<a href="{}" target="_blank" rel="noopener">{}</a>', obj.url, label)
+
+    list_display = ("title_link", "url_short", "platform", "subscribers", "region_subject",
                     "chat_type", "msgs_per_day", "topics_display")
     # Порядок навмисний: суб'єкт (розгорнутий) -> тип -> тема -> підписники ->
     # повідомлень за добу, далі другорядне. Мову прибрано — не використовувалась.
-    list_filter = (ChannelSubjectFilter, ChannelTypeFilter, ChannelTopicFilter,
+    list_filter = ("platform", ChannelSubjectFilter, ChannelTypeFilter, ChannelTopicFilter,
                    ("subscribers", SubscribersRangeFilter),
                    ("msgs_per_day", MsgsPerDayRangeFilter),
                    "comments_open", "participants_visible", "access",
                    "discusses_problems", ClassifiedFilter, "enriched", "is_channel")
-    search_fields = ("username", "title", "description", "settlement")
+    search_fields = ("username", "title", "url", "description", "settlement")
     ordering = ("-subscribers",)
     list_select_related = ("region_subject",)
     list_per_page = 50

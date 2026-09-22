@@ -414,6 +414,26 @@ class AnalysisTask(models.Model):
 # ---------------------------------------------------------------------------
 
 class Channel(models.Model):
+    """Довідник каналів і джерел — один рядок на будь-яке місце, звідки можуть
+    прийти дані (Telegram зараз; VK, сайт, RSS — тією ж таблицею). Ключ —
+    нормалізоване посилання `url` (services/directory.py), платформа з нього.
+    tg_id/username/chat_type — Telegram-специфічні й необовʼязкові.
+    Що ми реально опитуємо — Source (1:1 з рядком довідника)."""
+    PLATFORM_CHOICES = [
+        ("telegram", "Telegram"),
+        ("vk", "VK"),
+        ("web", "Сайт"),
+        ("rss", "RSS"),
+    ]
+    platform = models.CharField(
+        max_length=12, choices=PLATFORM_CHOICES, default="telegram", db_default="telegram",
+        db_index=True, verbose_name="Платформа",
+    )
+    url = models.CharField(
+        max_length=500, blank=True, db_default="", db_index=True, verbose_name="Посилання",
+        help_text="Нормалізована адреса — ключ довідника (https://t.me/name, "
+                  "https://vk.com/club…, https://site/розділ). Заповнює код.",
+    )
     tg_id = models.BigIntegerField(null=True, blank=True, db_index=True, verbose_name="Telegram ID")
     username = models.CharField(max_length=128, blank=True, db_index=True, verbose_name="Юзернейм")
     title = models.CharField(max_length=512, blank=True, verbose_name="Назва")
@@ -531,11 +551,13 @@ class Channel(models.Model):
     )
 
     class Meta:
-        verbose_name = "Канал"
-        verbose_name_plural = "Канали"
+        verbose_name = "Канал / джерело"
+        verbose_name_plural = "Довідник каналів і джерел"
         constraints = [
             models.UniqueConstraint(fields=["tg_id"], name="uniq_channel_tgid",
                                     condition=models.Q(tg_id__isnull=False)),
+            # унікальність адреси — після бекфілу (directory_backfill) і перевірки
+            # конфліктів вмикається обмеженням; до того — перевірка в коді
         ]
         indexes = [
             models.Index(fields=["region_subject", "discusses_problems"]),
@@ -1147,6 +1169,12 @@ class Source(models.Model):
 
     kind = models.CharField(max_length=12, choices=KIND_CHOICES, db_index=True,
                             verbose_name="Тип")
+    channel = models.OneToOneField(
+        "Channel", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="source", verbose_name="Рядок довідника",
+        help_text="Довідник каналів і джерел (1:1): назва, регіон, підписники "
+                  "живуть там. Заповнює directory_backfill / код створення джерела.",
+    )
     name = models.CharField(max_length=200, verbose_name="Назва")
     url = models.CharField(
         max_length=500, verbose_name="Ідентифікатор (URL)",
