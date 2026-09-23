@@ -12,17 +12,17 @@ from .policy import telezip_daily_limit, telezip_used
 
 @admin.register(McpRole)
 class McpRoleAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "is_active", "scopes_display", "tokens_count",
+    list_display = ("user", "is_active", "scopes_display", "max_scope", "tokens_count",
                     "telezip_daily_limit", "telezip_usage", "last_call", "updated_at")
-    # ліміт TeleZip правиться прямо в таблиці — це ціна, її крутять часто
-    list_editable = ("telezip_daily_limit",)
-    list_filter = ("role", "is_active")
+    # стеля й ліміт TeleZip правляться прямо в таблиці — їх крутять часто
+    list_editable = ("max_scope", "telezip_daily_limit")
+    list_filter = ("max_scope", "is_active")
     search_fields = ("user__username", "user__email", "notes")
     autocomplete_fields = ("user",)
 
-    @admin.display(description="Скоупи")
+    @admin.display(description="Може через MCP (з прав в адмінці)")
     def scopes_display(self, obj):
-        return ", ".join(obj.scopes)
+        return ", ".join(obj.scopes) or "— (немає прав у розділах)"
 
     @admin.display(description="Токенів")
     def tokens_count(self, obj):

@@ -10,7 +10,7 @@
 Місток між ними — таблиці: провайдер кладе `McpAuthRequest`, сторінка згоди
 створює `McpAuthCode`, провайдер обмінює його на токени.
 
-Скоупи НІКОЛИ не перевищують роль користувача (`McpRole`): клієнт може
+Скоупи НІКОЛИ не перевищують права користувача в адмінці: клієнт може
 попросити `mcp:admin`, але читач отримає лише `mcp:read`.
 """
 from asgiref.sync import sync_to_async
@@ -24,7 +24,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from .models import (McpAuthCode, McpAuthRequest, McpClient, McpRole, McpToken,
                      new_secret, sha256)
 from .policy import (ACCESS_TTL, ALL_SCOPES, REFRESH_TTL, REQUEST_TTL,  # noqa: F401
-                     SCOPE_READ, granted_scopes)
+                     SCOPE_READ, granted_scopes, scope_summary)
 
 
 def consent_url(key: str) -> str:
@@ -153,7 +153,7 @@ class DjangoOAuthProvider(OAuthAuthorizationServerProvider):
         return AccessToken(token=token, client_id=row.client.client_id, scopes=scopes,
                            expires_at=int(row.expires_at.timestamp()) if row.expires_at else None,
                            resource=row.resource or None, subject=row.user.username,
-                           claims={"role": role.role})
+                           claims={"role": scope_summary(scopes)})
 
     async def load_refresh_token(self, client, refresh_token: str):
         return await sync_to_async(self._load_refresh)(client, refresh_token)

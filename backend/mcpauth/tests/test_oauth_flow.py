@@ -62,13 +62,15 @@ def client_info():
 
 @pytest.fixture
 def operator(db):
+    """«Оператор» — це вже не роль, а набір прав Django: бачити задачі й
+    змінювати їх (звідси й виходять mcp:read + mcp:write)."""
     from django.contrib.auth.models import Permission
     user = User.objects.create_user("operator", password="x", is_staff=True)
-    # інструменти перевіряють і права Django (mcp_api/perms.py) — даємо розділ задач
-    user.user_permissions.add(Permission.objects.get(content_type__app_label="analysis",
-                                                     codename="view_analysistask"))
-    McpRole.objects.create(user=user, role=McpRole.OPERATOR)
-    return user
+    user.user_permissions.set(Permission.objects.filter(
+        content_type__app_label="analysis",
+        codename__in=["view_analysistask", "change_analysistask"]))
+    McpRole.objects.create(user=user)
+    return User.objects.get(pk=user.pk)
 
 
 def _authorize(provider, client_info, scopes=("mcp:read", "mcp:write")):
@@ -123,7 +125,7 @@ def test_full_flow_issues_token_scoped_by_role(client, provider, client_info, op
     token = provider.exchange_authorization_code(client_info, loaded)
     assert token.access_token and token.refresh_token
     access = provider.load_access_token(token.access_token)
-    assert access.subject == "operator" and access.claims["role"] == McpRole.OPERATOR
+    assert access.subject == "operator" and access.claims["role"] == "rw"
 
     # код одноразовий
     assert provider.load_authorization_code(client_info, code) is None
@@ -133,7 +135,7 @@ def test_repeating_registered_scope_is_not_a_narrowing(operator):
     """Клієнт реєструється з `mcp:read` і повторює його в запиті — це не
     «прошу лише читання», тож оператор дістає і `mcp:write`.
 
-    Була регресія: перетин із запитом зрізав роль, і оператор отримував токен,
+    Була регресія: перетин із запитом зрізав права, і оператор отримував токен,
     яким нічого не міг змінити (на сторінці згоди — один рядок замість двох).
     """
     from mcpauth.policy import granted_scopes
@@ -142,13 +144,17 @@ def test_repeating_registered_scope_is_not_a_narrowing(operator):
     assert granted_scopes(operator, [], registered) == ["mcp:read", "mcp:write"]
     # свідомо ВУЖЧЕ за видане — поважаємо (клієнт зареєстрований ширше)
     assert granted_scopes(operator, ["mcp:read"], ["mcp:read", "mcp:write"]) == ["mcp:read"]
-    # ширше за видане теж не додає прав понад роль
+    # ширше за видане теж не додає прав понад ті, що в адмінці
     assert granted_scopes(operator, ["mcp:read", "mcp:admin"], registered) == ["mcp:read", "mcp:write"]
 
 
-def test_role_is_the_ceiling_even_if_client_asks_more(client, provider, client_info):
+def test_rights_are_the_ceiling_even_if_client_asks_more(client, provider, client_info):
+    """Стеля — права в адмінці (+ max_scope), а не те, що попросив клієнт."""
+    from django.contrib.auth.models import Permission
     reader = User.objects.create_user("reader", password="x")
-    McpRole.objects.create(user=reader, role=McpRole.READER)
+    reader.user_permissions.add(Permission.objects.get(content_type__app_label="analysis",
+                                                       codename="view_analysistask"))
+    McpRole.objects.create(user=reader)
     client.force_login(reader)
     _, req = _authorize(provider, client_info, scopes=("mcp:read", "mcp:write", "mcp:admin"))
     client.post(reverse("mcpauth:consent"), {"req": req.key, "action": "allow"})
@@ -307,3 +313,46 @@ def test_registration_stores_secret_in_a_verifiable_form(provider):
     back = provider.get_client("cli-reg")
     assert back.client_secret == "issued-by-sdk"
     assert back.token_endpoint_auth_method == "client_secret_post"
+
+
+
+def test_scopes_come_from_django_permissions(db):
+    """Скоупи — похідна від прав в адмінці; max_scope лише звужує."""
+    from django.contrib.auth.models import Permission
+    from mcpauth.policy import scopes_for
+    u = User.objects.create_user("perms", password="x", is_staff=True)
+    assert scopes_for(u) == []                                   # прав немає — нічого
+    def grant(*codenames):
+        u.user_permissions.add(*Permission.objects.filter(codename__in=codenames,
+                                                          content_type__app_label__in=("analysis", "accounts")))
+        return User.objects.get(pk=u.pk)
+    assert scopes_for(grant("view_event")) == ["mcp:read"]
+    assert scopes_for(grant("change_event")) == ["mcp:read", "mcp:write"]
+    assert scopes_for(grant("add_event")) == ["mcp:read", "mcp:write", "mcp:create"]
+    assert scopes_for(grant("change_setting")) == ["mcp:read", "mcp:write", "mcp:create", "mcp:admin"]
+    # стеля звужує, але не розширює
+    assert scopes_for(User.objects.get(pk=u.pk), "mcp:write") == ["mcp:read", "mcp:write"]
+    assert scopes_for(User.objects.get(pk=u.pk), "mcp:read") == ["mcp:read"]
+    root = User.objects.create_superuser("root-perms", password="x")
+    assert scopes_for(root) == ["mcp:read", "mcp:write", "mcp:create", "mcp:admin"]
+    assert scopes_for(root, "mcp:read") == ["mcp:read"]
+    # право з чужого застосунку скоупів не дає
+    other = User.objects.create_user("other-app", password="x", is_staff=True)
+    other.user_permissions.add(Permission.objects.get(content_type__app_label="auth",
+                                                      codename="view_user"))
+    assert scopes_for(User.objects.get(pk=other.pk)) == []
+
+
+def test_no_mcp_row_means_no_access_even_with_full_rights(db):
+    """Права в адмінці не дають мережевого MCP: допуск — окремий рядок."""
+    from django.contrib.auth.models import Permission
+    from mcpauth.policy import granted_scopes
+    u = User.objects.create_user("noaccess", password="x", is_staff=True)
+    u.user_permissions.set(Permission.objects.all())
+    u = User.objects.get(pk=u.pk)
+    assert granted_scopes(u, ["mcp:read"], ["mcp:read"]) == []
+    row = McpRole.objects.create(user=u)
+    assert "mcp:write" in granted_scopes(u, ["mcp:read"], ["mcp:read"])
+    row.is_active = False
+    row.save()
+    assert granted_scopes(u, ["mcp:read"], ["mcp:read"]) == []

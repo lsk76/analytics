@@ -32,36 +32,37 @@ def new_secret(nbytes: int = 32) -> str:
 
 
 class McpRole(models.Model):
-    """Роль користувача в MCP. Немає рядка — немає доступу взагалі."""
+    """Дозвіл користувачеві працювати через MCP. Немає рядка — немає доступу.
 
-    READER = "reader"
-    OPERATOR = "operator"
-    ANALYST = "analyst"
-    ADMIN = "admin"
-    ROLE_CHOICES = [
-        (READER, "Читач — лише перегляд стану"),
-        (OPERATOR, "Оператор — збори, чати, джерела, акаунти (наявні)"),
-        (ANALYST, "Просунутий аналітик — + створює дослідження, канали, джерела, акаунти"),
-        (ADMIN, "Адмін — усе, включно з налаштуваннями й контейнерами"),
+    Роль РУЧНУ більше не задають: що людині можна, вирішують її права Django
+    (ті самі, що в адмінці) — `policy.scopes_for`. Тут лишилося те, чого з
+    прав не вивести:
+
+    * сам факт допуску (мережевий MCP — окрема поверхня: доступ до адмінки ще
+      не означає, що людині можна ходити туди ззовні ще й через асистента);
+    * `max_scope` — необовʼязкова стеля, «у MCP можна МЕНШЕ, ніж в адмінці»
+      (напр. лишити самé читання, навіть якщо в адмінці людина редагує);
+    * добова квота на платний TeleZip.
+    """
+
+    SCOPE_CHOICES = [
+        ("", "Як в адмінці (за правами Django)"),
+        ("mcp:read", "Лише читання"),
+        ("mcp:write", "Читання і зміни (без створення й адмінського)"),
+        ("mcp:create", "Читання, зміни, створення (без адмінського)"),
     ]
-    # скоупи, які отримає токен із цією роллю (перевіряються на кожному виклику).
-    # mcp:create — створення нових обʼєктів (task_create, channel_add, source_add,
-    # account_import): оператор працює з тим, що є, аналітик заводить своє.
-    SCOPES = {
-        READER: ["mcp:read"],
-        OPERATOR: ["mcp:read", "mcp:write"],
-        ANALYST: ["mcp:read", "mcp:write", "mcp:create"],
-        ADMIN: ["mcp:read", "mcp:write", "mcp:create", "mcp:admin"],
-    }
 
     user = models.OneToOneField(User, on_delete=models.CASCADE,
                                 related_name="mcp_role", verbose_name="Користувач")
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=READER,
-                            verbose_name="Роль")
+    max_scope = models.CharField(
+        max_length=12, choices=SCOPE_CHOICES, blank=True, default="",
+        verbose_name="Стеля доступу",
+        help_text="Порожньо = рівно те, що людина може в адмінці. Інше значення "
+                  "ЗВУЖУЄ доступ через MCP, розширити ним не можна.")
     is_active = models.BooleanField(default=True, verbose_name="Активний")
     # Платні виклики TeleZip (≈$0.10 кожен) рахуються на користувача за добу;
     # 0 = взяти дефолт із Setting `mcp_telezip_daily_limit`. Редагується прямо
-    # у списку ролей.
+    # у списку доступів.
     telezip_daily_limit = models.PositiveIntegerField(
         default=0, verbose_name="TeleZip: ліміт запитів/добу",
         help_text="0 = дефолт із налаштування mcp_telezip_daily_limit.")
@@ -70,16 +71,18 @@ class McpRole(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Оновлено")
 
     class Meta:
-        verbose_name = "Роль у MCP"
-        verbose_name_plural = "Ролі у MCP"
+        verbose_name = "Доступ до MCP"
+        verbose_name_plural = "Доступи до MCP"
         ordering = ["user__username"]
 
     @property
     def scopes(self) -> list[str]:
-        return list(self.SCOPES.get(self.role, []))
+        """Скоупи цього користувача: з прав Django, зрізані стелею."""
+        from .policy import scopes_for
+        return scopes_for(self.user, self.max_scope)
 
     def __str__(self):
-        return f"{self.user.username}: {self.get_role_display()}"
+        return f"{self.user.username}: {', '.join(self.scopes) or 'без доступу'}"
 
 
 class McpClient(models.Model):
