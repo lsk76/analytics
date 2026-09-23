@@ -31,7 +31,7 @@ from ..normalize import resolve_region
 from ..stages import _advance, _attach_posts, _claim_posts, _create_event
 from .adapters import get_adapter
 from .adapters.base import RateLimited
-from .prompts import INFO_JUDGE_PROMPT, INFO_SCREEN_PROMPT
+from .prompts import INFO_JUDGE_PROMPT, build_screen_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -237,28 +237,6 @@ def rescreen_task_now(task):
 
 # =========================================================================== screen
 
-def _build_screen_prompt(task):
-    """Скрін-промпт = системний промпт задачі + (якщо є категорії тегів) схема
-    tags + правила тегування. Порожній промпт → дефолт із коду."""
-    system = (task.info_screen_prompt or INFO_SCREEN_PROMPT).strip()
-    cats = list(task.tag_categories.all())
-    if not cats:
-        return system
-    tag_fields = ",".join(f'"{c.key}":["..."]' for c in cats)
-    lines = [system, "",
-             f'Додай у JSON поле "tags" зі списками значень: {{{tag_fields}}}.']
-    for c in cats:
-        if c.closed:
-            from analysis.models import Tag
-            seeded = list(Tag.objects.filter(category=c.key).values_list("name", flat=True))
-            lines.append(f'- "{c.key}" ({c.label}): ТОЧНО зі списку {seeded}; нема — пропусти.')
-        else:
-            lines.append(f'- "{c.key}" ({c.label}): {c.hint or "вільні значення, узагальнено"}.')
-    if task.info_tagger_prompt:
-        lines.append(task.info_tagger_prompt.strip())
-    return "\n".join(lines)
-
-
 async def _llm_screen(posts, system, model, api_key=None):
     """→ {post_id: (parsed|None, was_empty)}. was_empty=True — LLM віддав ""
     (транзієнт: таймаут/рейт-ліміт), НЕ битий JSON; стадія пере-черговує його
@@ -290,7 +268,7 @@ def info_screen_once(task):
         return False
     model = task.info_screen_model or task.llm_model or settings.LLM_MODEL
     posts = list(Post.objects.filter(id__in=ids).order_by("posted_at", "id"))
-    system = _build_screen_prompt(task)
+    system = build_screen_prompt(task)
     verdicts = asyncio.run(_llm_screen(posts, system, model, llm.key_for_user(task.owner)))
 
     decided, screened, bad, transient = [], [], [], []

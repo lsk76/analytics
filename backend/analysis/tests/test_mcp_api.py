@@ -351,19 +351,128 @@ def test_task_update_extended_fields():
     assert AnalysisTask.objects.get(slug="t-ext").classify_system_prompt == ""
 
 
+def test_infospace_tagger_prompt_is_readable_and_writable():
+    from analysis.models import TagCategory
+    TaskFactory(slug="info-tag", info_tagger_prompt="")
+    shown = mcp_api.call("task_show", {"ref": "info-tag"})
+    assert "### info_tagger_prompt" in shown
+    out = mcp_api.call("task_update", {"ref": "info-tag",
+                                       "info_tagger_prompt": "ПРАВИЛА ТЕГЕРА УНІКАЛЬНІ"})
+    assert "info_tagger_prompt (24 симв)" in out
+    t = AnalysisTask.objects.get(slug="info-tag")
+    assert t.info_tagger_prompt == "ПРАВИЛА ТЕГЕРА УНІКАЛЬНІ"
+    shown = mcp_api.call("task_show", {"ref": "info-tag"})
+    assert "ПРАВИЛА ТЕГЕРА УНІКАЛЬНІ" in shown
+    assert "немає категорій тегів" in shown
+    TagCategory.objects.create(key="topic", label="Тема")
+    mcp_api.call("task_update", {"ref": "info-tag", "tag_categories": "topic"})
+    shown = mcp_api.call("task_show", {"ref": "info-tag"})
+    assert shown.count("ПРАВИЛА ТЕГЕРА УНІКАЛЬНІ") >= 2
+    assert "немає категорій тегів" not in shown
+    mcp_api.call("task_update", {"ref": "info-tag", "info_tagger_prompt": "-"})
+    assert AnalysisTask.objects.get(slug="info-tag").info_tagger_prompt == ""
+    ev = TaskFactory(slug="ev-tag", pipeline=AnalysisTask.PIPELINE_EVENTS)
+    with pytest.raises(ToolError, match="info_tagger_prompt пише лише infospace"):
+        mcp_api.call("task_update", {"ref": "ev-tag", "info_tagger_prompt": "ні"})
+    created = mcp_api.call("task_create", {
+        "slug": "info-born", "name": "Нова", "pipeline": "infospace",
+        "info_tagger_prompt": "З НАРОДЖЕННЯ",
+    })
+    assert "infospace" in created
+    assert AnalysisTask.objects.get(slug="info-born").info_tagger_prompt == "З НАРОДЖЕННЯ"
+    with pytest.raises(ToolError, match="лише"):
+        mcp_api.call("task_create", {"slug": "ev-born", "name": "Події",
+                                    "pipeline": "events", "info_tagger_prompt": "ні"})
+
+
+def test_task_update_writes_every_pipeline_field_and_dependencies():
+    from analysis.models import MonitorChat, ResearchRubric, Tag, TagCategory
+    info = TaskFactory(slug="info-age")
+    mcp_api.call("task_update", {"ref": "info-age", "info_max_age_days": 3,
+                                 "info_update_summaries": False})
+    info.refresh_from_db()
+    assert info.info_max_age_days == 3 and info.info_update_summaries is False
+    with pytest.raises(ToolError, match="mon_min_len"):
+        mcp_api.call("task_update", {"ref": "info-age", "mon_min_len": 10})
+
+    mon = TaskFactory(slug="mon-len", pipeline=AnalysisTask.PIPELINE_MONITOR)
+    mcp_api.call("task_update", {"ref": "mon-len", "mon_min_len": 40, "mon_max_len": 400,
+                                 "tagger_prompt": "ТЕГУЙ КОМЕНТАРІ"})
+    mon.refresh_from_db()
+    assert mon.mon_min_len == 40 and mon.mon_max_len == 400
+    assert mon.tagger_prompt == "ТЕГУЙ КОМЕНТАРІ"
+    assert "немає активних чатів" in mcp_api.call("task_show", {"ref": "mon-len"})
+    out = mcp_api.call("chat_add", {"task": "mon-len", "channel": "@dagchat"})
+    assert "додано" in out
+    assert MonitorChat.objects.filter(task=mon, channel__username="dagchat").exists()
+    assert "немає активних чатів" not in mcp_api.call("task_show", {"ref": "mon-len"})
+    again = mcp_api.call("chat_add", {"task": "mon-len", "channel": "@dagchat"})
+    assert "уже в whitelist" in again
+    row = MonitorChat.objects.get(task=mon)
+    with pytest.raises(ToolError, match="confirm=true"):
+        mcp_api.call("chat_delete", {"chat": str(row.id)})
+    mcp_api.call("chat_delete", {"chat": str(row.id), "confirm": True})
+    assert not MonitorChat.objects.filter(task=mon).exists()
+    with pytest.raises(ToolError, match="whitelist чатів лише"):
+        mcp_api.call("chat_add", {"task": "info-age", "channel": "@dagchat"})
+
+    ev = TaskFactory(slug="ev-dedup", pipeline=AnalysisTask.PIPELINE_EVENTS)
+    mcp_api.call("task_update", {"ref": "ev-dedup", "dedup_pre_thresh": 90,
+                                 "dedup_judge_prompt": "СУДДЯ",
+                                 "drop_linked_comments": True,
+                                 "generic_sides": "мігрант, місцевий"})
+    ev.refresh_from_db()
+    assert ev.dedup_pre_thresh == 90 and ev.dedup_judge_prompt == "СУДДЯ"
+    assert ev.drop_linked_comments is True
+    assert ev.generic_sides == ["мігрант", "місцевий"]
+
+    res = TaskFactory(slug="res-rub", pipeline=AnalysisTask.PIPELINE_RESEARCH)
+    assert "немає рубрик" in mcp_api.call("task_show", {"ref": "res-rub"})
+    TagCategory.objects.create(key="econ_event", label="Економіка")
+    created = mcp_api.call("rubric_create", {
+        "task": "res-rub", "tag_category": "econ_event", "tag_name": "корупція",
+        "keywords": "коррупц|взятк\nзадержа|арест", "extra_prompt": "лише в республіці",
+    })
+    assert "econ_event:корупція" in created
+    rub = ResearchRubric.objects.get(task=res)
+    assert rub.keywords == ["коррупц|взятк", "задержа|арест"]
+    assert Tag.objects.filter(category="econ_event", name="корупція").exists()
+    listed = mcp_api.call("rubrics_list", {"task": "res-rub"})
+    assert "коррупц|взятк" in listed
+    assert "econ_event:корупція" in mcp_api.call("task_show", {"ref": "res-rub"})
+    with pytest.raises(ToolError, match="confirm=true"):
+        mcp_api.call("rubric_delete", {"ref": str(rub.id)})
+    mcp_api.call("rubric_delete", {"ref": str(rub.id), "confirm": True})
+    assert not ResearchRubric.objects.filter(pk=rub.id).exists()
+    with pytest.raises(ToolError, match="рубрики лише для research"):
+        mcp_api.call("rubric_create", {"task": "ev-dedup", "tag_category": "econ_event",
+                                      "tag_name": "x", "keywords": "a"})
+
+    born = mcp_api.call("task_create", {
+        "slug": "info-born-age", "name": "Свіжа", "pipeline": "infospace",
+        "info_max_age_days": 2,
+    })
+    assert "infospace" in born
+    assert AnalysisTask.objects.get(slug="info-born-age").info_max_age_days == 2
+
+
 def test_task_show_returns_every_pipeline_field_including_prompts():
     from analysis.services.infospace.prompts import INFO_JUDGE_PROMPT
     TaskFactory(slug="show-info", description="повний опис задачі без обрізання",
                 info_screen_prompt="МІЙ СКРІН ПРОМПТ УНІКАЛЬНИЙ",
                 info_judge_prompt="", info_tagger_prompt="")
     out = mcp_api.call("task_show", {"ref": "show-info"})
+    assert out.startswith("## Промпт, який іде в LLM")
+    assert "Параметра classify_prompt у infospace немає" in out
     assert "infospace —" in out and "[info_screen_prompt]" in out
-    assert "run_create і classify_prompt цей конвеєр не читає" in out
+    assert "run_create цей конвеєр не читає" in out
     assert "МІЙ СКРІН ПРОМПТ УНІКАЛЬНИЙ" in out
     assert "повний опис задачі без обрізання" in out
     assert "порожньо в базі — нижче дефолт із коду" in out
     assert "deduplication judge for a live news-event feed" in out
     assert INFO_JUDGE_PROMPT.strip() in out
+    assert "### info_tagger_prompt" in out
+    assert "task_update info_tagger_prompt" in out
     assert "порожньо (лише підказки категорій тегів)" in out
     assert "Свіжість: макс. вік новини (днів)" in out
 
@@ -372,6 +481,7 @@ def test_task_show_returns_every_pipeline_field_including_prompts():
                 classify_system_prompt="КЛАСИФІКУЙ ЦЕ ПОВНІСТЮ",
                 telezip_query=long_query)
     ev = mcp_api.call("task_show", {"ref": "show-ev"})
+    assert "Це classify_prompt" in ev
     assert "events —" in ev and "[classify_system_prompt]" in ev
     assert "КЛАСИФІКУЙ ЦЕ ПОВНІСТЮ" in ev
     assert long_query in ev
@@ -475,6 +585,7 @@ def test_tag_category_and_tag_crud(events):
     assert cat.closed is False and cat.hint == ""
     card = mcp_api.call("tag_category_show", {"key": "importance"})
     assert "відкрита" in card and "підказка" in card
+    assert "Підказка — не промпт LLM" in card
 
     made = mcp_api.call("tag_create", {"category": "importance", "name": "важливість_4"})
     assert "створено" in made

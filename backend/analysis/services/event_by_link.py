@@ -157,11 +157,12 @@ def _fill_prompt(task: AnalysisTask, screen_system: str) -> str:
 
 def screen(task: AnalysisTask, fetched: Fetched) -> dict:
     """Скрін-промпт дослідження (relevant/summary/region/tags) на одному тексті."""
-    from analysis.services.infospace.stages import _build_screen_prompt, _llm_screen
+    from analysis.services.infospace.prompts import build_screen_prompt
+    from analysis.services.infospace.stages import _llm_screen
     from django.conf import settings
     model = task.info_screen_model or task.llm_model or settings.LLM_MODEL
     fake = SimpleNamespace(id=0, title=fetched.title, text=fetched.text)
-    system = _build_screen_prompt(task)
+    system = build_screen_prompt(task)
     key = llm.key_for_user(task.owner)
     verdict, _ = asyncio.run(_llm_screen([fake], system, model, key)).get(0, (None, True))
     if isinstance(verdict, dict) and not (verdict.get("summary") or "").strip():

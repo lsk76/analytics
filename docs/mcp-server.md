@@ -370,14 +370,21 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | інструмент | що робить | параметри |
 |------------|-----------|-----------|
 | `tasks_list` | задачі; колонка «конвеєр» — точний ключ events/monitor/research/infospace/tgsearch | pipeline='', active_only=False |
-| `task_update` **[пише]** | параметри задачі: збір (запит TeleZip, мови, unique, чанк), назва/опис, прапорці стадій, вікно дедупу, промпт класифікації | ref, telezip_query, languages, unique, chunk_days, is_active, min_subscribers, llm_model, display_name, name, description, search_posts, search_comments, geo_enabled, review_enabled, dedup_window_days, classify_prompt |
-| `task_show` | картка моніторингу: усі поля конвеєра (промпти повністю, порожнє = дефолт із коду), черги, події, збори | ref |
+| `task_create` **[пише]** | створити задачу і одразу поля етапів (ті самі імена, що в task_update / task_show) | slug, name, pipeline + поля форми цього конвеєра |
+| `task_update` **[пише]** | будь-яке поле етапу з картки `task_show` (ім'я параметра = ім'я в дужках). Чуже для конвеєра поле відхиляється. Аліаси: `classify_prompt`, `unique`, `chunk_days`, `min_subscribers` | ref + поля форми задачі для її конвеєра |
+| `task_show` | картка задачі: зібраний промпт LLM, поля конвеєра, блок «Щоб запустити, бракує» (чати, рубрики, джерела, запит) | ref |
 | `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
 | `run_show` | збір детально (аналог «Збори → Статус») | run_id |
 | `run_create` **[пише]** | запустити збір за період (планує чанки) | task, date_from, date_to, chunk_days=0, title='' |
 | `run_cancel` **[пише]** | скасувати збір + прибрати чанки в черзі | run_id, drop_pending_chunks=True |
 | `chats_list` | whitelist чатів: акаунт, режим, свіжість | task='', active, stream_only, problems_only, limit=60 |
-| `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет | chat, is_active, stream_enabled, account, priority, forward_media |
+| `chat_add` **[пише]** | додати чат у whitelist monitor/research/tgsearch; невідомий @username створюється в довіднику | task, channel, is_active, stream_enabled, forward_media, account, priority |
+| `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет / критичне джерело / нотатка | chat, is_active, stream_enabled, account, priority, forward_media, is_critical_source, notes |
+| `chat_delete` **[пише]** | прибрати чат із whitelist (`confirm=true`); зібрані пости лишаються | chat, confirm |
+| `rubrics_list` | рубрики research-задачі | task |
+| `rubric_create` **[пише]** | рубрика: категорія, тег, ключові слова (усі мають збігтися) | task, tag_category, tag_name, keywords, extra_prompt, is_active, order |
+| `rubric_update` **[пише]** | змінити рубрику | ref, tag_category, tag_name, keywords, extra_prompt, is_active, order |
+| `rubric_delete` **[пише]** | видалити рубрику (`confirm=true`) | ref, confirm |
 | `sources_list` | джерела інформпростору: розклад, health, якість | task='', kind='', problems_only=False, limit=60 |
 | `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account |
 | `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |

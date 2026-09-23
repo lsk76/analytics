@@ -5,25 +5,26 @@ from django.db.models import Count, Max, Q
 from django.utils import timezone
 
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, Post,
-                             ResearchRun, Source, SourceSubscription)
+                             ResearchRubric, ResearchRun, Source, SourceSubscription)
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
 # Ключ pipeline має бути видимий агенту як є: скорочення «інформпр.» / слово
 # «моніторинг» на всі задачі змушувало плутати п'ять конвеєрів.
 _PIPELINE_HOW = {
-    "events": "events — події з TeleZip. Збір: run_create. Промпт класифікації: "
-              "classify_system_prompt (task_update classify_prompt).",
-    "monitor": "monitor — критика в чатах, не інформпростір. Чати: chats_list. "
-               "Промпти: prescreen_prompt, tagger_prompt. classify_prompt не читається.",
-    "research": "research — тематичне дослідження каналів. Чати: chats_list. "
-                "Промпт агента: tagger_prompt. Не скрін infospace і не classify_prompt.",
-    "infospace": "infospace — полінг джерел, не TeleZip. Джерела: sources_list / "
-                 "source_add. Промпти: info_screen_prompt, info_judge_prompt. "
-                 "run_create і classify_prompt цей конвеєр не читає.",
-    "tgsearch": "tgsearch — пошук у чатах Telegram, не TeleZip. Чати: chats_list. "
-                "Поля: search_terms, stream_regex. Промпти: prescreen_prompt, tagger_prompt.",
+    "events": "events — події з TeleZip. Збір: run_create. Поля етапів — task_update "
+              "з іменами з task_show (classify_prompt = classify_system_prompt).",
+    "monitor": "monitor — критика в чатах, не інформпростір. Чати: chat_add. "
+               "Промпти: task_update prescreen_prompt, tagger_prompt.",
+    "research": "research — тематичне дослідження каналів. Чати: chat_add. "
+                "Рубрики: rubric_create. Промпт агента: task_update tagger_prompt.",
+    "infospace": "infospace — полінг джерел, не TeleZip. Джерела: source_add. "
+                 "Поля етапів — task_update (info_screen_prompt, info_tagger_prompt, "
+                 "info_judge_prompt, info_max_age_days, …). run_create цей конвеєр не читає.",
+    "tgsearch": "tgsearch — пошук у чатах Telegram, не TeleZip. Чати: chat_add. "
+                "Поля: task_update search_terms, stream_regex, prescreen_prompt, tagger_prompt.",
 }
+_CHAT_PIPES = {"monitor", "research", "tgsearch"}
 _TELEZIP_RUNS = {"events", "monitor", "research"}
 
 # Картка task_show = усі поля форми задачі для її конвеєра (ті самі fieldsets,
@@ -75,6 +76,117 @@ _LONG_FIELDS = {
 }
 _HEAD_FIELDS = ("display_name", "name", "slug", "description", "pipeline", "is_active",
                 "owner", "created_at", "updated_at")
+
+# Поля форми, які task_update приймає ПІД ТИМ САМИМ ім'ям, що в картці [field].
+# Старі аліаси (classify_prompt, unique, chunk_days, min_subscribers, мови,
+# info_*_prompt, tag_categories) лишаються окремо.
+_TEXT_FIELDS = (
+    "dedup_judge_prompt", "review_model", "review_prompt", "agent_review_prompt",
+    "prescreen_model", "prescreen_prompt", "tagger_prompt", "dedup_cluster_prompt",
+    "research_audit_prompt", "search_terms", "stream_regex", "stream_media_chat_id",
+    "info_screen_model",
+)
+_BOOL_FIELDS = (
+    "drop_linked_comments", "dedup_llm_cluster", "research_audit_enabled",
+    "info_update_summaries", "prescreen_enabled",
+)
+_INT_FIELDS = (
+    "dedup_pre_thresh", "dedup_cand_thresh", "mon_min_len", "mon_max_len",
+    "dedup_group_days", "dedup_group_fuzz", "info_max_age_days",
+    "info_match_window_hours", "info_retention_days", "stream_interval_min",
+    "search_days", "search_limit_per_term",
+)
+_JSON_LIST_FIELDS = ("generic_sides",)
+_PIPE_FIELDS = {}
+for _pipe, _groups in _TASK_GROUPS.items():
+    for _title, _fields in _groups:
+        for _name in _fields:
+            _PIPE_FIELDS.setdefault(_name, set()).add(_pipe)
+
+
+def _field_param_doc(name, kind):
+    label = AnalysisTask._meta.get_field(name).verbose_name
+    pipes = ", ".join(sorted(_PIPE_FIELDS.get(name, ())))
+    if kind == "text":
+        rule = "Порожньо = не змінювати; '-' = очистити."
+    elif kind == "bool":
+        rule = "Не передавати = не змінювати."
+    elif kind == "int":
+        rule = "Не передавати = не змінювати. 0 — валідне значення."
+    else:
+        rule = "Список через кому. Порожньо = не змінювати; '-' = очистити."
+    return f"{label}. Лише конвеєри: {pipes}. {rule}"
+
+
+_EXTRA_PARAM_DOCS = {}
+_EXTRA_PARAM_DOCS.update({n: _field_param_doc(n, "text") for n in _TEXT_FIELDS})
+_EXTRA_PARAM_DOCS.update({n: _field_param_doc(n, "bool") for n in _BOOL_FIELDS})
+_EXTRA_PARAM_DOCS.update({n: _field_param_doc(n, "int") for n in _INT_FIELDS})
+_EXTRA_PARAM_DOCS.update({n: _field_param_doc(n, "list") for n in _JSON_LIST_FIELDS})
+
+
+def _guard_task_field(pipeline, name):
+    pipes = _PIPE_FIELDS.get(name)
+    if pipes and pipeline not in pipes:
+        raise ToolError(
+            f"конвеєр {pipeline}, поле {name} є лише в: {', '.join(sorted(pipes))}. "
+            + _PIPELINE_HOW.get(pipeline, ""))
+
+
+def _coerce_task_field(name, value):
+    field = AnalysisTask._meta.get_field(name)
+    kind = field.get_internal_type()
+    if kind == "JSONField":
+        if str(value).strip() == "-":
+            return []
+        parts = [x.strip() for x in str(value).replace("\n", ",").split(",") if x.strip()]
+        return parts
+    if kind == "BooleanField":
+        return bool(value)
+    if kind in ("PositiveSmallIntegerField", "PositiveIntegerField",
+                "SmallIntegerField", "IntegerField"):
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise ToolError(f"{name}: очікується ціле число, отримано «{value}»")
+        if n < 0:
+            raise ToolError(f"{name}: від'ємне значення")
+        limit = 32767 if kind == "PositiveSmallIntegerField" else 2147483647
+        if n > limit:
+            raise ToolError(f"{name}: максимум {limit}")
+        return n
+    text = "" if str(value).strip() == "-" else str(value)
+    max_length = getattr(field, "max_length", None)
+    if max_length and len(text) > max_length:
+        raise ToolError(f"{name}: довше за {max_length} символів")
+    return text
+
+
+def _collect_task_fields(**kwargs):
+    """Лише передані значення: порожній рядок і None = параметр не чіпали."""
+    out = {}
+    for name in _TEXT_FIELDS + _JSON_LIST_FIELDS:
+        if kwargs.get(name):
+            out[name] = kwargs[name]
+    for name in _BOOL_FIELDS + _INT_FIELDS:
+        if kwargs.get(name) is not None:
+            out[name] = kwargs[name]
+    return out
+
+
+def _apply_task_fields(task, extras, changed):
+    for name, value in extras.items():
+        _guard_task_field(task.pipeline, name)
+        coerced = _coerce_task_field(name, value)
+        setattr(task, name, coerced)
+        if coerced == "" or coerced == []:
+            changed.append(f"{name} очищено")
+        elif isinstance(coerced, bool):
+            changed.append(f"{name}={fmt.flag(coerced)}")
+        else:
+            shown = coerced if not isinstance(coerced, str) else f"({len(coerced)} симв)"
+            changed.append(f"{name}={shown}" if not isinstance(coerced, str)
+                           else f"{name} {shown}")
 
 
 def _field_label(name):
@@ -179,6 +291,56 @@ def _long_block(task, name):
     return f"### {_field_label(name)}\n{body}"
 
 
+def _effective_llm_section(task):
+    """Текст, який реально отримує модель, а не сире поле і не підказка категорії."""
+    pipe = task.pipeline
+    if pipe == AnalysisTask.PIPELINE_EVENTS:
+        from analysis.services.stages import build_classify_prompt
+        body = ("Це classify_prompt: поле classify_system_prompt плюс JSON-схема тегів. "
+                "Саме цей текст іде в LLM на стадії classify.\n\n"
+                + build_classify_prompt(task))
+    elif pipe == AnalysisTask.PIPELINE_INFOSPACE:
+        from analysis.services.infospace.prompts import INFO_JUDGE_PROMPT, build_screen_prompt
+        judge = (task.info_judge_prompt or INFO_JUDGE_PROMPT).strip()
+        tagger = (task.info_tagger_prompt or "").strip()
+        if tagger and not task.tag_categories.exists():
+            tagger_body = (tagger + "\n\nУ зібраний скрін цей текст не входить, "
+                           "доки в задачі немає категорій тегів: "
+                           "task_update tag_categories=ключ.")
+        elif tagger:
+            tagger_body = tagger
+        else:
+            tagger_body = ("порожньо — у зібраний скрін цей блок не додається, "
+                           "лишаються лише підказки категорій.\n"
+                           "Записати: task_update info_tagger_prompt=\"…\" "
+                           "(\"-\" очистити).")
+        body = ("Параметра classify_prompt у infospace немає — він лише для events. "
+                "У LLM на скріні іде зібраний текст: info_screen_prompt + схема тегів "
+                "+ підказки категорій + info_tagger_prompt.\n\n"
+                "### Зібраний скрін-промпт\n" + build_screen_prompt(task)
+                + "\n\n### info_tagger_prompt\n" + tagger_body
+                + "\n\n### Суддя зіставлення [info_judge_prompt]\n" + judge)
+    elif pipe == AnalysisTask.PIPELINE_MONITOR:
+        from analysis.pilot.prompts import (PRESCREEN_SYSTEM_PROMPT_COMPACT,
+                                            TAGGER_SYSTEM_PROMPT)
+        pre = (task.prescreen_prompt or PRESCREEN_SYSTEM_PROMPT_COMPACT).strip()
+        tag = (task.tagger_prompt or TAGGER_SYSTEM_PROMPT).strip()
+        body = ("classify_prompt цей конвеєр не читає. У LLM ідуть два тексти.\n\n"
+                "### prescreen_prompt\n" + pre + "\n\n### tagger_prompt\n" + tag)
+    elif pipe == AnalysisTask.PIPELINE_RESEARCH:
+        from analysis.services.research_stages import _agent_prompt
+        body = ("classify_prompt цей конвеєр не читає. У агента іде tagger_prompt "
+                "плюс рубрики.\n\n" + _agent_prompt(task))
+    elif pipe == AnalysisTask.PIPELINE_TGSEARCH:
+        pre = (task.prescreen_prompt or "").strip() or "порожньо (стадія не стартує)"
+        tag = (task.tagger_prompt or "").strip() or "порожньо (стадія не стартує)"
+        body = ("classify_prompt цей конвеєр не читає. У LLM ідуть тексти з полів задачі.\n\n"
+                "### prescreen_prompt\n" + pre + "\n\n### tagger_prompt\n" + tag)
+    else:
+        return ""
+    return fmt.section("Промпт, який іде в LLM", body)
+
+
 def _task_config(task):
     groups = (("Задача", _HEAD_FIELDS),) + _TASK_GROUPS.get(
         task.pipeline, _TASK_GROUPS["events"])
@@ -243,15 +405,46 @@ def tasks_list(pipeline: str = "", active_only: bool = False):
                       "постів", "подій", "ост. матеріал"], rows)
 
 
+def _task_gaps(task):
+    """Чого бракує, щоб конвеєр цієї задачі взагалі мав що обробляти."""
+    gaps = []
+    pipe = task.pipeline
+    if pipe in ("events", "monitor") and not (task.telezip_query or "").strip():
+        gaps.append("немає telezip_query — task_update telezip_query=… "
+                    "(діалект v3: пробіл = АБО, І — це +)")
+    if pipe in _CHAT_PIPES and not task.monitor_chats.filter(is_active=True).exists():
+        gaps.append("немає активних чатів — chat_add task=" + task.slug + " channel=@…")
+    if pipe == AnalysisTask.PIPELINE_RESEARCH and not task.rubrics.filter(is_active=True).exists():
+        gaps.append("немає рубрик — rubric_create task=" + task.slug
+                    + " tag_category=… tag_name=… keywords=…")
+    if pipe == AnalysisTask.PIPELINE_INFOSPACE:
+        if not task.source_subscriptions.filter(is_active=True).exists():
+            gaps.append("немає джерел — source_add url=… task=" + task.slug)
+        if (task.info_tagger_prompt or "").strip() and not task.tag_categories.exists():
+            gaps.append("info_tagger_prompt заданий, а категорій тегів немає — "
+                        "task_update tag_categories=ключ (інакше правила в скрін не входять)")
+    if pipe == AnalysisTask.PIPELINE_TGSEARCH:
+        if not (task.search_terms or "").strip() and not (task.stream_regex or "").strip():
+            gaps.append("немає ні search_terms, ні stream_regex — пошук і стрім вимкнені")
+        if not (task.prescreen_prompt or "").strip():
+            gaps.append("порожній prescreen_prompt — стадія фільтра не стартує")
+        if not (task.tagger_prompt or "").strip():
+            gaps.append("порожній tagger_prompt — стадія тегів не стартує")
+    if not gaps:
+        return fmt.section("Далі", _PIPELINE_HOW.get(pipe, pipe))
+    return fmt.section("Щоб запустити, бракує", "\n".join(f"- {g}" for g in gaps))
+
+
 @tool("task_show", group="monitoring", params={"ref": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».'})
 def task_show(ref: str):
-    """Картка задачі. Перший рядок — ключ pipeline і чим цей тип відрізняється від інших.
+    """Картка задачі. Перший блок — «Промпт, який іде в LLM»: зібраний текст моделі.
 
-    Поля підписані іменем колонки в дужках, напр. [info_screen_prompt]. Промпти
-    повністю; порожнє з підстановкою з коду позначене «дефолт із коду».
+    classify_prompt є лише в events (поле classify_system_prompt плюс схема тегів).
+    В infospace в модель іде зібраний info_screen_prompt; підказка категорії — одне
+    речення всередині нього, її показує tag_category_show, це не весь промпт.
     """
     t = common.resolve_task(ref)
-    parts = [_task_config(t)]
+    parts = [_effective_llm_section(t), _task_config(t), _task_gaps(t)]
 
     stages = (Post.objects.filter(task=t).order_by().values("stage")
               .annotate(n=Count("id")))
@@ -270,14 +463,18 @@ def task_show(ref: str):
         ("за 30 днів", ev.filter(event_date__gte=month).count()),
     ])))
 
-    if t.pipeline in ("monitor", "tgsearch", "research"):
+    if t.pipeline in _CHAT_PIPES:
         chats = t.monitor_chats.all()
         parts.append(fmt.section("Чати", fmt.kv([
             ("активних", chats.filter(is_active=True).count()),
             ("усього", chats.count()),
             ("у стрімі", chats.filter(is_active=True, stream_enabled=True).count()),
             ("без акаунта", chats.filter(is_active=True, tg_account__isnull=True).count()),
-        ])) + "\n(деталі: chats_list task=" + t.slug + ")")
+        ])) + "\n(деталі: chats_list task=" + t.slug + "; додати: chat_add)")
+    if t.pipeline == AnalysisTask.PIPELINE_RESEARCH:
+        rubrics = list(t.rubrics.all())
+        body = "\n".join(_rubric_line(r) for r in rubrics) if rubrics else "рубрик немає"
+        parts.append(fmt.section("Рубрики", body))
     if t.pipeline == "infospace":
         subs = t.source_subscriptions.all()
         bad = subs.filter(is_active=True).filter(
@@ -489,9 +686,12 @@ def chats_list(task: str = "", active: bool = None, stream_only: bool = False,
       "stream_enabled": "true — читати чат суцільно (стрім), false — шукати за словами.",
       "account": "Telegram-акаунт збору: id/номер/назва, або '-' щоб відвʼязати.",
       "priority": "Менше число = вище в списку.",
-      "forward_media": "Пересилати медіа цього чату в чат медіа задачі."})
+      "forward_media": "Пересилати медіа цього чату в чат медіа задачі.",
+      "is_critical_source": "Особливо важливий чат (пріоритет у звітах). Не передавати = не змінювати.",
+      "notes": "Нотатка. Порожньо = не змінювати; '-' = очистити."})
 def chat_update(chat: str, is_active: bool = None, stream_enabled: bool = None,
-                account: str = "", priority: int = None, forward_media: bool = None):
+                account: str = "", priority: int = None, forward_media: bool = None,
+                is_critical_source: bool = None, notes: str = ""):
     """Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.
 
     chat — id рядка або @username (якщо однозначний). account — id/назва акаунта
@@ -508,6 +708,12 @@ def chat_update(chat: str, is_active: bool = None, stream_enabled: bool = None,
     if forward_media is not None:
         c.forward_media = bool(forward_media)
         changed.append(f"пересилання медіа={fmt.flag(c.forward_media)}")
+    if is_critical_source is not None:
+        c.is_critical_source = bool(is_critical_source)
+        changed.append(f"критичне джерело={fmt.flag(c.is_critical_source)}")
+    if notes:
+        c.notes = "" if notes.strip() == "-" else notes
+        changed.append("нотатка " + ("очищена" if not c.notes else f"({len(c.notes)} симв)"))
     if priority is not None:
         c.priority = int(priority)
         changed.append(f"пріоритет={c.priority}")
@@ -523,6 +729,231 @@ def chat_update(chat: str, is_active: bool = None, stream_enabled: bool = None,
         return f"#{c.id} {c.task.slug}/@{c.channel.username}: нічого не змінено"
     c.save()
     return f"#{c.id} {c.task.slug}/@{c.channel.username}: " + "; ".join(changed)
+
+
+@tool("chat_delete", group="monitoring", mutates=True, params={
+      "chat": "Рядок whitelist: числовий id із chats_list або @username чату.",
+      "confirm": "true — прибрати чат із задачі. Історія постів лишається. Без цього видалення не відбудеться."})
+def chat_delete(chat: str, confirm: bool = False):
+    """Прибрати чат із whitelist задачі. Пости, уже зібрані з нього, не чіпає."""
+    c = common.resolve_chat(chat)
+    user = f"@{c.channel.username}" if c.channel.username else f"#{c.channel_id}"
+    label = f"#{c.id} {c.task.slug}/{user}"
+    if not confirm:
+        raise ToolError(f"{label} не прибрано. Повтори з confirm=true.")
+    c.delete()
+    return f"{label}: прибрано з whitelist"
+
+
+def _whitelist_channel(ref: str):
+    """Рядок довідника для whitelist. @username / посилання, якого ще нема, створюється."""
+    ref = (ref or "").strip()
+    if not ref:
+        raise ToolError("дай channel: @username, посилання або id довідника")
+    looks_new = ref.startswith("@") or "://" in ref or "t.me/" in ref
+    if looks_new:
+        try:
+            return common.resolve_channel(ref)
+        except ToolError:
+            try:
+                ch, _created = Channel.ensure(ref)
+            except ValueError as e:
+                raise ToolError(str(e))
+            return ch
+    return common.resolve_channel(ref)
+
+
+@tool("chat_add", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
+      "task": "Задача monitor, research або tgsearch: id, slug або частина назви.",
+      "channel": "@username, посилання t.me або id рядка довідника. Невідомий @username створюється в довіднику.",
+      "is_active": "Одразу збирати (дефолт true).",
+      "stream_enabled": "true — стрім (полінг + регулярка задачі), false — пошук за словами.",
+      "forward_media": "Пересилати медіа цього чату в чат медіа задачі.",
+      "account": "Telegram-акаунт збору: id/номер/назва. Порожньо = не призначати.",
+      "priority": "Менше число = вище в списку. Дефолт 100."})
+def chat_add(task: str, channel: str, is_active: bool = True, stream_enabled: bool = False,
+             forward_media: bool = False, account: str = "", priority: int = 100):
+    """Додати чат у whitelist задачі (те, що в адмінці — вкладка «Чати»).
+
+    Лише конвеєри monitor, research, tgsearch. Повтор того самого чату не дублює.
+    Для infospace джерело підключається через source_add, не через чат.
+    """
+    t = common.resolve_task(task)
+    if t.pipeline not in _CHAT_PIPES:
+        raise ToolError(
+            f"{t.slug} — конвеєр {t.pipeline}, whitelist чатів лише для "
+            + ", ".join(sorted(_CHAT_PIPES)) + ". " + _PIPELINE_HOW.get(t.pipeline, ""))
+    ch = _whitelist_channel(channel)
+    acc = common.resolve_account(account) if account else None
+    row, created = MonitorChat.objects.get_or_create(
+        task=t, channel=ch,
+        defaults={"is_active": bool(is_active), "stream_enabled": bool(stream_enabled),
+                  "forward_media": bool(forward_media), "priority": int(priority)})
+    if acc is not None and created:
+        row.tg_account = acc
+        row.save(update_fields=["tg_account"])
+    user = f"@{ch.username}" if ch.username else ch.title or f"#{ch.id}"
+    if not created:
+        return (f"#{row.id} {t.slug}/{user}: уже в whitelist "
+                "(правки: chat_update)")
+    bits = [f"активний={fmt.flag(row.is_active)}",
+            "стрім" if row.stream_enabled else "пошук"]
+    if row.tg_account_id:
+        bits.append(f"акаунт=#{row.tg_account_id}")
+    return f"#{row.id} {t.slug}/{user}: додано, " + ", ".join(bits)
+
+
+def _rubric_keywords(spec: str) -> list:
+    import json
+    spec = (spec or "").strip()
+    if not spec:
+        raise ToolError("keywords порожні: по одному регулярному виразу в рядок "
+                        "(усі мають збігтися) або JSON-список")
+    if spec.startswith("["):
+        try:
+            data = json.loads(spec)
+        except json.JSONDecodeError as e:
+            raise ToolError(f"keywords: битий JSON ({e})")
+        if not isinstance(data, list) or not all(isinstance(x, str) and x.strip() for x in data):
+            raise ToolError("keywords: JSON-список непорожніх рядків")
+        return [x.strip() for x in data]
+    lines = [ln.strip() for ln in spec.splitlines() if ln.strip()]
+    if not lines:
+        raise ToolError("keywords порожні")
+    return lines
+
+
+def _ensure_rubric_tag(category: str, name: str) -> tuple[str, str]:
+    from analysis.models import Tag, TagCategory
+    key = (category or "").strip()
+    c = TagCategory.objects.filter(key=key).first()
+    if not c:
+        raise ToolError(f"категорії тегів «{key}» немає (спершу tag_category_create)")
+    name = (name or "").strip()
+    if not name:
+        raise ToolError("tag_name порожній")
+    if len(name) > 80:
+        raise ToolError("tag_name довше за 80 символів")
+    folded = name.casefold()
+    for existing in Tag.objects.filter(category=c.key):
+        if existing.name.casefold() == folded:
+            return c.key, existing.name
+    Tag.objects.create(category=c.key, name=name)
+    return c.key, name
+
+
+def _resolve_rubric(ref: str) -> ResearchRubric:
+    ref = str(ref).strip().lstrip("#")
+    if not ref.isdigit():
+        raise ToolError("рубрика: числовий id із rubrics_list")
+    row = common.scope_by_task(
+        ResearchRubric.objects.select_related("task")).filter(pk=int(ref)).first()
+    if not row:
+        raise ToolError(f"рубрики #{ref} немає")
+    return row
+
+
+def _rubric_line(row: ResearchRubric) -> str:
+    keys = " | ".join(row.keywords or []) or "—"
+    return (f"#{row.id} {row.task.slug} {row.tag_category}:{row.tag_name} "
+            f"активна={fmt.flag(row.is_active)} порядок={row.order}\n"
+            f"ключі (усі мають збігтися): {keys}"
+            + (f"\nдоповнення промпту: {row.extra_prompt}" if row.extra_prompt else ""))
+
+
+@tool("rubrics_list", group="monitoring", params={
+      "task": "Задача research: id, slug або частина назви."})
+def rubrics_list(task: str):
+    """Рубрики тематичного дослідження: тег події і ключові слова (усі мають збігтися)."""
+    t = common.resolve_task(task)
+    rows = list(t.rubrics.all())
+    if not rows:
+        return f"{t.slug}: рубрик немає (rubric_create)"
+    return "\n\n".join(_rubric_line(r) for r in rows)
+
+
+@tool("rubric_create", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
+      "task": "Задача research: id, slug або частина назви.",
+      "tag_category": "Ключ категорії тегів, яка вже існує (tag_category_create).",
+      "tag_name": "Канонічний тег події цієї рубрики (до 80 символів). Якщо тега ще нема — створюється.",
+      "keywords": "Регулярки: по одній в рядок (кандидат, якщо КОЖНА збіглась) або JSON-список рядків.",
+      "extra_prompt": "Додаткові правила рубрики в промпт агента. Порожньо = без доповнення.",
+      "is_active": "Одразу активна (дефолт true).",
+      "order": "Порядок у списку. Менше — вище."})
+def rubric_create(task: str, tag_category: str, tag_name: str, keywords: str,
+                  extra_prompt: str = "", is_active: bool = True, order: int = 0):
+    """Додати рубрику research-задачі: що шукаємо в потоці чатів.
+
+    Лише конвеєр research. Категорія тегів має вже існувати — інакше фасет подій не реєструється.
+    """
+    t = common.resolve_task(task)
+    if t.pipeline != AnalysisTask.PIPELINE_RESEARCH:
+        raise ToolError(
+            f"{t.slug} — конвеєр {t.pipeline}, рубрики лише для research. "
+            + _PIPELINE_HOW.get(t.pipeline, ""))
+    cat, tag = _ensure_rubric_tag(tag_category, tag_name)
+    words = _rubric_keywords(keywords)
+    row = ResearchRubric(task=t, tag_category=cat, tag_name=tag, keywords=words,
+                         extra_prompt=extra_prompt or "", is_active=bool(is_active),
+                         order=max(0, int(order)))
+    row.save()
+    return "Рубрику додано\n" + _rubric_line(row)
+
+
+@tool("rubric_update", group="monitoring", mutates=True, params={
+      "ref": "Числовий id рубрики з rubrics_list.",
+      "tag_category": "Інша категорія тегів. Порожньо = не змінювати.",
+      "tag_name": "Інший тег події. Порожньо = не змінювати.",
+      "keywords": "Новий список регулярок (рядки або JSON). Порожньо = не змінювати.",
+      "extra_prompt": "Доповнення промпту. Порожньо = не змінювати; '-' = очистити.",
+      "is_active": "Увімкнути/вимкнути. Не передавати = не змінювати.",
+      "order": "Порядок. Не передавати = не змінювати."})
+def rubric_update(ref: str, tag_category: str = "", tag_name: str = "", keywords: str = "",
+                  extra_prompt: str = "", is_active: bool = None, order: int = None):
+    """Змінити рубрику research-задачі."""
+    row = _resolve_rubric(ref)
+    changed = []
+    cat = tag_category or row.tag_category
+    tag = tag_name or row.tag_name
+    if tag_category or tag_name:
+        cat, tag = _ensure_rubric_tag(cat, tag)
+        if cat != row.tag_category:
+            row.tag_category = cat
+            changed.append(f"категорія={cat}")
+        if tag != row.tag_name:
+            row.tag_name = tag
+            changed.append(f"тег={tag}")
+    if keywords:
+        row.keywords = _rubric_keywords(keywords)
+        changed.append(f"ключів={len(row.keywords)}")
+    if extra_prompt:
+        row.extra_prompt = "" if extra_prompt.strip() == "-" else extra_prompt
+        changed.append("доповнення промпту " + ("очищено" if not row.extra_prompt
+                                                else f"({len(row.extra_prompt)} симв)"))
+    if is_active is not None:
+        row.is_active = bool(is_active)
+        changed.append(f"активна={fmt.flag(row.is_active)}")
+    if order is not None:
+        row.order = max(0, int(order))
+        changed.append(f"порядок={row.order}")
+    if not changed:
+        return f"#{row.id}: нічого не змінено"
+    row.save()
+    return _rubric_line(row) + "\n" + "; ".join(changed)
+
+
+@tool("rubric_delete", group="monitoring", mutates=True, params={
+      "ref": "Числовий id рубрики з rubrics_list.",
+      "confirm": "true — справді видалити. Без цього видалення не відбудеться."})
+def rubric_delete(ref: str, confirm: bool = False):
+    """Видалити рубрику. Тег події в довіднику лишається."""
+    row = _resolve_rubric(ref)
+    if not confirm:
+        raise ToolError(f"#{row.id} {row.tag_category}:{row.tag_name} не видалено. "
+                        "Повтори з confirm=true.")
+    label = f"#{row.id} {row.task.slug} {row.tag_category}:{row.tag_name}"
+    row.delete()
+    return f"{label}: видалено"
 
 
 @tool("sources_list", group="monitoring", params={
@@ -966,8 +1397,8 @@ def channel_add(url: str, title: str = "", region: str = "", topics: str = "",
 
     Довідник спільний: рядок ідентифікує посилання, тож повторний виклик не
     дублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал
-    ще й ОПИТУВАВСЯ, потрібне джерело: `source_add` (воно саме створить рядок
-    довідника, якщо його нема). У whitelist моніторингу — через адмінку.
+    ще й ОПИТУВАВСЯ як джерело infospace: `source_add`. У whitelist чатів
+    monitor/research/tgsearch — `chat_add`.
     """
     reg = common.resolve_region(region) if region else None
     try:
@@ -1228,11 +1659,35 @@ def source_subscribe(ref: str, task: str, active: bool = True, priority: int = 0
       "languages": "Мови через кому (ru, uk…).",
       "tag_categories": "Ключі категорій тегів через кому (див. tag_categories) — які теги класифікатор збирає з поста.",
       "display_name": "Людська назва для простого інтерфейсу (/app/).",
-      "is_active": "Створити активною (дефолт true)."})
+      "is_active": "Створити активною (дефолт true).",
+      "info_screen_prompt": "Лише infospace: системний промпт скріну. Порожньо = дефолт моделі (копіюється в поле при збереженні форми; тут лишається порожнім, доки не задаси).",
+      "info_tagger_prompt": "Лише infospace: додаткові правила тегів, доклеюються до скрін-промпта. Порожньо = лише підказки категорій.",
+      "info_judge_prompt": "Лише infospace: промпт судді зіставлення. Порожньо = дефолт із коду.",
+      **_EXTRA_PARAM_DOCS})
 def task_create(slug: str, name: str, pipeline: str = "events", description: str = "",
                 telezip_query: str = "", languages: str = "", tag_categories: str = "",
-                display_name: str = "", is_active: bool = True):
-    """Створити задачу (`AnalysisTask`). Власник = ти; видно лише тобі і суперюзерам.
+                display_name: str = "", is_active: bool = True,
+                info_screen_prompt: str = "", info_tagger_prompt: str = "",
+                info_judge_prompt: str = "",
+                drop_linked_comments: bool = None,
+                dedup_pre_thresh: int = None, dedup_cand_thresh: int = None,
+                dedup_judge_prompt: str = "", generic_sides: str = "",
+                review_model: str = "", review_prompt: str = "",
+                agent_review_prompt: str = "",
+                mon_min_len: int = None, mon_max_len: int = None,
+                prescreen_model: str = "", prescreen_prompt: str = "",
+                prescreen_enabled: bool = None, tagger_prompt: str = "",
+                dedup_group_days: int = None, dedup_group_fuzz: int = None,
+                dedup_llm_cluster: bool = None, dedup_cluster_prompt: str = "",
+                research_audit_enabled: bool = None, research_audit_prompt: str = "",
+                info_screen_model: str = "", info_max_age_days: int = None,
+                info_match_window_hours: int = None, info_update_summaries: bool = None,
+                info_retention_days: int = None,
+                stream_regex: str = "", stream_interval_min: int = None,
+                stream_media_chat_id: str = "",
+                search_terms: str = "", search_days: int = None,
+                search_limit_per_term: int = None):
+    """Створити задачу (`AnalysisTask`) і одразу поля її етапів. Власник = ти; видно лише тобі і суперюзерам.
 
     pipeline обовʼязково розрізняй: events (події TeleZip), monitor (критика
     в чатах), research (тематичне), infospace (полінг джерел), tgsearch
@@ -1250,6 +1705,31 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
         raise ToolError("дай назву")
     if pipeline not in dict(AnalysisTask.PIPELINE_CHOICES):
         raise ToolError(f"pipeline: одне з {', '.join(dict(AnalysisTask.PIPELINE_CHOICES))}")
+    if any((info_screen_prompt, info_tagger_prompt, info_judge_prompt)) \
+            and pipeline != AnalysisTask.PIPELINE_INFOSPACE:
+        raise ToolError(
+            "info_screen_prompt, info_tagger_prompt, info_judge_prompt пишуться лише "
+            "в конвеєр infospace")
+    extras = _collect_task_fields(
+        drop_linked_comments=drop_linked_comments, dedup_pre_thresh=dedup_pre_thresh,
+        dedup_cand_thresh=dedup_cand_thresh, dedup_judge_prompt=dedup_judge_prompt,
+        generic_sides=generic_sides, review_model=review_model, review_prompt=review_prompt,
+        agent_review_prompt=agent_review_prompt, mon_min_len=mon_min_len,
+        mon_max_len=mon_max_len, prescreen_model=prescreen_model,
+        prescreen_prompt=prescreen_prompt, prescreen_enabled=prescreen_enabled,
+        tagger_prompt=tagger_prompt, dedup_group_days=dedup_group_days,
+        dedup_group_fuzz=dedup_group_fuzz, dedup_llm_cluster=dedup_llm_cluster,
+        dedup_cluster_prompt=dedup_cluster_prompt,
+        research_audit_enabled=research_audit_enabled,
+        research_audit_prompt=research_audit_prompt, info_screen_model=info_screen_model,
+        info_max_age_days=info_max_age_days, info_match_window_hours=info_match_window_hours,
+        info_update_summaries=info_update_summaries, info_retention_days=info_retention_days,
+        stream_regex=stream_regex, stream_interval_min=stream_interval_min,
+        stream_media_chat_id=stream_media_chat_id, search_terms=search_terms,
+        search_days=search_days, search_limit_per_term=search_limit_per_term)
+    for field_name, field_value in extras.items():
+        _guard_task_field(pipeline, field_name)
+        _coerce_task_field(field_name, field_value)
     cats = []
     for key in _split_csv(tag_categories):
         c = TagCategory.objects.filter(key=key).first()
@@ -1261,9 +1741,15 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
         slug=slug, name=name.strip()[:200], pipeline=pipeline, description=description.strip(),
         telezip_query=telezip_query, display_name=(display_name or "").strip()[:120],
         languages=[x.strip() for x in languages.replace(",", " ").split() if x.strip()],
-        is_active=bool(is_active), owner=who.user)
+        is_active=bool(is_active), owner=who.user,
+        info_screen_prompt=info_screen_prompt, info_tagger_prompt=info_tagger_prompt,
+        info_judge_prompt=info_judge_prompt)
     if cats:
         t.tag_categories.set(cats)
+    if extras:
+        applied = []
+        _apply_task_fields(t, extras, applied)
+        t.save()
     return fmt.joinsec(
         fmt.section(f"Задача #{t.id} {t.slug} створена", fmt.kv([
             ("назва", t.name), ("конвеєр", f"{t.pipeline} — {t.get_pipeline_display()}"),
@@ -1294,15 +1780,42 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
       "geo_enabled": "Визначати регіон подій (гео-стадія). Не передавати = не змінювати.",
       "review_enabled": "Авто-аудит подій LLM після створення. Не передавати = не змінювати.",
       "dedup_window_days": "Вікно дедупу подій у днях. 0 = не змінювати.",
-      "classify_prompt": "Лише конвеєр events: system-промпт класифікації (поле classify_system_prompt). Порожньо = не змінювати; '-' = очистити поле. Для infospace промпт інший — info_screen_prompt, його показує task_show. Перед зміною подивись поточний: task_show."})
+      "classify_prompt": "Лише конвеєр events: system-промпт класифікації (поле classify_system_prompt). Порожньо = не змінювати; '-' = очистити поле. Для infospace це інше поле — info_screen_prompt / info_tagger_prompt. Перед зміною подивись task_show.",
+      "info_screen_prompt": "Лише infospace: системний промпт скріну. Порожньо = не змінювати; '-' = очистити (тоді береться дефолт із коду). Поточний зібраний текст — task_show.",
+      "info_tagger_prompt": "Лише infospace: додаткові правила тегів, доклеюються до скрін-промпта. Порожньо = не змінювати; '-' = очистити (лишаться підказки категорій). Це НЕ підказка категорії (hint).",
+      "info_judge_prompt": "Лише infospace: промпт судді зіставлення. Порожньо = не змінювати; '-' = очистити (дефолт із коду).",
+      "tag_categories": "Ключі категорій тегів через кому — замінити набір задачі. Порожньо = не змінювати; '-' = відв'язати всі.",
+      **_EXTRA_PARAM_DOCS})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
                 min_subscribers: int = -1, llm_model: str = "", display_name: str = "",
                 name: str = "", description: str = "", search_posts: bool = None,
                 search_comments: bool = None, geo_enabled: bool = None,
                 review_enabled: bool = None, dedup_window_days: int = 0,
-                classify_prompt: str = ""):
-    """Змінити параметри задачі. classify_prompt пише лише конвеєр events.
+                classify_prompt: str = "", info_screen_prompt: str = "",
+                info_tagger_prompt: str = "", info_judge_prompt: str = "",
+                tag_categories: str = "",
+                drop_linked_comments: bool = None,
+                dedup_pre_thresh: int = None, dedup_cand_thresh: int = None,
+                dedup_judge_prompt: str = "", generic_sides: str = "",
+                review_model: str = "", review_prompt: str = "",
+                agent_review_prompt: str = "",
+                mon_min_len: int = None, mon_max_len: int = None,
+                prescreen_model: str = "", prescreen_prompt: str = "",
+                prescreen_enabled: bool = None, tagger_prompt: str = "",
+                dedup_group_days: int = None, dedup_group_fuzz: int = None,
+                dedup_llm_cluster: bool = None, dedup_cluster_prompt: str = "",
+                research_audit_enabled: bool = None, research_audit_prompt: str = "",
+                info_screen_model: str = "", info_max_age_days: int = None,
+                info_match_window_hours: int = None, info_update_summaries: bool = None,
+                info_retention_days: int = None,
+                stream_regex: str = "", stream_interval_min: int = None,
+                stream_media_chat_id: str = "",
+                search_terms: str = "", search_days: int = None,
+                search_limit_per_term: int = None):
+    """Змінити задачу: кожне поле картки task_show (ім'я в дужках) — параметр тут, для свого конвеєра.
+
+    classify_prompt — лише events; info_screen_prompt, info_tagger_prompt, info_judge_prompt — лише infospace. Решта полів етапів називаються як у моделі.
 
     Який тип у задачі — перший рядок task_show. Запит TeleZip (events/monitor):
     `tz_find(stats=true)` показав обсяг → фіксуємо тут → `run_create`. Старий
@@ -1313,6 +1826,36 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
         raise ToolError(
             f"{t.slug} — конвеєр {t.pipeline}, classify_prompt пише лише events. "
             + _PIPELINE_HOW.get(t.pipeline, ""))
+    info_prompts = (
+        ("info_screen_prompt", info_screen_prompt),
+        ("info_tagger_prompt", info_tagger_prompt),
+        ("info_judge_prompt", info_judge_prompt),
+    )
+    for arg_name, value in info_prompts:
+        if value and t.pipeline != AnalysisTask.PIPELINE_INFOSPACE:
+            raise ToolError(
+                f"{t.slug} — конвеєр {t.pipeline}, {arg_name} пише лише infospace. "
+                + _PIPELINE_HOW.get(t.pipeline, ""))
+    extras = _collect_task_fields(
+        drop_linked_comments=drop_linked_comments, dedup_pre_thresh=dedup_pre_thresh,
+        dedup_cand_thresh=dedup_cand_thresh, dedup_judge_prompt=dedup_judge_prompt,
+        generic_sides=generic_sides, review_model=review_model, review_prompt=review_prompt,
+        agent_review_prompt=agent_review_prompt, mon_min_len=mon_min_len,
+        mon_max_len=mon_max_len, prescreen_model=prescreen_model,
+        prescreen_prompt=prescreen_prompt, prescreen_enabled=prescreen_enabled,
+        tagger_prompt=tagger_prompt, dedup_group_days=dedup_group_days,
+        dedup_group_fuzz=dedup_group_fuzz, dedup_llm_cluster=dedup_llm_cluster,
+        dedup_cluster_prompt=dedup_cluster_prompt,
+        research_audit_enabled=research_audit_enabled,
+        research_audit_prompt=research_audit_prompt, info_screen_model=info_screen_model,
+        info_max_age_days=info_max_age_days, info_match_window_hours=info_match_window_hours,
+        info_update_summaries=info_update_summaries, info_retention_days=info_retention_days,
+        stream_regex=stream_regex, stream_interval_min=stream_interval_min,
+        stream_media_chat_id=stream_media_chat_id, search_terms=search_terms,
+        search_days=search_days, search_limit_per_term=search_limit_per_term)
+    for field_name, field_value in extras.items():
+        _guard_task_field(t.pipeline, field_name)
+        _coerce_task_field(field_name, field_value)
     changed = []
     if telezip_query:
         old = t.telezip_query
@@ -1363,6 +1906,28 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
         t.classify_system_prompt = "" if classify_prompt.strip() == "-" else classify_prompt
         changed.append("промпт класифікації " + ("→ дефолт із коду" if not t.classify_system_prompt
                                                  else f"({len(t.classify_system_prompt)} симв)"))
+    for field, value in info_prompts:
+        if not value:
+            continue
+        text = "" if value.strip() == "-" else value
+        setattr(t, field, text)
+        changed.append(f"{field} " + ("очищено" if not text else f"({len(text)} симв)"))
+    if extras:
+        _apply_task_fields(t, extras, changed)
+    if tag_categories:
+        from analysis.models import TagCategory
+        if tag_categories.strip() == "-":
+            t.tag_categories.clear()
+            changed.append("категорії тегів очищено")
+        else:
+            cats = []
+            for key in _split_csv(tag_categories):
+                c = TagCategory.objects.filter(key=key).first()
+                if not c:
+                    raise ToolError(f"категорії тегів «{key}» немає (список: tag_categories)")
+                cats.append(c)
+            t.tag_categories.set(cats)
+            changed.append("категорії тегів=" + ", ".join(c.key for c in cats))
     if not changed:
         return f"#{t.id} {t.slug}: нічого не змінено (жоден параметр не передано)"
     t.save()
