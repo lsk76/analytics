@@ -45,7 +45,9 @@ def gw(monkeypatch):
 
 
 def make_actor(name, role):
+    from django.contrib.auth.models import Permission
     user = User.objects.create_user(name, is_staff=True, password="x")
+    user.user_permissions.set(Permission.objects.all())     # права розділів — окремий тест
     McpRole.objects.create(user=user, role=role)
     return Actor(user=user, scopes=McpRole.SCOPES[role], role=role)
 

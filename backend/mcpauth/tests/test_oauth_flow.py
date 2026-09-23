@@ -62,7 +62,11 @@ def client_info():
 
 @pytest.fixture
 def operator(db):
+    from django.contrib.auth.models import Permission
     user = User.objects.create_user("operator", password="x", is_staff=True)
+    # інструменти перевіряють і права Django (mcp_api/perms.py) — даємо розділ задач
+    user.user_permissions.add(Permission.objects.get(content_type__app_label="analysis",
+                                                     codename="view_analysistask"))
     McpRole.objects.create(user=user, role=McpRole.OPERATOR)
     return user
 

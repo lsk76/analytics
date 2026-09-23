@@ -4,6 +4,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).\n\nref — id/номер/назва, або `all` / `active` / `problem` для групи.\n\nПозначений як такий, що лише читає: єдиний запис у БД — позначка «востаннє\nвикористано» для живих акаунтів, вона ні на що в роботі стадій не впливає.\n(На відміну від `proxy_check`, чий вердикт лягає в `is_working`/`fail_count`,\nзвідки воркери й беруть проксі.)",
   "summary": "Жива перевірка акаунта (connect+get_me через його проксі, нічого не надсилає).",
   "params": [
@@ -28,6 +29,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».\n\nkind — фільтр `канал` / `група` / `приват`.",
   "summary": "Діалоги акаунта наживо (на що підписаний) — перевірка «прогрітості».",
   "params": [
@@ -59,6 +61,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:create",
+  "perm": "accounts.add_telegramaccount",
   "doc": "Додати ОДИН Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.\n\nТе саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,\ndevice-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається\nавторизованою; далі — `account_check` (жива?) і `account_spam_check`.\nБагато акаунтів одразу — `account_import_batch`. Секрети у відповідь не потрапляють.",
   "summary": "Додати ОДИН Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.",
   "params": [
@@ -111,6 +114,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:create",
+  "perm": "accounts.add_telegramaccount",
   "doc": "Додати БАГАТО акаунтів із tdata-експорту: тека або zip із парами\n<phone>.json + <phone>.session → по акаунту на пару, звіт таблицею.\n\nКожна пара імпортується окремо: дубль номера чи битий файл не зупиняє решту.\nСпершу `dry_run=true` — побачиш, що знайдено й що вже є. Після імпорту —\n`account_check ref=problem` / `account_spam_check`, щоб знати, хто живий.\nШлях — у контейнері (web/mcp монтують ./backend як /app/backend).",
   "summary": "Додати БАГАТО акаунтів із tdata-експорту: тека або zip із парами <phone>.json + <phone>.session → по акаунту на пару, звіт таблицею.",
   "params": [
@@ -170,6 +174,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_warmupjob",
   "doc": "Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота).",
   "summary": "Черги завдань акаунтів: `warm_up` (прогрів) і `test_bot` (тестовий прогін бота).",
   "params": [
@@ -201,6 +206,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Полагодити акаунт через gateway: живість → регенерація session-id проксі →\nстан. Те саме робить фоновий ремонт gateway після транспортних збоїв.",
   "summary": "Полагодити акаунт через gateway: живість → регенерація session-id проксі → стан. Те саме робить фоновий ремонт gateway після транспортних збоїв.",
   "params": [
@@ -218,6 +224,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Картка акаунта: конфіг, проксі, що він обслуговує, останні завдання й боти.",
   "summary": "Картка акаунта: конфіг, проксі, що він обслуговує, останні завдання й боти.",
   "params": [
@@ -235,6 +242,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.\n\nСаме обмеження SpamBot-ом, а не мертва проксі, валить резолв юзернеймів.\nref — id/номер/назва, або `all` / `active` / `problem`.",
   "summary": "Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.",
   "params": [
@@ -259,6 +267,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Змінити акаунт: активність, проксі, теги (теги — через кому).\n\nproxy: id/частина рядка проксі, або `-` щоб відв'язати.",
   "summary": "Змінити акаунт: активність, проксі, теги (теги — через кому).",
   "params": [
@@ -304,6 +313,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.\n\nНепрогрітий акаунт не резолвить чужі юзернейми. Виконує воркер `warm-up`\n(join кожного каналу — секунди, тому це черга, а не синхронна дія).\nchannels — скільки каналів (0 = випадково 5-10).",
   "summary": "Поставити акаунт(и) у чергу прогріву — підписка на випадкові канали з довідника.",
   "params": [
@@ -328,6 +338,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.\n\nquery — частина назви/номера/тега; problems_only — лише ті, що потребують уваги\n(не авторизовані, обмежені SpamBot-ом, без проксі або з мертвою проксі).\n«чати»/«джерела» — скільки моніторингів читає саме цей акаунт.",
   "summary": "Усі Telegram-акаунти: авторизація, статус SpamBot, проксі, навантаження.",
   "params": [
@@ -359,6 +370,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
   "summary": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
   "params": [
@@ -383,6 +395,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).\n\nref — id/частина рядка, або `all` / `broken`. repair=False — лише діагноз.",
   "summary": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).",
   "params": [
@@ -407,6 +420,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:create",
+  "perm": "analysis.add_channel",
   "doc": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.\n\nДовідник спільний: рядок ідентифікує посилання, тож повторний виклик не\nдублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал\nще й ОПИТУВАВСЯ, потрібне джерело: `source_add` (воно саме створить рядок\nдовідника, якщо його нема). У whitelist моніторингу — через адмінку.",
   "summary": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.",
   "params": [
@@ -459,6 +473,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_channel",
   "doc": "Змінити рядок довідника: теми (теги), назву, регіон, населений пункт, тип, фокус.\n\nТеми — це поле `Channel.topics` (список), те саме, що править агент\nкласифікації директорії; підписники/активність/доступ пише лише код.",
   "summary": "Змінити рядок довідника: теми (теги), назву, регіон, населений пункт, тип, фокус.",
   "params": [
@@ -532,6 +547,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_channel",
   "doc": "Знайти канал/чат у нашому довіднику (`Channel`) за username/назвою.\n\nКолонка «id» — це id рядка довідника, і він НЕ підходить ні для\n`chat_update` (там id рядка whitelist із `chats_list`), ні для\n`tz_find(channel=…)` (там TelegramID або @username). Із цієї таблиці для\nінших інструментів бери @username, а рядок whitelist шукай у `chats_list`.",
   "summary": "Знайти канал/чат у нашому довіднику (`Channel`) за username/назвою.",
   "params": [
@@ -556,6 +572,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_monitorchat",
   "doc": "Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.\n\nchat — id рядка або @username (якщо однозначний). account — id/назва акаунта\nабо `-` щоб відв'язати.",
   "summary": "Змінити рядок whitelist: активність, режим стріму, акаунт збору, пріоритет.",
   "params": [
@@ -608,6 +625,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_monitorchat",
   "doc": "Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.\n\nproblems_only — без акаунта, або стрім не оновлювався понад добу.",
   "summary": "Whitelist чатів моніторингу: акаунт збору, режим (стрім/пошук), свіжість.",
   "params": [
@@ -653,6 +671,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.add_event",
   "doc": "Додати подію за посиланням — як «Додати подію» в списку подій адмінки.\n\nТекст поста/статті → скрін-промпт дослідження (relevant/summary/region/tags)\n→ Post(done) → Event(approved). Це виклик LLM і fetch сторінки; закритий\nканал або нерелевантний текст → зрозуміла помилка. Якщо пост із таким URL\nу дослідженні вже має подію — повернеться вона, дубля не буде.",
   "summary": "Додати подію за посиланням — як «Додати подію» в списку подій адмінки.",
   "params": [
@@ -677,6 +696,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_event",
   "doc": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
   "summary": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
   "params": [
@@ -694,6 +714,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_event",
   "doc": "Схвалити/відхилити/повернути в чергу, тегувати, поправити регіон/дату/опис події.\n\nСхвалення/відхилення — те саме, що дії «✅ Схвалити» / «🚫 Відхилити» в\nадмінці (нотатка `manual: … by <user>`, claim-lock аудиту знімається).\nВідхилена подія зникає з дефолтних списків і графіків і згодом видаляється\nчисткою — це не «м'яке приховування».",
   "summary": "Схвалити/відхилити/повернути в чергу, тегувати, поправити регіон/дату/опис події.",
   "params": [
@@ -767,6 +788,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_event",
   "doc": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,\nрегіон, теги (фасети), канал, кількість каналів, охоплення.\n\nДефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;\n`review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).\nКатегорії тегів для фільтра `tag` — `tag_categories`; id події — для\n`event_show`/`event_update`.",
   "summary": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту, регіон, теги (фасети), канал, кількість каналів, охоплення.",
   "params": [
@@ -875,6 +897,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_event",
   "doc": "Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.\n\ngroup_by: day|week|month|region|tag:<категорія>|task.\nРахує через services/metrics.py — ті самі формули, що й графіки адмінки.",
   "summary": "Зріз подій: по днях/тижнях/місяцях, регіонах, тегах або задачах.",
   "params": [
@@ -927,6 +950,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_researchrun",
   "doc": "Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки.",
   "summary": "Скасувати збір: статус `cancelled` + (опційно) прибрати його ще не взяті чанки.",
   "params": [
@@ -951,6 +975,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.add_researchrun",
   "doc": "Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).\n\nДалі все ведуть воркери. Ідемпотентно за діапазонами: вже покриті чанки не дублюються.",
   "summary": "Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).",
   "params": [
@@ -996,6 +1021,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_researchrun",
   "doc": "Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»).",
   "summary": "Збір детально: чанки, рух постів по стадіях, події періоду (як екран «Збори → Статус»).",
   "params": [
@@ -1013,6 +1039,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_researchrun",
   "doc": "Збори (ResearchRun): статус, період, прогрес чанків.",
   "summary": "Збори (ResearchRun): статус, період, прогрес чанків.",
   "params": [
@@ -1044,6 +1071,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:create",
+  "perm": "analysis.add_source",
   "doc": "Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.\n\nДжерело = рядок довідника (`Channel`, створюється/знаходиться за посиланням)\n+ розклад/курсор/акаунт. Без підписки активної infospace-задачі\n`info_collect` його НЕ бере в роботу — тож зазвичай передавай `task`.\nПовторний виклик з тим самим посиланням віддає наявне джерело.",
   "summary": "Створити джерело інформпростору (`Source`) і, за потреби, підписати на нього задачу.",
   "params": [
@@ -1110,6 +1138,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.add_sourcesubscription",
   "doc": "Підписати задачу на джерело (або вимкнути підписку) — `SourceSubscription`.\n\nСаме підписка робить джерело «робочим» для `info_collect`. Вимкнення не\nвидаляє ні джерело, ні зібране — лише виключає з наступних зборів.",
   "summary": "Підписати задачу на джерело (або вимкнути підписку) — `SourceSubscription`.",
   "params": [
@@ -1148,6 +1177,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_source",
   "doc": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
   "summary": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
   "params": [
@@ -1200,6 +1230,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_source",
   "doc": "Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені.",
   "summary": "Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені.",
   "params": [
@@ -1238,6 +1269,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_tagcategory",
   "doc": "Категорії тегів (`TagCategory`) і приклади тегів — щоб правильно писати\n`tag=` у events_list і `add_tags=` в event_update. Закрита категорія =\nлише словникові теги.",
   "summary": "Категорії тегів (`TagCategory`) і приклади тегів — щоб правильно писати `tag=` у events_list і `add_tags=` в event_update. Закрита категорія = лише словникові теги.",
   "params": [
@@ -1255,6 +1287,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:create",
+  "perm": "analysis.add_analysistask",
   "doc": "Створити дослідження (`AnalysisTask`) — власник = ти, далі воно видиме\nлише тобі (і суперюзерам), як в адмінці.\n\nМінімум — slug, назва і конвеєр; решту (запит, промпти, стадії) правиш\n`task_update`, канали/джерела підключаєш `source_add`/`source_subscribe`,\nзбір запускаєш `run_create`. Промпти класифікації за замовчуванням — із коду.",
   "summary": "Створити дослідження (`AnalysisTask`) — власник = ти, далі воно видиме лише тобі (і суперюзерам), як в адмінці.",
   "params": [
@@ -1328,6 +1361,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори.",
   "summary": "Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори.",
   "params": [
@@ -1345,6 +1379,7 @@
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_analysistask",
   "doc": "Змінити параметри задачі: збір (запит TeleZip, мови, unique, чанк), назву/опис,\nпрапорці стадій (пости/коментарі, гео, аудит), вікно дедупу, промпт класифікації.\n\nЗамикає маршрут розвідки: `tz_find(stats=true)` показав, що обсяг здоровий →\nфіксуємо його в задачі → `run_create` збирає ним period. Старий запит\nдрукується у відповіді — щоб було куди відкотитись.",
   "summary": "Змінити параметри задачі: збір (запит TeleZip, мови, unique, чанк), назву/опис, прапорці стадій (пости/коментарі, гео, аудит), вікно дедупу, промпт класифікації.",
   "params": [
@@ -1474,6 +1509,7 @@
   "group": "monitoring",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено.",
   "summary": "Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено.",
   "params": [
@@ -1498,6 +1534,7 @@
   "group": "service",
   "mutates": true,
   "scope": "mcp:create",
+  "perm": "analysis.add_publishconfig",
   "doc": "Створити профіль публікації подій у Telegram-канал (власник = ти).\n\nЗа замовчуванням НЕАКТИВНИЙ — спершу перевір відбір `events_list` із тими\nсамими тегами/регіоном, потім `publish_config_update(is_active=true)`.\nАктивний профіль воркер `publish` бере одразу і публікує реальні пости.",
   "summary": "Створити профіль публікації подій у Telegram-канал (власник = ти).",
   "params": [
@@ -1634,6 +1671,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_publishconfig",
   "doc": "Картка профілю публікації: канал, режим, відбір (теги/регіони/аудит), лічильники.",
   "summary": "Картка профілю публікації: канал, режим, відбір (теги/регіони/аудит), лічильники.",
   "params": [
@@ -1651,6 +1689,7 @@
   "group": "service",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "analysis.change_publishconfig",
   "doc": "Змінити профіль публікації: увімкнути/вимкнути, канал, відбір, режим, AI.\n\nСписки (tags, require_tags, exclude_tags, regions) замінюються ПОВНІСТЮ\nпереданим значенням; '-' очищає; не передано = без змін. Не передані\nскаляри теж не змінюються.",
   "summary": "Змінити профіль публікації: увімкнути/вимкнути, канал, відбір, режим, AI.",
   "params": [
@@ -1794,6 +1833,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_publishconfig",
   "doc": "Профілі публікації + останні публікації подій у Telegram.",
   "summary": "Профілі публікації + останні публікації подій у Telegram.",
   "params": [
@@ -1811,6 +1851,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_publishedevent",
   "doc": "Що було опубліковано (журнал `PublishedEvent`): коли, яким профілем, яка подія,\nпосилання на пост у каналі; для відсіяних/збійних — причина.\n\nПовний текст поста — `published_show`. Перечергувати подію (щоб воркер\nобробив наново) можна лише в адмінці (дія «Перечергувати»).",
   "summary": "Що було опубліковано (журнал `PublishedEvent`): коли, яким профілем, яка подія, посилання на пост у каналі; для відсіяних/збійних — причина.",
   "params": [
@@ -1863,6 +1904,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_publishedevent",
   "doc": "Одна публікація повністю: текст поста, вердикт і причина AI, посилання, помилка.",
   "summary": "Одна публікація повністю: текст поста, вердикт і причина AI, посилання, помилка.",
   "params": [
@@ -1880,6 +1922,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.\n\nПерше, що варто викликати: показує ЩО стоїть і ХТО це розгрібає.",
   "summary": "Загальний стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація.",
   "params": []
@@ -1889,6 +1932,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.\n\ntask — id/slug/назва (порожньо = всі); stage — конкретна стадія;\nerrors — скільки прикладів помилок показати (0 = без них).",
   "summary": "Черги конвеєра детально: стадії×задачі, застряглі claim'и, свіжі помилки.",
   "params": [
@@ -1920,6 +1964,7 @@
   "group": "service",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "analysis.change_setting",
   "doc": "Записати налаштування (`Setting`). Порожнє значення = дефолт із коду.\n\nКлючі не валідуються: одруківка не впаде з помилкою, а створить НОВИЙ\nнепотрібний рядок, і код далі читатиме старий ключ. Тому спершу звір ім'я\nчерез `settings_list`, а у відповіді дивись позначку «створено/оновлено».",
   "summary": "Записати налаштування (`Setting`). Порожнє значення = дефолт із коду.",
   "params": [
@@ -1951,6 +1996,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_setting",
   "doc": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
   "summary": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
   "params": [
@@ -1968,6 +2014,7 @@
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "",
   "doc": "Список інструментів MCP-шару (назва, група, чи змінює стан, параметри).",
   "summary": "Список інструментів MCP-шару (назва, група, чи змінює стан, параметри).",
   "params": []
@@ -1977,6 +2024,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Призначити / зняти адміністратора.",
   "summary": "Призначити / зняти адміністратора.",
   "params": [
@@ -2029,6 +2077,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Забанити / розбанити учасника.",
   "summary": "Забанити / розбанити учасника.",
   "params": [
@@ -2074,6 +2123,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Заблокувати / розблокувати користувача.",
   "summary": "Заблокувати / розблокувати користувача.",
   "params": [
@@ -2105,6 +2155,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Картка чату/каналу/користувача: опис, учасники, linked-група, закріплене, invite-link.",
   "summary": "Картка чату/каналу/користувача: опис, учасники, linked-група, закріплене, invite-link.",
   "params": [
@@ -2129,6 +2180,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Натиснути inline-кнопку (боти, меню).",
   "summary": "Натиснути inline-кнопку (боти, меню).",
   "params": [
@@ -2181,6 +2233,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Спільні чати акаунта з користувачем.",
   "summary": "Спільні чати акаунта з користувачем.",
   "params": [
@@ -2212,6 +2265,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Додати контакт за телефоном.",
   "summary": "Додати контакт за телефоном.",
   "params": [
@@ -2250,6 +2304,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Видалити контакти.",
   "summary": "Видалити контакти.",
   "params": [
@@ -2274,6 +2329,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Контакти акаунта.",
   "summary": "Контакти акаунта.",
   "params": [
@@ -2305,6 +2361,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Глобальний пошук людей і чатів у Telegram за іменем/username.",
   "summary": "Глобальний пошук людей і чатів у Telegram за іменем/username.",
   "params": [
@@ -2336,6 +2393,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Повідомлення й N сусідніх до/після — контекст розмови.",
   "summary": "Повідомлення й N сусідніх до/після — контекст розмови.",
   "params": [
@@ -2374,6 +2432,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Створити групу, супергрупу або канал.",
   "summary": "Створити групу, супергрупу або канал.",
   "params": [
@@ -2426,6 +2485,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Видалити повідомлення (свої — завжди; чужі — якщо адмін).",
   "summary": "Видалити повідомлення (свої — завжди; чужі — якщо адмін).",
   "params": [
@@ -2464,6 +2524,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Діалоги акаунта: чати, канали, приватні — з непрочитаним і останнім повідомленням.\nid звідси годиться в `chat=` решти tg_-інструментів.",
   "summary": "Діалоги акаунта: чати, канали, приватні — з непрочитаним і останнім повідомленням. id звідси годиться в `chat=` решти tg_-інструментів.",
   "params": [
@@ -2516,6 +2577,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Скачати медіа повідомлення: у файл gateway або base64 у відповідь.",
   "summary": "Скачати медіа повідомлення: у файл gateway або base64 у відповідь.",
   "params": [
@@ -2554,6 +2616,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Зберегти або очистити чернетку в чаті.",
   "summary": "Зберегти або очистити чернетку в чаті.",
   "params": [
@@ -2592,6 +2655,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Чернетки у всіх чатах.",
   "summary": "Чернетки у всіх чатах.",
   "params": [
@@ -2609,6 +2673,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Відредагувати своє повідомлення.",
   "summary": "Відредагувати своє повідомлення.",
   "params": [
@@ -2654,6 +2719,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Змінити назву/опис/повільний режим/username чату (потрібні права).",
   "summary": "Змінити назву/опис/повільний режим/username чату (потрібні права).",
   "params": [
@@ -2706,6 +2772,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Теки чатів акаунта.",
   "summary": "Теки чатів акаунта.",
   "params": [
@@ -2723,6 +2790,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Переслати повідомлення (файли не проходять через нас — копія на боці Telegram).",
   "summary": "Переслати повідомлення (файли не проходять через нас — копія на боці Telegram).",
   "params": [
@@ -2768,6 +2836,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Історія чату/каналу: останні N повідомлень або пошук/пагінація. Повний\nтекст одного — `tg_messages`; довкола — `tg_context`.",
   "summary": "Історія чату/каналу: останні N повідомлень або пошук/пагінація. Повний текст одного — `tg_messages`; довкола — `tg_context`.",
   "params": [
@@ -2855,6 +2924,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Додати людей у чат/канал (потрібне право; людина має дозволяти запрошення).",
   "summary": "Додати людей у чат/канал (потрібне право; людина має дозволяти запрошення).",
   "params": [
@@ -2886,6 +2956,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Створити invite-посилання (потрібне право запрошувати).",
   "summary": "Створити invite-посилання (потрібне право запрошувати).",
   "params": [
@@ -2938,6 +3009,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Вступити в канали/чати (з паузами між ними, як прогрів).",
   "summary": "Вступити в канали/чати (з паузами між ними, як прогрів).",
   "params": [
@@ -2962,6 +3034,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Вигнати учасника (без бану — може повернутись).",
   "summary": "Вигнати учасника (без бану — може повернутись).",
   "params": [
@@ -2993,6 +3066,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Вийти з чату/каналу (діалог видаляється).",
   "summary": "Вийти з чату/каналу (діалог видаляється).",
   "params": [
@@ -3017,6 +3091,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Позначити чат прочитаним.",
   "summary": "Позначити чат прочитаним.",
   "params": [
@@ -3048,6 +3123,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Посилання t.me/… на повідомлення (публічний або приватний канал).",
   "summary": "Посилання t.me/… на повідомлення (публічний або приватний канал).",
   "params": [
@@ -3079,6 +3155,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Повідомлення повністю: текст без обрізання, медіа, кнопки, реакції, пересилання.",
   "summary": "Повідомлення повністю: текст без обрізання, медіа, кнопки, реакції, пересилання.",
   "params": [
@@ -3110,6 +3187,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Учасники чату/каналу (де це дозволено): адміни, боти, забанені.",
   "summary": "Учасники чату/каналу (де це дозволено): адміни, боти, забанені.",
   "params": [
@@ -3155,6 +3233,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Закріпити / відкріпити повідомлення.",
   "summary": "Закріпити / відкріпити повідомлення.",
   "params": [
@@ -3200,6 +3279,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Створити опитування.",
   "summary": "Створити опитування.",
   "params": [
@@ -3259,6 +3339,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Налаштування приватності акаунта (хто бачить телефон, статус, фото…).",
   "summary": "Налаштування приватності акаунта (хто бачить телефон, статус, фото…).",
   "params": [
@@ -3283,6 +3364,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Поставити або зняти реакцію.",
   "summary": "Поставити або зняти реакцію.",
   "params": [
@@ -3335,6 +3417,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Обмежити права учасника (мут = send_messages=false).",
   "summary": "Обмежити права учасника (мут = send_messages=false).",
   "params": [
@@ -3401,6 +3484,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Пошук по всіх чатах акаунта (як рядок пошуку в Telegram).",
   "summary": "Пошук по всіх чатах акаунта (як рядок пошуку в Telegram).",
   "params": [
@@ -3432,6 +3516,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Надіслати повідомлення від імені акаунта. Це ВИДИМА дія: чужим людям і\nв чужі чати — спам-ризик для акаунта.",
   "summary": "Надіслати повідомлення від імені акаунта. Це ВИДИМА дія: чужим людям і в чужі чати — спам-ризик для акаунта.",
   "params": [
@@ -3498,6 +3583,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:admin",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Надіслати файл/фото/відео/голосове.",
   "summary": "Надіслати файл/фото/відео/голосове.",
   "params": [
@@ -3571,6 +3657,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Встановити або видалити фото профілю.",
   "summary": "Встановити або видалити фото профілю.",
   "params": [
@@ -3609,6 +3696,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Теми форум-супергрупи.",
   "summary": "Теми форум-супергрупи.",
   "params": [
@@ -3647,6 +3735,7 @@
   "group": "telegram",
   "mutates": true,
   "scope": "mcp:write",
+  "perm": "accounts.change_telegramaccount",
   "doc": "Змінити імʼя/прізвище/опис/username акаунта.",
   "summary": "Змінити імʼя/прізвище/опис/username акаунта.",
   "params": [
@@ -3692,6 +3781,7 @@
   "group": "telegram",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "accounts.view_telegramaccount",
   "doc": "Фото профілю користувача (кількість і дати; скачати — tg_download не підходить, лише перелік).",
   "summary": "Фото профілю користувача (кількість і дати; скачати — tg_download не підходить, лише перелік).",
   "params": [
@@ -3723,6 +3813,7 @@
   "group": "telezip",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "/CHANNELS — пошук каналів і чатів у базі TeleZip (не в Телеграмі загалом).\n\nКанали, яких TeleZip не вантажить, тут не знайдуться. Межа саме цього\nендпоінта — 10 000 знайдених каналів; більше = відлуп, треба звужувати.\n(Не плутай із межею 20 000 для `channeltext` у tz_find — там канали лише\nвідбираються, а шукається все одно по повідомленнях.)\n\nВіддає: id, юзернейм, назву, опис, підписників, скільки повідомлень\nзбережено, мову, канал це чи чат, і чи він ЗАРАЗ у моніторингу (якщо ні —\nдоступна лише збережена історія). Плюс позначку, чи є він у нашому довіднику.\n\nЗвідси беруть `id`/`name` для `tz_find(channel=...)`.\n\nКожен виклик ≈ $0.10 (платиться за виклик, не за обсяг); наступна сторінка\nчерез `page_token` — це ще один виклик.",
   "summary": "/CHANNELS — пошук каналів і чатів у базі TeleZip (не в Телеграмі загалом).",
   "params": [
@@ -3796,6 +3887,7 @@
   "group": "telezip",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "Пошук у текстах повідомлень Telegram (`POST /v4/messages`).\n\nПотрібен хоча б один критерій: text, exact, regex, channel або user.\n\nПРОБІЛ = І, не АБО. `text=\"мигрант драка\"` вимагає ОБИДВА слова й на вузькій\nтемі тихо віддасть нуль. АБО — риска `|`, робоча форма:\n`text=\"(мигрант | приезж*) (драка | избил)\"`. Мінус ЗЛИТНО: `-mavic`.\nВідмінки застосовуються самі, перелічувати не треба.\n(Увага: конвеєрний збір `run_create` ходить у v3, де все навпаки —\nтам пробіл = АБО. Розмір і глибину індексу показує `tz_status`.)\n\nДва режими виводу:\n  * `stats=false` (типово) — самі повідомлення: тексти, автори, посилання.\n    Лічильник «віддано» = розмір ВИБІРКИ, а не скільки всього збігів;\n  * `stats=true` — лише цифри: скільки повідомлень, каналів, авторів,\n    динаміка по днях/годинах, топ каналів. Питай так обсяг ПЕРЕД тим, як\n    качати: працює на довгих вікнах, де видача відлупилась би.\n\nАЛЕ РЕЖИМИ РОЗБИРАЮТЬ ЗАПИТ ПО-РІЗНОМУ: пошук читає пробіл як І, статистика —\nяк АБО. Той самий рядок «(дэг | \"электронное голосование\") (сбой | зависл*)»\nдав 12 575 220 у stats і 4 228 у зметі (прод, 18-19.09.2026). Тому на запиті\nз І-групами статистикою обсяг НЕ міряють — вона рахує об'єднання слів; вона\nчесна лише на чисто-АБО запиті (самі синоніми через |).\n\nСтеля виводу: `limit` ≤ 10000 за виклик, `page_size` ≤ 1000. Якщо віддано\nрівно `limit` — вибірку обрізало: ділити вікно навпіл і качати половини.\n\nОдин виклик tz_find = один запит до TeleZip ≈ $0.10, незалежно від обсягу\n(`limit=10000` коштує стільки ж, скільки `limit=10`). Виняток — пагінація:\nкожна наступна сторінка через `page_token` оплачується окремо.",
   "summary": "Пошук у текстах повідомлень Telegram (`POST /v4/messages`).",
   "params": [
@@ -3981,6 +4073,7 @@
   "group": "telezip",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.\n\n«Глибина» — найдавніша дата, яку взагалі можна шукати (searchDateLimit):\nглибше неї збір поверне порожньо не через помилку, а бо даних немає.",
   "summary": "Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.",
   "params": [
@@ -3998,6 +4091,7 @@
   "group": "telezip",
   "mutates": false,
   "scope": "mcp:read",
+  "perm": "analysis.view_analysistask",
   "doc": "/USERS — пошук людей за профілем: юзернейм, ім'я, прізвище, TelegramID.\n\nДва різні питання:\n  * `username` / `id` — точний збіг («хто такий @X», «чий це id»);\n  * `term` — вільний пошук по імені й прізвищу («усі Durov»).\n\nЩоб побачити, ЩО людина писала, візьми знайдений id у\n`tz_find(user=\"<id>\", text=\"*\")`.\n\nКожен виклик ≈ $0.10. Пошук за `username` і добір профілів — це два різні\nзапити, тож разом вийде $0.20.",
   "summary": "/USERS — пошук людей за профілем: юзернейм, ім'я, прізвище, TelegramID.",
   "params": [

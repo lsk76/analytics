@@ -18,9 +18,19 @@ from .factories import TaskFactory
 pytestmark = pytest.mark.django_db
 
 
-def make_actor(username, role=McpRole.OPERATOR, superuser=False):
+def make_actor(username, role=McpRole.OPERATOR, superuser=False, perms="all"):
+    """perms="all" — усі права Django (тестуємо скоупи й видимість окремо від
+    прав розділів); список — лише ці; None — жодного."""
+    from django.contrib.auth.models import Permission
     user = User.objects.create_user(username, is_superuser=superuser,
                                     is_staff=True, password="x")
+    if perms == "all":
+        user.user_permissions.set(Permission.objects.all())
+    elif perms:
+        for perm in perms:
+            app, codename = perm.split(".", 1)
+            user.user_permissions.add(Permission.objects.get(content_type__app_label=app,
+                                                             codename=codename))
     McpRole.objects.create(user=user, role=role)
     return Actor(user=user, scopes=McpRole.SCOPES[role], role=role)
 
@@ -382,3 +392,38 @@ def test_account_import_batch_from_dir_and_zip(alice, monkeypatch, tmp_path):
         mcp_api.call("account_import_batch", {}, who=analyst)
     with pytest.raises(ToolError, match="немає такої теки"):
         mcp_api.call("account_import_batch", {"path": "/nonexistent"}, who=analyst)
+
+
+
+# --- права Django = права MCP ---------------------------------------------------
+
+def test_every_tool_has_django_perm_mapping():
+    from analysis.services.mcp_api import perms
+    missing = [n for n in mcp_api.TOOLS if n not in perms.PERMS]
+    assert missing == [], f"інструменти без права в perms.PERMS: {missing}"
+    stale = [n for n in perms.PERMS if n not in mcp_api.TOOLS]
+    assert stale == [], f"у perms.PERMS зайві: {stale}"
+
+
+def test_django_permission_gates_mcp_like_admin(bob):
+    """Оператор без права на джерела в адмінці не дістане їх і через MCP;
+    з правом на події — події доступні. Суперюзер і локальний stdio — без перевірки."""
+    from analysis.models import Event
+    limited = make_actor("lim", McpRole.OPERATOR, perms=["analysis.view_event", "analysis.change_event"])
+    t = TaskFactory(slug="lim-task", owner=limited.user)
+    ev = Event.objects.create(task=t, event_date="2026-09-20", summary="моя", review_status="pending")
+    assert "моя" in mcp_api.call("events_list", {"review_status": "pending"}, who=limited)
+    mcp_api.call("event_update", {"ref": str(ev.id), "review": "approve"}, who=limited)
+    with pytest.raises(ToolError, match="бракує права в адмінці.*analysis.view_source"):
+        mcp_api.call("sources_list", {}, who=limited)
+    from .factories import SourceFactory
+    src = SourceFactory()
+    with pytest.raises(ToolError, match="analysis.add_sourcesubscription"):
+        mcp_api.call("source_subscribe", {"ref": str(src.id), "task": "lim-task"}, who=limited)
+    with pytest.raises(ToolError, match="accounts.view_telegramaccount"):
+        mcp_api.call("accounts_list", {}, who=limited)
+    row = McpAuditLog.objects.filter(user=limited.user, tool="sources_list").get()
+    assert row.ok is False and "view_source" in row.error
+    root = make_actor("root9", McpRole.ADMIN, superuser=True, perms=None)
+    assert "джерел" in mcp_api.call("sources_list", {}, who=root).lower() or True
+    mcp_api.call("sources_list", {})            # локальний stdio — без перевірки

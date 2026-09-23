@@ -96,6 +96,13 @@ class Tool:
                 f"бракує прав: «{self.name}» потребує {self.scope}, а роль "
                 f"«{who.role or 'без ролі'}» дає {', '.join(who.scopes) or 'нічого'}. "
                 "Права змінює власник в адмінці (Ролі у MCP).")
+        # право Django — те саме, що пускає в розділ адмінки (mcp_api/perms.py)
+        from analysis.services.mcp_api import perms as _perms
+        perm = _perms.required(self.name)
+        if perm and not who.is_superuser and not (who.user and who.user.has_perm(perm)):
+            raise ToolError(
+                f"бракує права в адмінці: «{self.name}» потребує «{_perms.label(perm)}» "
+                f"({perm}). Права дає власник групою користувача (/admin/auth/user/).")
         # None від host-шару = «параметр не передали» (MCP шле всі поля схеми)
         return self.fn(**{k: v for k, v in payload.items() if v is not None})
 
@@ -192,8 +199,10 @@ def _type_name(ann) -> str:
 
 def manifest() -> list[dict]:
     """Опис інструментів для host-шару (звірка сигнатур у тестах/доках)."""
+    from analysis.services.mcp_api import perms as _perms
     return [{
         "name": t.name, "group": t.group, "mutates": t.mutates, "scope": t.scope,
+        "perm": _perms.required(t.name),
         # ПОВНИЙ докстрінг, а не перший абзац: саме він стає описом інструмента
         # в JSON-схемі, і саме там живуть застереження («пробіл = АБО»), без
         # яких модель складає хибні запити. `summary` — для компактних таблиць.

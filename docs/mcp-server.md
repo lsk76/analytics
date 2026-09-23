@@ -138,12 +138,17 @@ make live-logs-mcp | grep '\[mcp\]'    # [mcp] 33 інструментів; issu
 | `analyst` | `+ mcp:create` | «Просунутий аналітик»: ще й створює своє — `task_create`, `channel_add`, `source_add`, `account_import` |
 | `admin` | `+ mcp:admin` | налаштування (`setting_set`), креденшали у виводі без маски |
 
-**Роль MCP і права Django — два різні шари.** Група Django («Продвинутий
-аналітик», міграція `analysis.0086`) визначає, що людина може в АДМІНЦІ; роль
-`McpRole` — що їй доступно через MCP. Одне з іншого не випливає: користувачу
-треба і група (для адмінки), і роль (для MCP). Спільна в них лише видимість
-даних (`owner` / `visible_to`) — вона перевіряється в коді моделей/адмінки й
-у `mcp_api.common.scope_*`, а не в permissions.
+**Права Django діють і в MCP.** Кожен інструмент має право `app.codename`
+(`mcp_api/perms.py`, видно в `tools_manifest` полем `perm`): `sources_list` →
+`analysis.view_source`, `event_update` → `analysis.change_event`, `tg_send` →
+`accounts.change_telegramaccount`… Немає права в адмінці — нема й через MCP,
+з тим самим формулюванням («Джерело: переглядати»). Роль `McpRole` — друга
+стеля, «наскільки небезпечно» (read/write/create/admin). Тобто користувачу
+треба: група Django (розділи) + роль MCP (скоуп); суперюзер і локальний stdio
+перевірку прав не проходять. Видимість даних (`owner` / `visible_to`) —
+третій шар, у `mcp_api.common.scope_*`. Групи з міграцій: «Telegram-акаунти»
+(`accounts.0012`), «Продвинутий аналітик» (`analysis.0086`), «Публікації»
+(`0087`), «Аналітик джерел і подій» (`0088`).
 
 **Платні виклики TeleZip лімітуються на користувача.** `tz_find` / `tz_channels` /
 `tz_users` (≈$0.10 кожен) доступні читачу, але рахуються: кожен виклик пише
