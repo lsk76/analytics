@@ -40,7 +40,7 @@ class Command(BaseCommand):
 
         from analysis.services import mcp_api
         from mcpauth.oauth import DjangoOAuthProvider
-        from mcpauth.policy import ALL_SCOPES
+        from mcpauth.policy import ALL_SCOPES, SCOPE_READ
 
         public = (opts["public_url"] or getattr(settings, "MCP_PUBLIC_URL", "")).rstrip("/")
         if not public:
@@ -82,11 +82,13 @@ class Command(BaseCommand):
                 issuer_url=public,
                 resource_server_url=public,
                 required_scopes=["mcp:read"],
-                # default_scopes = ВСЕ: клієнт просить максимум, стеля — роль
-                # користувача (policy.granted_scopes), а не те, що попросив клієнт
+                # Реєструємо клієнта з МІНІМУМОМ (`mcp:read`): у запиті клієнта
+                # не має світитися `mcp:admin`. Скоупи видає роль — див.
+                # policy.granted_scopes (клієнт, що не звужував запит свідомо,
+                # дістає все, що дає його роль).
                 client_registration_options=ClientRegistrationOptions(
                     enabled=True, valid_scopes=list(ALL_SCOPES),
-                    default_scopes=list(ALL_SCOPES)),
+                    default_scopes=[SCOPE_READ]),
                 revocation_options=RevocationOptions(enabled=True),
                 # AS і resource server — той самий процес, а токени непрозорі й
                 # звіряються з нашою ж таблицею, тож підміни аудиторії бути не може

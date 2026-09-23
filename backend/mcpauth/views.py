@@ -35,7 +35,9 @@ def consent(request):
                       status=400)
 
     role = McpRole.objects.filter(user=request.user, is_active=True).first()
-    scopes = granted_scopes(request.user, req.scopes)
+    # req.client.scope — те, що ми видали клієнту при реєстрації: повтор цього
+    # рядка не є свідомим звуженням (див. policy.granted_scopes)
+    scopes = granted_scopes(request.user, req.scopes, (req.client.scope or "").split())
     if not role or not scopes:
         return render(request, "mcpauth/consent.html", {
             "req": req, "no_role": True,
