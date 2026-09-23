@@ -57,3 +57,31 @@ def test_publishconfig_list_is_scoped_and_prefills_task(client, analyst, setting
     # чужий профіль за прямим id — 404/редирект, не сторінка
     foreign_cfg = PublishConfig.objects.get(name="Чужий профіль")
     assert client.get(f"/admin/analysis/publishconfig/{foreign_cfg.id}/change/").status_code != 200
+
+
+def test_publications_group_gives_only_publish_section(client, settings):
+    """Група «Публікації» (analysis.0087) + «Telegram-акаунти»: розділ публікацій
+    і акаунти є, досліджень створювати не можна."""
+    settings.SECURE_SSL_REDIRECT = False
+    user = User.objects.create_user("pub", password="x", is_staff=True)
+    user.groups.add(Group.objects.get(name="Публікації"), Group.objects.get(name="Telegram-акаунти"))
+    for p in ("analysis.add_publishconfig", "analysis.view_publishedevent",
+              "accounts.add_telegramaccount", "analysis.view_analysistask"):
+        assert user.has_perm(p), p
+    assert not user.has_perm("analysis.add_analysistask") and not user.has_perm("analysis.add_channel")
+    client.force_login(user)
+    html = client.get("/admin/").content.decode()
+    assert 'href="/admin/analysis/publishconfig/"' in html and 'href="/admin/accounts/telegramaccount/"' in html
+    assert client.get("/admin/analysis/publishconfig/add/").status_code == 200
+
+
+def test_sidebar_hidden_for_non_superuser(client, settings):
+    settings.SECURE_SSL_REDIRECT = False
+    user = User.objects.create_user("pub2", password="x", is_staff=True)
+    user.groups.add(Group.objects.get(name="Публікації"))
+    client.force_login(user)
+    html = client.get("/admin/analysis/publishconfig/").content.decode()
+    assert 'id="nav-sidebar"' not in html
+    root = User.objects.create_superuser("root", password="x")
+    client.force_login(root)
+    assert 'id="nav-sidebar"' in client.get("/admin/analysis/publishconfig/").content.decode()
