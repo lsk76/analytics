@@ -44,12 +44,16 @@ def gw(monkeypatch):
     return fake
 
 
-def make_actor(name, role):
+def make_actor(name, cap=""):
+    """Скоупи — з прав Django (усі), `cap` звужує (McpRole.max_scope)."""
     from django.contrib.auth.models import Permission
+    from mcpauth.policy import scope_summary, scopes_for
     user = User.objects.create_user(name, is_staff=True, password="x")
-    user.user_permissions.set(Permission.objects.all())     # права розділів — окремий тест
-    McpRole.objects.create(user=user, role=role)
-    return Actor(user=user, scopes=McpRole.SCOPES[role], role=role)
+    user.user_permissions.set(Permission.objects.all())
+    McpRole.objects.create(user=user, max_scope=cap)
+    user = User.objects.get(pk=user.pk)
+    scopes = scopes_for(user, cap)
+    return Actor(user=user, scopes=scopes, role=scope_summary(scopes))
 
 
 @pytest.fixture
@@ -74,7 +78,7 @@ def test_no_available_account_is_clear_error(gw):
 
 
 def test_foreign_account_is_invisible(gw, acc):
-    alice = make_actor("alice", McpRole.OPERATOR)
+    alice = make_actor("alice", cap="mcp:write")
     bob = User.objects.create_user("bob")
     acc.user = bob
     acc.save()
@@ -83,7 +87,7 @@ def test_foreign_account_is_invisible(gw, acc):
 
 
 def test_send_requires_admin_scope(gw, acc):
-    analyst = make_actor("ann", McpRole.ANALYST)
+    analyst = make_actor("ann", cap="mcp:create")
     with pytest.raises(ToolError, match="mcp:admin"):
         mcp_api.call("tg_send", {"chat": "@c", "text": "hi"}, who=analyst)
     # читання й правки — можна
@@ -91,7 +95,7 @@ def test_send_requires_admin_scope(gw, acc):
     assert "порожньо" in mcp_api.call("tg_history", {"chat": "@c"}, who=analyst)
     gw["result"] = {"ok": True}
     assert "закріплено" in mcp_api.call("tg_pin", {"chat": "@c", "msg_id": 3}, who=analyst)
-    root = make_actor("root", McpRole.ADMIN)
+    root = make_actor("root")
     gw["result"] = {"ok": True, "message_id": 9}
     assert "надіслано #9" in mcp_api.call("tg_send", {"chat": "@c", "text": "hi"}, who=root)
     assert gw["calls"][-1][2]["text"] == "hi" and gw["calls"][-1][2]["parse_mode"] == "md"

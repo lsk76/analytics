@@ -34,7 +34,9 @@
   `ScopedAdminMixin`, MCP — через `mcp_api.common.scope`; свій фільтр
   `owner=request.user` у ModelAdmin писати не можна (є тест). Права розділів —
   `mcp_api/perms.py`: інструмент → `app.codename`, те саме право, що пускає в
-  розділ адмінки.
+  розділ адмінки. **Ролей MCP немає** — скоупи виводяться з прав Django
+  (`mcpauth/policy.py::scopes_for`); рядок «Доступи до MCP» лише допускає до
+  мережевого режиму, може ЗВУЗИТИ (`max_scope`) і тримає квоту TeleZip.
 - **Доступ інших людей до MCP — лише через мережевий режим на проді**
   (`manage.py run_mcp_server`, застосунок `mcpauth`): OAuth + Django-юзери +
   ролі (reader/operator/admin) + аудит. Видимість даних там ТАКА САМА, як в

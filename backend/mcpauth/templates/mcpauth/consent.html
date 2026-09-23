@@ -35,7 +35,7 @@
       <div class="sub">
         Клієнт <strong>{{ req.client.name|default:req.client.client_id }}</strong>
         просить діяти від імені <strong>{{ user.username }}</strong>
-        (роль: {{ role.get_role_display }}).
+        {% if role.max_scope %}(стеля доступу: {{ role.get_max_scope_display|lower }}){% else %}(права — ті самі, що в адмінці){% endif %}.
       </div>
 
       <div>Що він зможе робити:</div>

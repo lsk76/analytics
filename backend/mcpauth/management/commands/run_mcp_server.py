@@ -171,4 +171,6 @@ def _actor_from_token():
     if not role:
         raise PermissionError(f"у {user.username} немає активної ролі MCP")
     client = McpClient.objects.filter(client_id=token.client_id).first()
-    return Actor(user=user, scopes=list(token.scopes), role=role.role, client=client)
+    from mcpauth.policy import scope_summary
+    return Actor(user=user, scopes=list(token.scopes), role=scope_summary(token.scopes),
+                 client=client)

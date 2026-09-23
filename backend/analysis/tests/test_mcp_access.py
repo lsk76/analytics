@@ -18,37 +18,50 @@ from .factories import TaskFactory
 pytestmark = pytest.mark.django_db
 
 
-def make_actor(username, role=McpRole.OPERATOR, superuser=False, perms="all"):
-    """perms="all" — усі права Django (тестуємо скоупи й видимість окремо від
-    прав розділів); список — лише ці; None — жодного."""
+def make_actor(username, cap="", superuser=False, perms="all"):
+    """Актор MCP: скоупи ВИВОДЯТЬСЯ з прав Django (як у проді), `cap` — стеля
+    звуження (McpRole.max_scope). perms="all" — усі права; список — лише ці."""
     from django.contrib.auth.models import Permission
+    from mcpauth.policy import scope_summary, scopes_for
     user = User.objects.create_user(username, is_superuser=superuser,
                                     is_staff=True, password="x")
-    if perms == "all":
-        user.user_permissions.set(Permission.objects.all())
+    if perms in ("all", "operator", "analyst"):
+        qs = Permission.objects.all()
+        if perms != "all":
+            # «оператор»/«аналітик» — це тепер просто набір прав в адмінці:
+            # без глобальних налаштувань, а оператор ще й без створення
+            qs = qs.exclude(content_type__app_label="analysis", codename="change_setting")
+            if perms == "operator":
+                qs = qs.exclude(codename__startswith="add_")
+        user.user_permissions.set(qs)
     elif perms:
         for perm in perms:
             app, codename = perm.split(".", 1)
             user.user_permissions.add(Permission.objects.get(content_type__app_label=app,
                                                              codename=codename))
-    McpRole.objects.create(user=user, role=role)
-    return Actor(user=user, scopes=McpRole.SCOPES[role], role=role)
+    McpRole.objects.create(user=user, max_scope=cap)
+    user = User.objects.get(pk=user.pk)          # скинути кеш прав
+    scopes = scopes_for(user, cap)
+    return Actor(user=user, scopes=scopes, role=scope_summary(scopes))
 
 
 @pytest.fixture
 def alice():
-    return make_actor("alice")
+    """Права «оператора»: бачить і змінює, але нічого не створює і не чіпає
+    глобальних налаштувань — звідси mcp:read + mcp:write."""
+    return make_actor("alice", perms="operator")
 
 
 @pytest.fixture
 def bob():
-    return make_actor("bob")
+    return make_actor("bob", perms="operator")
 
 
 # --- ролі -------------------------------------------------------------------
 
 def test_reader_cannot_change_anything():
-    reader = make_actor("reader", McpRole.READER)
+    """Стеля max_scope=mcp:read зрізає до читання навіть при повних правах."""
+    reader = make_actor("reader", cap="mcp:read")
     TaskFactory(slug="t1", owner=reader.user)
     assert "t1" in mcp_api.call("tasks_list", {}, who=reader)      # читати можна
     with pytest.raises(ToolError, match="бракує прав"):
@@ -56,6 +69,7 @@ def test_reader_cannot_change_anything():
 
 
 def test_operator_can_write_but_not_touch_global_config(alice):
+    """Немає права change_setting в адмінці — немає й mcp:admin у MCP."""
     TaskFactory(slug="t2", owner=alice.user)
     out = mcp_api.call("task_update", {"ref": "t2", "chunk_days": 5}, who=alice)
     assert "чанк=5 дн" in out
@@ -65,7 +79,7 @@ def test_operator_can_write_but_not_touch_global_config(alice):
 
 
 def test_admin_role_passes_admin_gate():
-    admin = make_actor("adm", McpRole.ADMIN)
+    admin = make_actor("adm")
     out = mcp_api.call("setting_set", {"key": "test_key", "value": "1"}, who=admin)
     assert "створено" in out
 
@@ -79,7 +93,8 @@ def test_user_sees_only_own_tasks(alice, bob):
     assert "alice-task" in out and "bob-task" not in out
 
 
-def test_foreign_task_is_not_reachable_even_by_id(alice, bob):
+def test_foreign_task_is_not_reachable_even_by_id(bob):
+    alice = make_actor("alice-create", perms="analyst")
     foreign = TaskFactory(slug="bob-task", owner=bob.user)
     # ані за id, ані за slug — і повідомлення не зізнається, що задача існує
     with pytest.raises(ToolError, match="немає|не знайдено"):
@@ -91,7 +106,7 @@ def test_foreign_task_is_not_reachable_even_by_id(alice, bob):
 
 def test_superuser_sees_everything(bob):
     TaskFactory(slug="bob-task", owner=bob.user)
-    root = make_actor("root", McpRole.ADMIN, superuser=True)
+    root = make_actor("root", superuser=True)
     assert "bob-task" in mcp_api.call("tasks_list", {}, who=root)
 
 
@@ -127,7 +142,7 @@ def test_proxy_password_hidden_from_non_admin(alice):
     assert "ultra.example.com:44445:user1" in out      # яка саме проксі — видно
     assert "SeCrEtPaSs" not in out and "***" in out    # пароль — ні
 
-    root = make_actor("root2", McpRole.ADMIN, superuser=True)
+    root = make_actor("root2", superuser=True)
     assert "SeCrEtPaSs" in mcp_api.call("proxies_list", {}, who=root)
 
 
@@ -144,7 +159,7 @@ def test_every_call_leaves_a_trace(alice):
     mcp_api.call("tasks_list", {"active_only": True}, who=alice)
     row = McpAuditLog.objects.get()
     assert row.user == alice.user and row.tool == "tasks_list" and row.ok
-    assert row.payload == {"active_only": True} and row.role == McpRole.OPERATOR
+    assert row.payload == {"active_only": True} and row.role == "rw"
 
 
 def test_denied_calls_are_logged_too(alice):
@@ -170,7 +185,7 @@ def test_settings_hide_credentials_from_non_admin(alice):
     assert "SeCrEtPaSs" not in out and "user1:***@proxy.example.com" in out
     assert "Ти — редактор" in out                       # промпти — відкриті
 
-    root = make_actor("root3", McpRole.ADMIN, superuser=True)
+    root = make_actor("root3", superuser=True)
     assert "SeCrEtPaSs" in mcp_api.call("settings_list", {}, who=root)
 
 
@@ -262,7 +277,8 @@ def test_events_visible_and_editable_only_within_own_tasks(alice, bob):
     assert e2.review_status == Event.REVIEW_PENDING
 
 
-def test_source_subscribe_refuses_foreign_task(alice, bob):
+def test_source_subscribe_refuses_foreign_task(bob):
+    alice = make_actor("alice-sub", perms="analyst")
     from .factories import SourceFactory
     src = SourceFactory()
     TaskFactory(slug="bob-inf", owner=bob.user)
@@ -281,7 +297,7 @@ def test_account_import_owner_follows_actor(alice, monkeypatch):
     b64 = base64.b64encode(blob.encode()).decode()
     with pytest.raises(ToolError, match="mcp:create"):
         mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64}, who=alice)
-    analyst = make_actor("ann2", McpRole.ANALYST)
+    analyst = make_actor("ann2", perms="analyst")
     with pytest.raises(ToolError, match="суперюзер"):
         mcp_api.call("account_import", {"meta_json": meta, "session_b64": b64, "shared": True},
                      who=analyst)
@@ -296,7 +312,8 @@ def test_account_import_owner_follows_actor(alice, monkeypatch):
 # --- просунутий аналітик: створює своє, не бачить чужого ---------------------
 
 def test_operator_cannot_create_but_analyst_can(alice):
-    analyst = make_actor("ann", McpRole.ANALYST)
+    """mcp:create дають права add_* в адмінці, а не окрема роль."""
+    analyst = make_actor("ann", perms="analyst")
     with pytest.raises(ToolError, match="mcp:create"):
         mcp_api.call("task_create", {"slug": "op-task", "name": "х"}, who=alice)
     with pytest.raises(ToolError, match="mcp:create"):
@@ -337,7 +354,7 @@ def test_publish_configs_are_private_per_owner(alice, bob):
     # створення — mcp:create (аналітик), оператору — ні
     with pytest.raises(ToolError, match="mcp:create"):
         mcp_api.call("publish_config_create", {"name": "x", "chat_id": "-3"}, who=alice)
-    analyst = make_actor("ann3", McpRole.ANALYST)
+    analyst = make_actor("ann3", perms="analyst")
     mcp_api.call("publish_config_create", {"name": "Аннин", "chat_id": "-3"}, who=analyst)
     assert PublishConfig.objects.get(name="Аннин").owner == analyst.user
 
@@ -364,7 +381,7 @@ def test_account_import_batch_from_dir_and_zip(alice, monkeypatch, tmp_path):
 
     with pytest.raises(ToolError, match="mcp:create"):
         mcp_api.call("account_import_batch", {"path": str(d)}, who=alice)
-    analyst = make_actor("ann4", McpRole.ANALYST)
+    analyst = make_actor("ann4", perms="analyst")
 
     out = mcp_api.call("account_import_batch", {"path": str(d), "dry_run": True}, who=analyst)
     assert "Перевірка: 3 пар, уже є 1" in out and "буде імпортовано" in out and "lonely" in out
@@ -409,7 +426,7 @@ def test_django_permission_gates_mcp_like_admin(bob):
     """Оператор без права на джерела в адмінці не дістане їх і через MCP;
     з правом на події — події доступні. Суперюзер і локальний stdio — без перевірки."""
     from analysis.models import Event
-    limited = make_actor("lim", McpRole.OPERATOR, perms=["analysis.view_event", "analysis.change_event"])
+    limited = make_actor("lim", perms=["analysis.view_event", "analysis.change_event"])
     t = TaskFactory(slug="lim-task", owner=limited.user)
     ev = Event.objects.create(task=t, event_date="2026-09-20", summary="моя", review_status="pending")
     assert "моя" in mcp_api.call("events_list", {"review_status": "pending"}, who=limited)
@@ -424,6 +441,6 @@ def test_django_permission_gates_mcp_like_admin(bob):
         mcp_api.call("accounts_list", {}, who=limited)
     row = McpAuditLog.objects.filter(user=limited.user, tool="sources_list").get()
     assert row.ok is False and "view_source" in row.error
-    root = make_actor("root9", McpRole.ADMIN, superuser=True, perms=None)
+    root = make_actor("root9", superuser=True, perms=None)
     assert "джерел" in mcp_api.call("sources_list", {}, who=root).lower() or True
     mcp_api.call("sources_list", {})            # локальний stdio — без перевірки

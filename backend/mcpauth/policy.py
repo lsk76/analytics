@@ -26,27 +26,79 @@ SCOPE_LABELS = {
 }
 
 
-def granted_scopes(user, requested, registered=None) -> list[str]:
-    """Скоупи токена: стеля — роль, звуження — лише СВІДОМЕ звуження клієнтом.
+# Наші застосунки: право з чужого (напр. auth.view_user) скоупів не дає.
+OUR_APPS = ("analysis", "accounts")
 
-    Немає ролі — немає доступу. Клієнт може попросити `mcp:admin`, але читач
-    отримає `mcp:read`: стеля завжди на боці сервера.
 
-    `registered` — те, що ми самі видали клієнту при реєстрації (`McpClient.scope`,
-    за замовчуванням `mcp:read`). Клієнт типу Claude не знає наших ролей і просто
-    повторює цей рядок — це не «прошу лише читання», а «прошу як домовились», тож
-    такий запит стелю не зрізає: оператор дістає і `mcp:write`. Якщо ж клієнт
-    попросив ВУЖЧЕ за видане — це свідомий вибір, і ми його поважаємо.
+def scopes_for(user, max_scope: str = "") -> list[str]:
+    """Скоупи користувача, виведені з його прав Django.
+
+    Окремої «ролі MCP» немає: що людина може в адмінці, те саме їй можна через
+    асистента. Правило просте — дія в назві права стає скоупом:
+
+        view_*            → mcp:read
+        change_*/delete_* → mcp:write
+        add_*             → mcp:create
+        суперюзер або change_setting → mcp:admin
+
+    `mcp:admin` окремо, бо ним закриті речі, яких із конкретного права не
+    вивести: глобальні налаштування й надсилання повідомлень від імені
+    акаунта (спам-ризик). `max_scope` — необовʼязкова стеля ЗВУЖЕННЯ
+    (`McpRole.max_scope`): розширити нею не можна.
     """
-    role = McpRole.objects.filter(user=user, is_active=True).first()
-    if not role:
+    if user is None or not getattr(user, "is_authenticated", False):
         return []
-    allowed = role.scopes
+    if user.is_superuser:
+        return _cap(list(ALL_SCOPES), max_scope)
+    actions = {p.split(".", 1)[1].split("_", 1)[0]
+               for p in user.get_all_permissions()
+               if p.split(".", 1)[0] in OUR_APPS and "_" in p.split(".", 1)[1]}
+    scopes = []
+    if actions:                                   # будь-яке наше право = доступ на читання
+        scopes.append(SCOPE_READ)
+    if {"change", "delete"} & actions:
+        scopes.append("mcp:write")
+    if "add" in actions:
+        scopes.append("mcp:create")
+    if user.has_perm("analysis.change_setting"):
+        scopes.append("mcp:admin")
+    return _cap(scopes, max_scope)
+
+
+def _cap(scopes: list[str], max_scope: str) -> list[str]:
+    """Зрізати набір стелею: `mcp:write` лишає read+write, і т.д."""
+    if not max_scope:
+        return scopes
+    keep = ALL_SCOPES[:ALL_SCOPES.index(max_scope) + 1] if max_scope in ALL_SCOPES else [SCOPE_READ]
+    return [s for s in scopes if s in keep]
+
+
+def granted_scopes(user, requested, registered=None) -> list[str]:
+    """Скоупи токена: стеля — права користувача, звуження — лише СВІДОМЕ.
+
+    Немає рядка `McpRole` (або він вимкнений) — немає доступу взагалі, навіть
+    якщо прав в адмінці повно: мережевий MCP допускають окремо.
+
+    `registered` — те, що ми самі видали клієнту при реєстрації
+    (`McpClient.scope`, за замовчуванням `mcp:read`). Клієнт типу Claude просто
+    повторює цей рядок — це не «прошу лише читання», а «прошу як домовились»,
+    тож такий запит стелю не зрізає. Якщо ж клієнт попросив ВУЖЧЕ за видане —
+    це свідомий вибір, і ми його поважаємо.
+    """
+    row = McpRole.objects.filter(user=user, is_active=True).first()
+    if not row:
+        return []
+    allowed = row.scopes
     asked = [s for s in (requested or []) if s]
     given = [s for s in (registered or []) if s] or [SCOPE_READ]
     if not asked or set(asked) >= set(given):
-        return allowed          # клієнт не звужував — даємо все, що дає роль
+        return allowed          # клієнт не звужував — даємо все, що дають права
     return [s for s in allowed if s in asked]
+
+
+def scope_summary(scopes) -> str:
+    """Компактний слід для аудиту: ['mcp:read','mcp:write'] → 'rw'."""
+    return "".join(s.split(":")[1][0] for s in scopes) or "—"
 
 
 # --------------------------------------------------------------------------- TeleZip
