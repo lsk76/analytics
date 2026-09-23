@@ -1435,6 +1435,302 @@
   ]
  },
  {
+  "name": "publish_config_create",
+  "group": "service",
+  "mutates": true,
+  "scope": "mcp:create",
+  "doc": "Створити профіль публікації подій у Telegram-канал (власник = ти).\n\nЗа замовчуванням НЕАКТИВНИЙ — спершу перевір відбір `events_list` із тими\nсамими тегами/регіоном, потім `publish_config_update(is_active=true)`.\nАктивний профіль воркер `publish` бере одразу і публікує реальні пости.",
+  "summary": "Створити профіль публікації подій у Telegram-канал (власник = ти).",
+  "params": [
+   {
+    "name": "name",
+    "type": "str",
+    "doc": "Назва профілю.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "chat_id",
+    "type": "str",
+    "doc": "Chat ID каналу Telegram: -100… або @username.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Дослідження (id/slug/назва — своє). '-' = будь-яке (усі свої події).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "bot_token",
+    "type": "str",
+    "doc": "Bot token (порожньо = глобальний з env). У відповідях не показується.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "doc": "Активний профіль (воркер публікує лише активні).",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "review_status",
+    "type": "str",
+    "doc": "Публікувати події зі статусом: approved (дефолт) | pending | rejected.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "doc": "Теги-відбір (АБО): `кат:тег, кат:тег`. '-' = без обмеження.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "require_tags",
+    "type": "str",
+    "doc": "Обовʼязкові теги (І): `кат:тег, …`. '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "exclude_tags",
+    "type": "str",
+    "doc": "Теги-виключення: подія з будь-яким із них не публікується. '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "regions",
+    "type": "str",
+    "doc": "Субʼєкти РФ через кому (канонічна назва/аліас). '-' = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "max_age_days",
+    "type": "int",
+    "doc": "Не публікувати старше N діб. 0 = без обмеження; -1 = не змінювати.",
+    "default": -1,
+    "required": false
+   },
+   {
+    "name": "publish_from",
+    "type": "str",
+    "doc": "Публікувати події від дати YYYY-MM-DD. '-' = зняти.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "raw_mode",
+    "type": "bool",
+    "doc": "true — без ШІ: оригінальний текст + теги; AI-промпт тоді лише фільтр.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "ai_model",
+    "type": "str",
+    "doc": "AI-модель (порожньо = дефолт). '-' = скинути.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "ai_prompt",
+    "type": "str",
+    "doc": "AI-промпт (фільтр + рерайт). '-' = очистити (у raw_mode = LLM не викликається).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "max_per_pass",
+    "type": "int",
+    "doc": "Макс. постів за прохід воркера. 0 = не змінювати.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "post_as_account",
+    "type": "bool",
+    "doc": "true — постити Telegram-акаунтом (з медіа), потрібен forward_account.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "forward_account",
+    "type": "str",
+    "doc": "Акаунт публікації (id/номер/назва — видимий тобі). '-' = зняти.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "publish_config_show",
+  "group": "service",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Картка профілю публікації: канал, режим, відбір (теги/регіони/аудит), лічильники.",
+  "summary": "Картка профілю публікації: канал, режим, відбір (теги/регіони/аудит), лічильники.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Профіль: id або частина назви.",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "publish_config_update",
+  "group": "service",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Змінити профіль публікації: увімкнути/вимкнути, канал, відбір, режим, AI.\n\nСписки (tags, require_tags, exclude_tags, regions) замінюються ПОВНІСТЮ\nпереданим значенням; '-' очищає; не передано = без змін. Не передані\nскаляри теж не змінюються.",
+  "summary": "Змінити профіль публікації: увімкнути/вимкнути, канал, відбір, режим, AI.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Профіль: id або частина назви (свій).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "name",
+    "type": "str",
+    "doc": "Назва профілю.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Дослідження (id/slug/назва — своє). '-' = будь-яке (усі свої події).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "chat_id",
+    "type": "str",
+    "doc": "Chat ID каналу Telegram: -100… або @username.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "bot_token",
+    "type": "str",
+    "doc": "Bot token (порожньо = глобальний з env). У відповідях не показується.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "doc": "Активний профіль (воркер публікує лише активні).",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "review_status",
+    "type": "str",
+    "doc": "Публікувати події зі статусом: approved (дефолт) | pending | rejected.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "doc": "Теги-відбір (АБО): `кат:тег, кат:тег`. '-' = без обмеження.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "require_tags",
+    "type": "str",
+    "doc": "Обовʼязкові теги (І): `кат:тег, …`. '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "exclude_tags",
+    "type": "str",
+    "doc": "Теги-виключення: подія з будь-яким із них не публікується. '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "regions",
+    "type": "str",
+    "doc": "Субʼєкти РФ через кому (канонічна назва/аліас). '-' = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "max_age_days",
+    "type": "int",
+    "doc": "Не публікувати старше N діб. 0 = без обмеження; -1 = не змінювати.",
+    "default": -1,
+    "required": false
+   },
+   {
+    "name": "publish_from",
+    "type": "str",
+    "doc": "Публікувати події від дати YYYY-MM-DD. '-' = зняти.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "raw_mode",
+    "type": "bool",
+    "doc": "true — без ШІ: оригінальний текст + теги; AI-промпт тоді лише фільтр.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "ai_model",
+    "type": "str",
+    "doc": "AI-модель (порожньо = дефолт). '-' = скинути.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "ai_prompt",
+    "type": "str",
+    "doc": "AI-промпт (фільтр + рерайт). '-' = очистити (у raw_mode = LLM не викликається).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "max_per_pass",
+    "type": "int",
+    "doc": "Макс. постів за прохід воркера. 0 = не змінювати.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "post_as_account",
+    "type": "bool",
+    "doc": "true — постити Telegram-акаунтом (з медіа), потрібен forward_account.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "forward_account",
+    "type": "str",
+    "doc": "Акаунт публікації (id/номер/назва — видимий тобі). '-' = зняти.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "publish_status",
   "group": "service",
   "mutates": false,
@@ -1448,6 +1744,75 @@
     "doc": "Скільки останніх публікацій показати.",
     "default": 10,
     "required": false
+   }
+  ]
+ },
+ {
+  "name": "published_list",
+  "group": "service",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Що було опубліковано (журнал `PublishedEvent`): коли, яким профілем, яка подія,\nпосилання на пост у каналі; для відсіяних/збійних — причина.\n\nПовний текст поста — `published_show`. Перечергувати подію (щоб воркер\nобробив наново) можна лише в адмінці (дія «Перечергувати»).",
+  "summary": "Що було опубліковано (журнал `PublishedEvent`): коли, яким профілем, яка подія, посилання на пост у каналі; для відсіяних/збійних — причина.",
+  "params": [
+   {
+    "name": "config",
+    "type": "str",
+    "doc": "Профіль: id або частина назви. Порожньо = усі свої.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Дослідження (id/slug/назва). Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "status",
+    "type": "str",
+    "doc": "published (дефолт) | skipped (відсіяно AI) | failed | pending | all.",
+    "default": "published",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "За останні N днів (за часом публікації/створення запису).",
+    "default": 14,
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Текст у пості або описі події.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки записів показати.",
+    "default": 30,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "published_show",
+  "group": "service",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Одна публікація повністю: текст поста, вердикт і причина AI, посилання, помилка.",
+  "summary": "Одна публікація повністю: текст поста, вердикт і причина AI, посилання, помилка.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "id запису публікації (з published_list).",
+    "default": null,
+    "required": true
    }
   ]
  },

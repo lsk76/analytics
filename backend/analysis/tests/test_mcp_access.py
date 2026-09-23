@@ -311,3 +311,22 @@ def test_operator_cannot_create_but_analyst_can(alice):
         mcp_api.call("task_create", {"slug": "Погано!", "name": "x"}, who=analyst)
     with pytest.raises(ToolError, match="pipeline"):
         mcp_api.call("task_create", {"slug": "ok-slug", "name": "x", "pipeline": "bogus"}, who=analyst)
+
+
+def test_publish_configs_are_private_per_owner(alice, bob):
+    from analysis.models import PublishConfig, PublishedEvent, Event
+    mine = PublishConfig.objects.create(name="Алісин канал", chat_id="-1", owner=alice.user)
+    theirs = PublishConfig.objects.create(name="Бобів канал", chat_id="-2", owner=bob.user)
+    t = TaskFactory(slug="b-pub", owner=bob.user)
+    ev = Event.objects.create(task=t, event_date="2026-09-20", summary="чуже")
+    PublishedEvent.objects.create(config=theirs, event=ev, status="published", post_text="чужий пост")
+    with pytest.raises(ToolError, match="немає"):
+        mcp_api.call("publish_config_update", {"ref": str(theirs.id), "is_active": True}, who=alice)
+    assert "чужий пост" not in mcp_api.call("published_list", {}, who=alice)
+    assert "Алісин" in mcp_api.call("publish_config_show", {"ref": str(mine.id)}, who=alice)
+    # створення — mcp:create (аналітик), оператору — ні
+    with pytest.raises(ToolError, match="mcp:create"):
+        mcp_api.call("publish_config_create", {"name": "x", "chat_id": "-3"}, who=alice)
+    analyst = make_actor("ann3", McpRole.ANALYST)
+    mcp_api.call("publish_config_create", {"name": "Аннин", "chat_id": "-3"}, who=analyst)
+    assert PublishConfig.objects.get(name="Аннин").owner == analyst.user

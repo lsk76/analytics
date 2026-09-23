@@ -271,7 +271,12 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 | `service_queues` | черги детально: стадії×задачі, застряглі claim'и, свіжі помилки | task='', stage='', errors=3 |
 | `settings_list` | key-value налаштування (`Setting`) | prefix='' |
 | `setting_set` **[пише]** | записати налаштування | key, value, description='' |
-| `publish_status` | профілі публікації + останні публікації | limit=10 |
+| `publish_status` | профілі публікації + останні публікації (зведення) | limit=10 |
+| `publish_config_show` | картка профілю публікації: канал, режим, відбір, лічильники | ref |
+| `publish_config_create` **[пише, mcp:create]** | новий профіль публікації в Telegram-канал (власник = ти; за замовчуванням неактивний) | name, chat_id, task, bot_token, is_active, review_status, tags, require_tags, exclude_tags, regions, max_age_days, publish_from, raw_mode, ai_model, ai_prompt, max_per_pass, post_as_account, forward_account |
+| `publish_config_update` **[пише]** | змінити профіль: увімкнути/вимкнути, канал, відбір (списки замінюються повністю, '-' очищає), режим, AI | ref + ті самі поля |
+| `published_list` | журнал опублікованого: коли, профіль, подія, посилання на пост; для відсіяних/збійних — причина | config, task, status='published', days=14, query, limit=30 |
+| `published_show` | одна публікація повністю: текст поста, вердикт AI, посилання, помилка | ref |
 | `tools_manifest` | список інструментів шару | — |
 
 ### Telegram-акаунти

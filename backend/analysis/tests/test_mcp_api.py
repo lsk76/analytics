@@ -424,3 +424,59 @@ def test_event_add_uses_link_service(events, monkeypatch):
         mcp_api.call("event_add", {"task": "ev-task", "url": "https://t.me/x/2"})
     with pytest.raises(ToolError, match="посилання"):
         mcp_api.call("event_add", {"task": "ev-task", "url": ""})
+
+
+# --- публікації: профілі й журнал ---------------------------------------------
+
+def test_publish_config_create_update_show():
+    from analysis.models import PublishConfig, Region, Tag
+    TaskFactory(slug="pub-task")
+    Region.objects.create(name="Республіка Дагестан")
+    Tag.objects.create(name="мігранти", category="topic")
+    Tag.objects.create(name="важливість 1", category="importance")
+    out = mcp_api.call("publish_config_create", {
+        "name": "Дагестан-канал", "chat_id": "-1001234567890", "task": "pub-task",
+        "tags": "topic:мігранти", "exclude_tags": "importance:важливість 1",
+        "regions": "Дагестан", "max_age_days": 3, "bot_token": "123:SECRET"})
+    cfg = PublishConfig.objects.get(name="Дагестан-канал")
+    assert cfg.task.slug == "pub-task" and cfg.is_active is False and cfg.max_age_days == 3
+    assert [t.name for t in cfg.tags.all()] == ["мігранти"]
+    assert [t.name for t in cfg.exclude_tags.all()] == ["важливість 1"]
+    assert [r.name for r in cfg.regions.all()] == ["Республіка Дагестан"]
+    assert "SECRET" not in out and "bot token: заданий" in out and "вимкнений" in out
+
+    out = mcp_api.call("publish_config_update", {"ref": "Дагестан", "is_active": True,
+                                                 "tags": "-", "task": "-", "raw_mode": True,
+                                                 "publish_from": "2026-09-01"})
+    cfg.refresh_from_db()
+    assert cfg.is_active and cfg.task is None and cfg.raw_mode and cfg.tags.count() == 0
+    assert str(cfg.publish_from) == "2026-09-01" and "tags: очищено" in out
+    assert "нічого не змінено" in mcp_api.call("publish_config_update", {"ref": str(cfg.id)})
+    with pytest.raises(ToolError, match="forward_account"):
+        mcp_api.call("publish_config_update", {"ref": str(cfg.id), "post_as_account": True})
+    with pytest.raises(ToolError, match="немає"):
+        mcp_api.call("publish_config_update", {"ref": str(cfg.id), "tags": "topic:неіснуючий"})
+    assert "сирий" in mcp_api.call("publish_config_show", {"ref": str(cfg.id)})
+
+
+def test_published_list_and_show():
+    from analysis.models import Event, PublishConfig, PublishedEvent
+    task = TaskFactory(slug="pub-task2")
+    cfg = PublishConfig.objects.create(name="Канал", chat_id="-1001234567890", task=task)
+    e1 = Event.objects.create(task=task, event_date="2026-09-20", summary="бійка на ринку")
+    e2 = Event.objects.create(task=task, event_date="2026-09-20", summary="реклама")
+    p1 = PublishedEvent.objects.create(config=cfg, event=e1, status="published", tg_message_id=42,
+                                       post_text="Пост про бійку", published_at=timezone.now())
+    PublishedEvent.objects.create(config=cfg, event=e2, status="skipped", ai_verdict=False,
+                                  ai_reason="реклама, не подія")
+    out = mcp_api.call("published_list", {})
+    assert "Пост про бійку" in out and "https://t.me/c/1234567890/42" in out and "реклама" not in out
+    out = mcp_api.call("published_list", {"status": "skipped"})
+    assert "реклама, не подія" in out and "бійку" not in out
+    out = mcp_api.call("published_list", {"status": "all", "config": "Канал", "task": "pub-task2",
+                                          "query": "бійк"})
+    assert "Публікації: 1" in out
+    with pytest.raises(ToolError, match="status"):
+        mcp_api.call("published_list", {"status": "bogus"})
+    out = mcp_api.call("published_show", {"ref": str(p1.id)})
+    assert "Пост про бійку" in out and "t.me/c/1234567890/42" in out
