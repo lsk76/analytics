@@ -619,3 +619,7 @@ OPS = {
     "send_code": (send_code, 60, False),
     "verify_code": (verify_code, 60, False),
 }
+
+# універсальні Telegram-операції для MCP (`tg_*`) — окремий модуль, той самий контракт
+from ._tg_tools import OPS as _TG_OPS  # noqa: E402
+OPS.update(_TG_OPS)

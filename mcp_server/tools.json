@@ -1914,6 +1914,1752 @@
   "params": []
  },
  {
+  "name": "tg_admin",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Призначити / зняти адміністратора.",
+  "summary": "Призначити / зняти адміністратора.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "promote",
+    "type": "bool",
+    "doc": "true — зробити адміном; false — зняти.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Титул адміна.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "rights",
+    "type": "str",
+    "doc": "Права через кому (порожньо = усі стандартні): change_info, post_messages, edit_messages, delete_messages, ban_users, invite_users, pin_messages, add_admins, manage_call, anonymous.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_ban",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Забанити / розбанити учасника.",
+  "summary": "Забанити / розбанити учасника.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "unban",
+    "type": "bool",
+    "doc": "true — розбанити.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "until",
+    "type": "str",
+    "doc": "До ISO дати (порожньо = назавжди).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_block",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Заблокувати / розблокувати користувача.",
+  "summary": "Заблокувати / розблокувати користувача.",
+  "params": [
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "unblock",
+    "type": "bool",
+    "doc": "true — розблокувати.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_chat_info",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Картка чату/каналу/користувача: опис, учасники, linked-група, закріплене, invite-link.",
+  "summary": "Картка чату/каналу/користувача: опис, учасники, linked-група, закріплене, invite-link.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_click",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Натиснути inline-кнопку (боти, меню).",
+  "summary": "Натиснути inline-кнопку (боти, меню).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id повідомлення з кнопками (список кнопок — tg_messages).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "text",
+    "type": "str",
+    "doc": "Текст кнопки.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "data",
+    "type": "str",
+    "doc": "callback-data кнопки.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "index",
+    "type": "int",
+    "doc": "Порядковий номер кнопки (0…), якщо text/data не задано.",
+    "default": 0,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_common_chats",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Спільні чати акаунта з користувачем.",
+  "summary": "Спільні чати акаунта з користувачем.",
+  "params": [
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки.",
+    "default": 100,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_contact_add",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Додати контакт за телефоном.",
+  "summary": "Додати контакт за телефоном.",
+  "params": [
+   {
+    "name": "phone",
+    "type": "str",
+    "doc": "Телефон (+7…).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "first_name",
+    "type": "str",
+    "doc": "Імʼя.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "last_name",
+    "type": "str",
+    "doc": "Прізвище.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_contact_delete",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Видалити контакти.",
+  "summary": "Видалити контакти.",
+  "params": [
+   {
+    "name": "users",
+    "type": "str",
+    "doc": "Кого прибрати, через кому (@ або id).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_contacts",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Контакти акаунта.",
+  "summary": "Контакти акаунта.",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Фільтр за іменем/username/телефоном.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки.",
+    "default": 200,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_contacts_search",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Глобальний пошук людей і чатів у Telegram за іменем/username.",
+  "summary": "Глобальний пошук людей і чатів у Telegram за іменем/username.",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Імʼя/username (глобальний пошук Telegram).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки.",
+    "default": 20,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_context",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Повідомлення й N сусідніх до/після — контекст розмови.",
+  "summary": "Повідомлення й N сусідніх до/після — контекст розмови.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id повідомлення-центру.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "around",
+    "type": "int",
+    "doc": "Скільки повідомлень до і після.",
+    "default": 5,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_create_chat",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Створити групу, супергрупу або канал.",
+  "summary": "Створити групу, супергрупу або канал.",
+  "params": [
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Назва.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "users",
+    "type": "str",
+    "doc": "Учасники через кому (@ або id) — для звичайної групи.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "channel",
+    "type": "bool",
+    "doc": "true — канал (мовлення); false — група/супергрупа.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "about",
+    "type": "str",
+    "doc": "Опис.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "forum",
+    "type": "bool",
+    "doc": "true — супергрупа з темами.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_delete",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Видалити повідомлення (свої — завжди; чужі — якщо адмін).",
+  "summary": "Видалити повідомлення (свої — завжди; чужі — якщо адмін).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "ids",
+    "type": "str",
+    "doc": "id повідомлень через кому.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "revoke",
+    "type": "bool",
+    "doc": "true — видалити для всіх (де є право).",
+    "default": true,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_dialogs",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Діалоги акаунта: чати, канали, приватні — з непрочитаним і останнім повідомленням.\nid звідси годиться в `chat=` решти tg_-інструментів.",
+  "summary": "Діалоги акаунта: чати, канали, приватні — з непрочитаним і останнім повідомленням. id звідси годиться в `chat=` решти tg_-інструментів.",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "channel | group | user | bot. Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "unread_only",
+    "type": "bool",
+    "doc": "true — лише з непрочитаним.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "archived",
+    "type": "bool",
+    "doc": "true — архів замість основного списку.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Частина назви.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки діалогів.",
+    "default": 60,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_download",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Скачати медіа повідомлення: у файл gateway або base64 у відповідь.",
+  "summary": "Скачати медіа повідомлення: у файл gateway або base64 у відповідь.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id повідомлення з медіа.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "save_to",
+    "type": "str",
+    "doc": "Шлях у контейнері gateway, куди зберегти (напр. /app/media/x.jpg). Порожньо = повернути base64 (до 8 МБ).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_draft",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Зберегти або очистити чернетку в чаті.",
+  "summary": "Зберегти або очистити чернетку в чаті.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "text",
+    "type": "str",
+    "doc": "Текст чернетки.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "clear",
+    "type": "bool",
+    "doc": "true — очистити чернетку.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_drafts",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Чернетки у всіх чатах.",
+  "summary": "Чернетки у всіх чатах.",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_edit",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Відредагувати своє повідомлення.",
+  "summary": "Відредагувати своє повідомлення.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id свого повідомлення.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "text",
+    "type": "str",
+    "doc": "Новий текст.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "parse_mode",
+    "type": "str",
+    "doc": "md | html | ''.",
+    "default": "md",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_edit_chat",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Змінити назву/опис/повільний режим/username чату (потрібні права).",
+  "summary": "Змінити назву/опис/повільний режим/username чату (потрібні права).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Нова назва.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "about",
+    "type": "str",
+    "doc": "Опис ('-' = очистити).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "slow_mode",
+    "type": "int",
+    "doc": "Повільний режим, секунд (0 = вимкнути; -1 = не чіпати).",
+    "default": -1,
+    "required": false
+   },
+   {
+    "name": "username",
+    "type": "str",
+    "doc": "Публічний username каналу ('-' = зняти).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_folders",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Теки чатів акаунта.",
+  "summary": "Теки чатів акаунта.",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_forward",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Переслати повідомлення (файли не проходять через нас — копія на боці Telegram).",
+  "summary": "Переслати повідомлення (файли не проходять через нас — копія на боці Telegram).",
+  "params": [
+   {
+    "name": "from_chat",
+    "type": "str",
+    "doc": "Звідки: Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "ids",
+    "type": "str",
+    "doc": "id повідомлень через кому.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "to_chat",
+    "type": "str",
+    "doc": "Куди: Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "silent",
+    "type": "bool",
+    "doc": "Без звуку.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_history",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Історія чату/каналу: останні N повідомлень або пошук/пагінація. Повний\nтекст одного — `tg_messages`; довкола — `tg_context`.",
+  "summary": "Історія чату/каналу: останні N повідомлень або пошук/пагінація. Повний текст одного — `tg_messages`; довкола — `tg_context`.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки повідомлень (з кінця).",
+    "default": 30,
+    "required": false
+   },
+   {
+    "name": "search",
+    "type": "str",
+    "doc": "Текстовий пошук у цьому чаті.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "from_user",
+    "type": "str",
+    "doc": "Лише від цього користувача (@ або id).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "offset_id",
+    "type": "int",
+    "doc": "Старіші за це id (пагінація: візьми найменший id з попередньої сторінки).",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "min_id",
+    "type": "int",
+    "doc": "Новіші за це id.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "max_id",
+    "type": "int",
+    "doc": "Старіші за це id.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "offset_date",
+    "type": "str",
+    "doc": "Старіші за дату/час ISO (2026-09-20 або 2026-09-20T12:00).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "reverse",
+    "type": "bool",
+    "doc": "true — від старих до нових.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "media_only",
+    "type": "bool",
+    "doc": "true — лише фото/відео.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_invite",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Додати людей у чат/канал (потрібне право; людина має дозволяти запрошення).",
+  "summary": "Додати людей у чат/канал (потрібне право; людина має дозволяти запрошення).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "users",
+    "type": "str",
+    "doc": "Кого додати, через кому (@ або id).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_invite_link",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Створити invite-посилання (потрібне право запрошувати).",
+  "summary": "Створити invite-посилання (потрібне право запрошувати).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Назва посилання.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "usage_limit",
+    "type": "int",
+    "doc": "Ліміт використань (0 = без).",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "expire",
+    "type": "str",
+    "doc": "Дійсне до ISO дати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "request_needed",
+    "type": "bool",
+    "doc": "true — вступ за схваленням.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_join",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Вступити в канали/чати (з паузами між ними, як прогрів).",
+  "summary": "Вступити в канали/чати (з паузами між ними, як прогрів).",
+  "params": [
+   {
+    "name": "chats",
+    "type": "str",
+    "doc": "Канали/чати через кому: @name, t.me/name, t.me/+invite.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_kick",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Вигнати учасника (без бану — може повернутись).",
+  "summary": "Вигнати учасника (без бану — може повернутись).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_leave",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Вийти з чату/каналу (діалог видаляється).",
+  "summary": "Вийти з чату/каналу (діалог видаляється).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_mark_read",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Позначити чат прочитаним.",
+  "summary": "Позначити чат прочитаним.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "max_id",
+    "type": "int",
+    "doc": "Прочитано до цього id (0 = усе).",
+    "default": 0,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_message_link",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Посилання t.me/… на повідомлення (публічний або приватний канал).",
+  "summary": "Посилання t.me/… на повідомлення (публічний або приватний канал).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id повідомлення.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_messages",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Повідомлення повністю: текст без обрізання, медіа, кнопки, реакції, пересилання.",
+  "summary": "Повідомлення повністю: текст без обрізання, медіа, кнопки, реакції, пересилання.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "ids",
+    "type": "str",
+    "doc": "id повідомлень через кому.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_participants",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Учасники чату/каналу (де це дозволено): адміни, боти, забанені.",
+  "summary": "Учасники чату/каналу (де це дозволено): адміни, боти, забанені.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки.",
+    "default": 100,
+    "required": false
+   },
+   {
+    "name": "search",
+    "type": "str",
+    "doc": "Пошук за іменем.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "admins | bots | kicked | banned | recent. Порожньо = усі.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_pin",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Закріпити / відкріпити повідомлення.",
+  "summary": "Закріпити / відкріпити повідомлення.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id повідомлення (0 разом з unpin=true = відкріпити все).",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "notify",
+    "type": "bool",
+    "doc": "Сповістити учасників.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "unpin",
+    "type": "bool",
+    "doc": "true — відкріпити.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_poll",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Створити опитування.",
+  "summary": "Створити опитування.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "question",
+    "type": "str",
+    "doc": "Питання.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "options",
+    "type": "str",
+    "doc": "Варіанти через | (2–10).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "multiple",
+    "type": "bool",
+    "doc": "Кілька відповідей.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "anonymous",
+    "type": "bool",
+    "doc": "Анонімне (дефолт).",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "quiz_correct",
+    "type": "int",
+    "doc": "Індекс правильної відповіді (0…) — робить вікторину; -1 = звичайне.",
+    "default": -1,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_privacy",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Налаштування приватності акаунта (хто бачить телефон, статус, фото…).",
+  "summary": "Налаштування приватності акаунта (хто бачить телефон, статус, фото…).",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "key",
+    "type": "str",
+    "doc": "phone | last_seen | photo | forwards | calls | groups | about | birthday. Порожньо = усі.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_react",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Поставити або зняти реакцію.",
+  "summary": "Поставити або зняти реакцію.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "msg_id",
+    "type": "int",
+    "doc": "id повідомлення.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "emoji",
+    "type": "str",
+    "doc": "Емодзі реакції (👍 ❤ 🔥 …).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "remove",
+    "type": "bool",
+    "doc": "true — зняти свою реакцію.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "big",
+    "type": "bool",
+    "doc": "Велика анімація.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_restrict",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Обмежити права учасника (мут = send_messages=false).",
+  "summary": "Обмежити права учасника (мут = send_messages=false).",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "send_messages",
+    "type": "bool",
+    "doc": "Може писати.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "send_media",
+    "type": "bool",
+    "doc": "Може слати медіа.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "invite_users",
+    "type": "bool",
+    "doc": "Може запрошувати.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "pin_messages",
+    "type": "bool",
+    "doc": "Може закріплювати.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "until",
+    "type": "str",
+    "doc": "До ISO дати.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_search_global",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Пошук по всіх чатах акаунта (як рядок пошуку в Telegram).",
+  "summary": "Пошук по всіх чатах акаунта (як рядок пошуку в Telegram).",
+  "params": [
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Що шукати по всіх діалогах акаунта.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки результатів.",
+    "default": 30,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_send",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Надіслати повідомлення від імені акаунта. Це ВИДИМА дія: чужим людям і\nв чужі чати — спам-ризик для акаунта.",
+  "summary": "Надіслати повідомлення від імені акаунта. Це ВИДИМА дія: чужим людям і в чужі чати — спам-ризик для акаунта.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "text",
+    "type": "str",
+    "doc": "Текст (markdown за замовчуванням).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "reply_to",
+    "type": "int",
+    "doc": "id повідомлення, на яке відповідаємо. 0 = ні.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "parse_mode",
+    "type": "str",
+    "doc": "md | html | '' (без розмітки).",
+    "default": "md",
+    "required": false
+   },
+   {
+    "name": "link_preview",
+    "type": "bool",
+    "doc": "Прев'ю посилань.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "silent",
+    "type": "bool",
+    "doc": "true — без звуку.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "schedule",
+    "type": "str",
+    "doc": "Відкласти до ISO дати/часу (2026-09-25T09:00).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_send_file",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "doc": "Надіслати файл/фото/відео/голосове.",
+  "summary": "Надіслати файл/фото/відео/голосове.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "name",
+    "type": "str",
+    "doc": "Імʼя файлу (для base64).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "base64_data",
+    "type": "str",
+    "doc": "Вміст файлу в base64.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "path",
+    "type": "str",
+    "doc": "Або шлях до файлу в контейнері gateway.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "caption",
+    "type": "str",
+    "doc": "Підпис.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "as_document",
+    "type": "bool",
+    "doc": "true — як документ, а не фото/відео.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "reply_to",
+    "type": "int",
+    "doc": "Відповідь на id.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "voice",
+    "type": "bool",
+    "doc": "true — як голосове (ogg/opus).",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_set_photo",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Встановити або видалити фото профілю.",
+  "summary": "Встановити або видалити фото профілю.",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "base64_data",
+    "type": "str",
+    "doc": "Фото (jpg) у base64.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "path",
+    "type": "str",
+    "doc": "Або шлях у контейнері gateway.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "delete",
+    "type": "bool",
+    "doc": "true — видалити поточне фото.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_topics",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Теми форум-супергрупи.",
+  "summary": "Теми форум-супергрупи.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Чат: @username, посилання t.me/…, або числовий id (як у tg_dialogs).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки.",
+    "default": 100,
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Пошук за назвою.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_update_profile",
+  "group": "telegram",
+  "mutates": true,
+  "scope": "mcp:write",
+  "doc": "Змінити імʼя/прізвище/опис/username акаунта.",
+  "summary": "Змінити імʼя/прізвище/опис/username акаунта.",
+  "params": [
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "first_name",
+    "type": "str",
+    "doc": "Імʼя.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "last_name",
+    "type": "str",
+    "doc": "Прізвище ('-' = очистити).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "about",
+    "type": "str",
+    "doc": "Про себе ('-' = очистити).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "username",
+    "type": "str",
+    "doc": "Публічний username ('-' = зняти).",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tg_user_photos",
+  "group": "telegram",
+  "mutates": false,
+  "scope": "mcp:read",
+  "doc": "Фото профілю користувача (кількість і дати; скачати — tg_download не підходить, лише перелік).",
+  "summary": "Фото профілю користувача (кількість і дати; скачати — tg_download не підходить, лише перелік).",
+  "params": [
+   {
+    "name": "user",
+    "type": "str",
+    "doc": "Користувач: @username або числовий id.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Акаунт: id, номер або частина назви (лише видимий тобі). Порожньо = перший доступний (активний, авторизований, без паузи).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки.",
+    "default": 10,
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "tz_channels",
   "group": "telezip",
   "mutates": false,

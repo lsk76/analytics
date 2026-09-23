@@ -224,6 +224,14 @@ class ManagedAccount:
     def join(self, handles: list[str]) -> dict:
         return self._call("join", handles=list(handles))
 
+    # ---- універсальні Telegram-операції (MCP tg_*, accounts/gateway/_tg_tools.py) ----
+    def tg(self, op: str, timeout: float | None = None, **kwargs):
+        """Виклик будь-якої `tg_*`-операції gateway за назвою: kwargs = параметри
+        операції як є. Помилки — ті самі винятки, що й у решти методів."""
+        if not op.startswith("tg_"):
+            raise ValueError(f"tg(): очікується операція tg_*, отримано {op!r}")
+        return self._call(op, timeout=timeout, **kwargs)
+
     # ---- сервіс ----
     def spam_status(self) -> dict:
         return self._call("spam_status")

@@ -324,6 +324,31 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 $0.10. Решта операторів і межі — в описі `tz_find` та в `docs/telezip-api.md`
 (розділ «Оператори»).
 
+### Telegram «руками» акаунтів — `tg_*` (43 інструменти)
+
+Асистент працює з Telegram від імені наших акаунтів: усе йде `mcp_api/telegram.py`
+→ `ManagedAccount.tg(op)` → gateway `accounts/gateway/_tg_tools.py` (єдине місце
+з Telethon для цих операцій), тією ж проксі й сесією, що й воркери. Акаунт —
+параметр `account` (id/номер/назва, лише видимий викликачу); порожньо = перший
+доступний. Покриття — за мотивами chigwell/telegram-mcp.
+
+| група | інструменти |
+|-------|-------------|
+| читання | `tg_dialogs`, `tg_chat_info`, `tg_history` (пошук/пагінація/від користувача/медіа), `tg_messages` (повний текст, кнопки, реакції), `tg_context`, `tg_search_global`, `tg_message_link`, `tg_download` |
+| повідомлення **[пише]** | `tg_edit`, `tg_delete`, `tg_pin`, `tg_mark_read`, `tg_react`, `tg_click` (inline-кнопки), `tg_draft` |
+| **надсилання [mcp:admin]** | `tg_send` (reply/markdown/тихо/відкладено), `tg_send_file` (файл/фото/голосове), `tg_forward`, `tg_poll`, `tg_create_chat`, `tg_invite`, `tg_contact_add` |
+| участь / адмін **[пише]** | `tg_join`, `tg_leave`, `tg_kick`, `tg_ban`, `tg_restrict` (мут), `tg_admin` (права/титул), `tg_invite_link`, `tg_edit_chat` (назва/опис/slow mode/username); читання: `tg_participants`, `tg_common_chats`, `tg_topics` |
+| контакти | `tg_contacts`, `tg_contacts_search` (глобальний пошук людей/чатів); **[пише]** `tg_contact_delete`, `tg_block` |
+| профіль | `tg_privacy`; **[пише]** `tg_update_profile`, `tg_set_photo` |
+| теки/чернетки | `tg_folders`, `tg_drafts`, `tg_draft` |
+
+Надсилання під `mcp:admin` навмисно: це видимі дії від імені акаунта, за які
+прилітає спам-бан. Нової операції не вигадувати в `telegram.py` — додавати в
+`_tg_tools.OPS` (gateway) і тонку обгортку в MCP; **після зміни `_tg_tools.py`
+треба рестартнути `tg-gateway`** (операції живуть у його процесі), а не лише `mcp`.
+Апдейти gateway не читає (`receive_updates=False`), тож «чекати нове
+повідомлення» тут нема — читай `tg_history(min_id=…)`.
+
 ### Моніторинги
 
 | інструмент | що робить | параметри |

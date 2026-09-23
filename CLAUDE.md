@@ -26,6 +26,9 @@
   `chats_list`, `sources_list`, `run_create`, `service_restart`… Нові інструменти
   додавай У DJANGO-ШАР `backend/analysis/services/mcp_api/` — host-сервер бере їх
   із маніфесту сам, дублювати в `mcp_server/server.py` не треба.
+  Telegram «руками» акаунтів — `tg_*` (`mcp_api/telegram.py` → `ManagedAccount.tg()` →
+  gateway `accounts/gateway/_tg_tools.py`): нову операцію додавай у `_tg_tools.OPS`
+  і рестартуй `tg-gateway`; надсилання — `mcp:admin`.
 - **Доступ інших людей до MCP — лише через мережевий режим на проді**
   (`manage.py run_mcp_server`, застосунок `mcpauth`): OAuth + Django-юзери +
   ролі (reader/operator/admin) + аудит. Видимість даних там ТАКА САМА, як в
