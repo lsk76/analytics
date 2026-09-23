@@ -228,29 +228,54 @@ def account_update(ref: str, is_active: bool = None, proxy: str = "",
     return f"#{a.id} {a.name}: " + "; ".join(changed)
 
 
+def _import_pair(meta: dict, session_path: str, owner, tag_names: list, proxy):
+    """Одна пара tdata (JSON + .session) → TelegramAccount. Помилки — ToolError."""
+    from django.db import IntegrityError
+    from accounts.services.tdata_import import import_tdata_account
+    if not isinstance(meta, dict) or not str(meta.get("phone") or "").strip():
+        raise ToolError("JSON має бути обʼєктом із полем phone (tdata-експорт)")
+    try:
+        a = import_tdata_account(meta, session_path, owner, tag_names)
+    except IntegrityError:
+        raise ToolError(f"акаунт із номером {meta.get('phone')} уже є в базі")
+    except Exception as e:  # noqa: BLE001 — модель має бачити причину
+        raise ToolError(f"не вдалось імпортувати: {type(e).__name__}: {e}")
+    if proxy is not None:
+        a.proxy = proxy
+        a.save(update_fields=["proxy"])
+    return a
+
+
+def _import_owner(shared):
+    who = actor()
+    if shared is None:
+        shared = who.is_superuser
+    if shared and not who.is_superuser:
+        raise ToolError("спільний акаунт (shared=true) може додати лише суперюзер")
+    return None if shared else who.user
+
+
 @tool("account_import", group="accounts", mutates=True, scope=SCOPE_CREATE, params={
       "meta_json": "ВМІСТ файлу <phone>.json з tdata-експорту (JSON-текст як є: phone, app_id, app_hash, device, sdk, app_version, lang_pack, twoFA…).",
       "session_b64": "ВМІСТ файлу <phone>.session (Telethon SQLiteSession) у base64. Альтернатива — session_path.",
-      "session_path": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/media/import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
+      "session_path": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/_import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
       "tags": "Теги акаунта через кому (створяться, якщо немає).",
       "proxy": "Проксі: id або частина рядка. Порожньо = призначить воркер/gateway. Без проксі акаунт не працює.",
       "shared": "true — спільний акаунт (бачать усі); false = власник — ти. Суперюзер за замовчуванням додає спільний, решта — свій."})
 def account_import(meta_json: str, session_b64: str = "", session_path: str = "",
                    tags: str = "", proxy: str = "", shared: bool = None):
-    """Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.
+    """Додати ОДИН Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.
 
     Те саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,
     device-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається
     авторизованою; далі — `account_check` (жива?) і `account_spam_check`.
-    Секрети (session, 2FA) у відповідь не потрапляють.
+    Багато акаунтів одразу — `account_import_batch`. Секрети у відповідь не потрапляють.
     """
     import base64
     import binascii
     import json
     import os
     import tempfile
-    from django.db import IntegrityError
-    from accounts.services.tdata_import import import_tdata_account
 
     if bool(session_b64) == bool(session_path):
         raise ToolError("дай рівно одне: session_b64 (вміст .session у base64) "
@@ -259,15 +284,7 @@ def account_import(meta_json: str, session_b64: str = "", session_path: str = ""
         meta = json.loads(meta_json)
     except (TypeError, ValueError) as e:
         raise ToolError(f"meta_json не розбирається як JSON: {e}")
-    if not isinstance(meta, dict) or not str(meta.get("phone") or "").strip():
-        raise ToolError("meta_json має бути обʼєктом із полем phone (tdata-експорт)")
-
-    who = actor()
-    if shared is None:
-        shared = who.is_superuser
-    owner = None if shared else who.user
-    if owner is None and not who.is_superuser:
-        raise ToolError("спільний акаунт (shared=true) може додати лише суперюзер")
+    owner = _import_owner(shared)
     tag_names = [t.strip() for t in (tags or "").split(",") if t.strip()]
     p = common.resolve_proxy(proxy) if proxy else None
 
@@ -288,21 +305,13 @@ def account_import(meta_json: str, session_b64: str = "", session_path: str = ""
             path = session_path
             if not os.path.isfile(path):
                 raise ToolError(f"файлу {path} у контейнері немає")
-        try:
-            a = import_tdata_account(meta, path, owner, tag_names)
-        except IntegrityError:
-            raise ToolError(f"акаунт із номером {meta.get('phone')} уже є в базі")
-        except Exception as e:  # noqa: BLE001 — модель має бачити причину
-            raise ToolError(f"не вдалось імпортувати: {type(e).__name__}: {e}")
+        a = _import_pair(meta, path, owner, tag_names, p)
     finally:
         if tmp_path:
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-    if p is not None:
-        a.proxy = p
-        a.save(update_fields=["proxy"])
     return fmt.joinsec(
         # назва без імені в JSON = номер телефону — у заголовок він не йде
         fmt.section(f"Акаунт #{a.id} {'' if a.name == a.phone_number else a.name} додано", fmt.kv([
@@ -314,6 +323,151 @@ def account_import(meta_json: str, session_b64: str = "", session_path: str = ""
             ("2FA", "є" if a.two_fa_password else "нема"),
         ])),
         f"Далі: account_check ref={a.id} → account_spam_check ref={a.id}")
+
+
+def _find_pairs(root: str) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """У теці (рекурсивно): пари <name>.json + <name>.session → [(name, json, session)],
+    + список одинаків без пари."""
+    import os
+    jsons, sessions = {}, {}
+    for dirpath, _, files in os.walk(root):
+        for f in files:
+            stem, ext = os.path.splitext(f)
+            if ext.lower() == ".json":
+                jsons[stem] = os.path.join(dirpath, f)
+            elif ext.lower() == ".session":
+                sessions[stem] = os.path.join(dirpath, f)
+    pairs = [(k, jsons[k], sessions[k]) for k in sorted(jsons) if k in sessions]
+    orphans = sorted(set(jsons) ^ set(sessions))
+    return pairs, orphans
+
+
+@tool("account_import_batch", group="accounts", mutates=True, scope=SCOPE_CREATE, params={
+      "path": "Тека В КОНТЕЙНЕРІ з парами <phone>.json + <phone>.session (рекурсивно), або шлях до .zip з ними. На сервері: покласти в /opt/tg-event-analytics/backend/_import/ → у контейнері /app/backend/_import/.",
+      "zip_b64": "Альтернатива path: .zip із парами файлів у base64 (для невеликих партій).",
+      "tags": "Теги для всіх акаунтів через кому.",
+      "proxy": "Одна проксі для всіх (id/рядок). Порожньо = призначить gateway (зазвичай так і треба — по проксі на акаунт).",
+      "shared": "true — спільні (лише суперюзер); за замовчуванням суперюзер додає спільні, решта — свої.",
+      "dry_run": "true — лише показати, що знайдено і що вже є в базі, нічого не імпортувати.",
+      "delete_after": "true — після успішного імпорту видалити пару файлів із теки (сесія вже в БД; лишати її на диску — зайва копія секрету)."})
+def account_import_batch(path: str = "", zip_b64: str = "", tags: str = "", proxy: str = "",
+                         shared: bool = None, dry_run: bool = False, delete_after: bool = False):
+    """Додати БАГАТО акаунтів із tdata-експорту: тека або zip із парами
+    <phone>.json + <phone>.session → по акаунту на пару, звіт таблицею.
+
+    Кожна пара імпортується окремо: дубль номера чи битий файл не зупиняє решту.
+    Спершу `dry_run=true` — побачиш, що знайдено й що вже є. Після імпорту —
+    `account_check ref=problem` / `account_spam_check`, щоб знати, хто живий.
+    Шлях — у контейнері (web/mcp монтують ./backend як /app/backend).
+    """
+    import base64
+    import binascii
+    import json
+    import os
+    import shutil
+    import tempfile
+    import zipfile
+    from accounts.models import TelegramAccount
+
+    if bool(path) == bool(zip_b64):
+        raise ToolError("дай рівно одне: path (тека/zip у контейнері) або zip_b64")
+    owner = _import_owner(shared)
+    tag_names = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    p = common.resolve_proxy(proxy) if proxy else None
+
+    tmp_dir = ""
+    try:
+        if zip_b64:
+            try:
+                blob = base64.b64decode(zip_b64, validate=True)
+            except (binascii.Error, ValueError) as e:
+                raise ToolError(f"zip_b64 — не base64: {e}")
+            tmp_dir = tempfile.mkdtemp(prefix="tdata_")
+            try:
+                with zipfile.ZipFile(io_bytes(blob)) as z:
+                    _safe_extract(z, tmp_dir)
+            except zipfile.BadZipFile:
+                raise ToolError("zip_b64 — не zip-архів")
+            root = tmp_dir
+        elif os.path.isfile(path) and path.lower().endswith(".zip"):
+            tmp_dir = tempfile.mkdtemp(prefix="tdata_")
+            with zipfile.ZipFile(path) as z:
+                _safe_extract(z, tmp_dir)
+            root = tmp_dir
+        elif os.path.isdir(path):
+            root = path
+        else:
+            raise ToolError(f"{path}: у контейнері немає такої теки чи zip")
+
+        pairs, orphans = _find_pairs(root)
+        if not pairs:
+            raise ToolError("пар <name>.json + <name>.session не знайдено"
+                            + (f"; без пари: {', '.join(orphans[:10])}" if orphans else ""))
+        rows, ok, dup, bad = [], 0, 0, 0
+        for name, jpath, spath in pairs:
+            try:
+                with open(jpath, encoding="utf-8") as fh:
+                    meta = json.load(fh)
+            except (OSError, ValueError) as e:
+                rows.append([name, "✗", "—", f"JSON: {type(e).__name__}"])
+                bad += 1
+                continue
+            phone = str((meta or {}).get("phone") or "").strip() if isinstance(meta, dict) else ""
+            phone_norm = phone if phone.startswith("+") else f"+{phone}"
+            if phone and TelegramAccount.objects.filter(phone_number=phone_norm).exists():
+                rows.append([name, "=", common.mask_secret(phone_norm, 5), "уже є в базі"])
+                dup += 1
+                continue
+            if dry_run:
+                rows.append([name, "·", common.mask_secret(phone_norm, 5) if phone else "—",
+                             "буде імпортовано" if phone else "у JSON немає phone"])
+                continue
+            try:
+                a = _import_pair(meta, spath, owner, tag_names, p)
+            except ToolError as e:
+                rows.append([name, "✗", common.mask_secret(phone_norm, 5) if phone else "—", str(e)[:70]])
+                bad += 1
+                continue
+            rows.append([name, "✓", common.mask_secret(a.phone_number, 5),
+                         f"#{a.id} {'' if a.name == a.phone_number else a.name}".strip()])
+            ok += 1
+            if delete_after and not tmp_dir:
+                for f in (jpath, spath):
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    head = (f"Перевірка: {len(pairs)} пар, уже є {dup}" if dry_run
+            else f"Імпорт: додано {ok}, уже було {dup}, помилок {bad} із {len(pairs)} пар")
+    return fmt.joinsec(
+        fmt.section(head, fmt.table(["файл", "", "телефон", "результат"], rows)),
+        f"без пари (пропущено): {', '.join(orphans[:20])}" if orphans else "",
+        "" if dry_run or not ok else
+        f"власник: {'спільні' if owner is None else owner.username}; теги: {', '.join(tag_names) or '—'}; "
+        f"проксі: {'#' + str(p.id) if p else 'призначить gateway'}. "
+        "Далі: account_check ref=problem, account_spam_check ref=<id>.")
+
+
+def io_bytes(blob: bytes):
+    import io
+    return io.BytesIO(blob)
+
+
+def _safe_extract(z, dest: str):
+    """Розпакувати без zip-slip: лише .json/.session, без шляхів назовні."""
+    import os
+    for info in z.infolist():
+        if info.is_dir():
+            continue
+        name = os.path.basename(info.filename)
+        if not name.lower().endswith((".json", ".session")):
+            continue
+        with z.open(info) as src, open(os.path.join(dest, name), "wb") as dst:
+            dst.write(src.read())
 
 
 @tool("account_warm_up", group="accounts", mutates=True, params={

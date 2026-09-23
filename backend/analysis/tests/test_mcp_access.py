@@ -330,3 +330,55 @@ def test_publish_configs_are_private_per_owner(alice, bob):
     analyst = make_actor("ann3", McpRole.ANALYST)
     mcp_api.call("publish_config_create", {"name": "Аннин", "chat_id": "-3"}, who=analyst)
     assert PublishConfig.objects.get(name="Аннин").owner == analyst.user
+
+
+def test_account_import_batch_from_dir_and_zip(alice, monkeypatch, tmp_path):
+    """Пакетний імпорт: пари файлів → акаунти; дубль/битий не зупиняють решту;
+    dry_run нічого не пише; zip_b64 — те саме; оператору — зась (mcp:create)."""
+    import base64
+    import io
+    import json
+    import zipfile
+    from accounts.services import tdata_import
+    monkeypatch.setattr(tdata_import, "convert_sqlite_to_string_session", lambda p: "1BVts_SESS")
+    d = tmp_path / "batch"
+    d.mkdir()
+    for phone in ("79990000101", "79990000102"):
+        (d / f"{phone}.json").write_text(json.dumps({"phone": phone, "app_id": 1, "app_hash": "h",
+                                                     "first_name": f"Ім{phone[-1]}"}))
+        (d / f"{phone}.session").write_bytes(b"SQLite format 3\x00")
+    (d / "broken.json").write_text("{не json")
+    (d / "broken.session").write_bytes(b"x")
+    (d / "lonely.json").write_text("{}")                      # без пари
+    TelegramAccount.objects.create(name="є", phone_number="+79990000102")   # дубль
+
+    with pytest.raises(ToolError, match="mcp:create"):
+        mcp_api.call("account_import_batch", {"path": str(d)}, who=alice)
+    analyst = make_actor("ann4", McpRole.ANALYST)
+
+    out = mcp_api.call("account_import_batch", {"path": str(d), "dry_run": True}, who=analyst)
+    assert "Перевірка: 3 пар, уже є 1" in out and "буде імпортовано" in out and "lonely" in out
+    assert not TelegramAccount.objects.filter(phone_number="+79990000101").exists()
+
+    out = mcp_api.call("account_import_batch", {"path": str(d), "tags": "партія1", "delete_after": True},
+                       who=analyst)
+    assert "додано 1, уже було 1, помилок 1 із 3" in out
+    a = TelegramAccount.objects.get(phone_number="+79990000101")
+    assert a.user == analyst.user and a.session_string == "1BVts_SESS" and a.name == "Ім1"
+    assert [t.name for t in a.tags.all()] == ["партія1"]
+    assert "+79990000101" not in out and "1BVts_SESS" not in out
+    assert not (d / "79990000101.json").exists() and not (d / "79990000101.session").exists()
+    assert (d / "79990000102.json").exists()                  # дубль не чіпали
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("sub/79990000103.json", json.dumps({"phone": "79990000103", "app_id": 1, "app_hash": "h"}))
+        z.writestr("sub/79990000103.session", b"SQLite format 3\x00")
+        z.writestr("../evil.session", b"x")
+    out = mcp_api.call("account_import_batch", {"zip_b64": base64.b64encode(buf.getvalue()).decode()},
+                       who=analyst)
+    assert "додано 1" in out and TelegramAccount.objects.filter(phone_number="+79990000103").exists()
+    with pytest.raises(ToolError, match="рівно одне"):
+        mcp_api.call("account_import_batch", {}, who=analyst)
+    with pytest.raises(ToolError, match="немає такої теки"):
+        mcp_api.call("account_import_batch", {"path": "/nonexistent"}, who=analyst)

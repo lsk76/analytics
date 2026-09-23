@@ -59,8 +59,8 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:create",
-  "doc": "Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.\n\nТе саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,\ndevice-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається\nавторизованою; далі — `account_check` (жива?) і `account_spam_check`.\nСекрети (session, 2FA) у відповідь не потрапляють.",
-  "summary": "Додати Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.",
+  "doc": "Додати ОДИН Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.\n\nТе саме, що адмінка «Додати акаунт через файли»: SQLiteSession → StringSession,\ndevice-відбиток переноситься, 2FA — з JSON. Сесія одразу вважається\nавторизованою; далі — `account_check` (жива?) і `account_spam_check`.\nБагато акаунтів одразу — `account_import_batch`. Секрети у відповідь не потрапляють.",
+  "summary": "Додати ОДИН Telegram-акаунт із tdata-експорту: <phone>.json + <phone>.session.",
   "params": [
    {
     "name": "meta_json",
@@ -79,7 +79,7 @@
    {
     "name": "session_path",
     "type": "str",
-    "doc": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/media/import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
+    "doc": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/_import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
     "default": "",
     "required": false
    },
@@ -102,6 +102,65 @@
     "type": "bool",
     "doc": "true — спільний акаунт (бачать усі); false = власник — ти. Суперюзер за замовчуванням додає спільний, решта — свій.",
     "default": null,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "account_import_batch",
+  "group": "accounts",
+  "mutates": true,
+  "scope": "mcp:create",
+  "doc": "Додати БАГАТО акаунтів із tdata-експорту: тека або zip із парами\n<phone>.json + <phone>.session → по акаунту на пару, звіт таблицею.\n\nКожна пара імпортується окремо: дубль номера чи битий файл не зупиняє решту.\nСпершу `dry_run=true` — побачиш, що знайдено й що вже є. Після імпорту —\n`account_check ref=problem` / `account_spam_check`, щоб знати, хто живий.\nШлях — у контейнері (web/mcp монтують ./backend як /app/backend).",
+  "summary": "Додати БАГАТО акаунтів із tdata-експорту: тека або zip із парами <phone>.json + <phone>.session → по акаунту на пару, звіт таблицею.",
+  "params": [
+   {
+    "name": "path",
+    "type": "str",
+    "doc": "Тека В КОНТЕЙНЕРІ з парами <phone>.json + <phone>.session (рекурсивно), або шлях до .zip з ними. На сервері: покласти в /opt/tg-event-analytics/backend/_import/ → у контейнері /app/backend/_import/.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "zip_b64",
+    "type": "str",
+    "doc": "Альтернатива path: .zip із парами файлів у base64 (для невеликих партій).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tags",
+    "type": "str",
+    "doc": "Теги для всіх акаунтів через кому.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "proxy",
+    "type": "str",
+    "doc": "Одна проксі для всіх (id/рядок). Порожньо = призначить gateway (зазвичай так і треба — по проксі на акаунт).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "shared",
+    "type": "bool",
+    "doc": "true — спільні (лише суперюзер); за замовчуванням суперюзер додає спільні, решта — свої.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dry_run",
+    "type": "bool",
+    "doc": "true — лише показати, що знайдено і що вже є в базі, нічого не імпортувати.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "delete_after",
+    "type": "bool",
+    "doc": "true — після успішного імпорту видалити пару файлів із теки (сесія вже в БД; лишати її на диску — зайва копія секрету).",
+    "default": false,
     "required": false
    }
   ]

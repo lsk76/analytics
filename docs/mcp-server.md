@@ -290,6 +290,7 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 | `account_spam_check` **[пише]** | статус через @SpamBot | ref, pause=2.0 |
 | `account_update` **[пише]** | активність / проксі / теги | ref, is_active, proxy, add_tags, remove_tags |
 | `account_import` **[пише]** | додати акаунт із tdata-експорту (`<phone>.json` + `.session`) — як адмінка «Додати акаунт через файли»; сесія base64 або шлях у контейнері; оператор додає собі, спільний — лише суперюзер | meta_json, session_b64 / session_path, tags, proxy, shared |
+| `account_import_batch` **[пише, mcp:create]** | БАГАТО акаунтів: тека або zip у контейнері (`/app/backend/_import/` = `backend/_import/` на сервері) чи `zip_b64` з парами `<phone>.json` + `<phone>.session`; по акаунту на пару, дубль/битий файл не зупиняє решту; `dry_run` показує, що буде; `delete_after` прибирає файли після імпорту | path / zip_b64, tags, proxy, shared, dry_run, delete_after |
 | `account_warm_up` **[пише]** | у чергу прогріву (підписка на канали) | ref, channels=0 |
 | `account_dialogs` | на що акаунт підписаний (наживо) | ref, limit=40, kind='' |
 | `account_jobs` | черги `warm_up` / `test_bot` | kind='all', status='', limit=20 |
