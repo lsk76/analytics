@@ -129,23 +129,21 @@ def test_full_flow_issues_token_scoped_by_role(client, provider, client_info, op
     assert provider.load_authorization_code(client_info, code) is None
 
 
-def test_client_registered_without_scope_gets_role_scopes(provider, client_info, operator):
-    """Клієнт, який не звужував запит, дістає рівно те, що дає роль.
+def test_repeating_registered_scope_is_not_a_narrowing(operator):
+    """Клієнт реєструється з `mcp:read` і повторює його в запиті — це не
+    «прошу лише читання», тож оператор дістає і `mcp:write`.
 
-    Була регресія: default_scopes сервера = ["mcp:read"], клієнт просив саме
-    читання, і оператор отримував токен без mcp:write — на сторінці згоди
-    світився один рядок замість двох.
+    Була регресія: перетин із запитом зрізав роль, і оператор отримував токен,
+    яким нічого не міг змінити (на сторінці згоди — один рядок замість двох).
     """
-    from mcpauth.oauth import _client_to_sdk
-    from mcpauth.models import McpClient
-    from mcpauth.policy import ALL_SCOPES, granted_scopes
-    provider.register_client(client_info)
-    row = McpClient.objects.get(client_id=client_info.client_id)
-    row.scope = ""
-    row.save(update_fields=["scope"])
-    assert _client_to_sdk(row).scope == " ".join(ALL_SCOPES)
-    asked = _client_to_sdk(row).scope.split()
-    assert granted_scopes(operator, asked) == ["mcp:read", "mcp:write"]
+    from mcpauth.policy import granted_scopes
+    registered = ["mcp:read"]
+    assert granted_scopes(operator, registered, registered) == ["mcp:read", "mcp:write"]
+    assert granted_scopes(operator, [], registered) == ["mcp:read", "mcp:write"]
+    # свідомо ВУЖЧЕ за видане — поважаємо (клієнт зареєстрований ширше)
+    assert granted_scopes(operator, ["mcp:read"], ["mcp:read", "mcp:write"]) == ["mcp:read"]
+    # ширше за видане теж не додає прав понад роль
+    assert granted_scopes(operator, ["mcp:read", "mcp:admin"], registered) == ["mcp:read", "mcp:write"]
 
 
 def test_role_is_the_ceiling_even_if_client_asks_more(client, provider, client_info):

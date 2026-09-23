@@ -13,11 +13,10 @@ REFRESH_TTL = timedelta(days=30)
 CODE_TTL = timedelta(minutes=5)
 REQUEST_TTL = timedelta(minutes=15)  # скільки людина має на логін і згоду
 
-# Усі скоупи, які сервер узагалі вміє. Клієнт (Claude) не знає наших ролей і
-# просить те, що ми віддали йому при реєстрації, — тож просити він має ВСЕ, а
-# звужує до ролі вже сервер (`granted_scopes`). Був тут лише `mcp:read` — і
-# оператор отримував токен на саме читання, хоч роль давала більше.
-ALL_SCOPES = ["mcp:read", "mcp:write", "mcp:create", "mcp:admin"]
+SCOPE_READ = "mcp:read"
+# Усі скоупи, які сервер узагалі вміє (valid_scopes). Реєструємо клієнта лише
+# з `mcp:read`: у його запиті не має світитися `mcp:admin`.
+ALL_SCOPES = [SCOPE_READ, "mcp:write", "mcp:create", "mcp:admin"]
 
 SCOPE_LABELS = {
     "mcp:read": "бачити стан сервісу, задачі, акаунти й джерела (у межах твоєї видимості)",
@@ -27,19 +26,26 @@ SCOPE_LABELS = {
 }
 
 
-def granted_scopes(user, requested) -> list[str]:
-    """Перетин запитаного з тим, що дозволяє роль. Немає ролі — немає доступу.
+def granted_scopes(user, requested, registered=None) -> list[str]:
+    """Скоупи токена: стеля — роль, звуження — лише СВІДОМЕ звуження клієнтом.
 
-    Клієнт може попросити `mcp:admin`, але читач отримає лише `mcp:read`:
-    стеля завжди на боці сервера, не клієнта.
+    Немає ролі — немає доступу. Клієнт може попросити `mcp:admin`, але читач
+    отримає `mcp:read`: стеля завжди на боці сервера.
+
+    `registered` — те, що ми самі видали клієнту при реєстрації (`McpClient.scope`,
+    за замовчуванням `mcp:read`). Клієнт типу Claude не знає наших ролей і просто
+    повторює цей рядок — це не «прошу лише читання», а «прошу як домовились», тож
+    такий запит стелю не зрізає: оператор дістає і `mcp:write`. Якщо ж клієнт
+    попросив ВУЖЧЕ за видане — це свідомий вибір, і ми його поважаємо.
     """
     role = McpRole.objects.filter(user=user, is_active=True).first()
     if not role:
         return []
     allowed = role.scopes
     asked = [s for s in (requested or []) if s]
-    if not asked:
-        return allowed          # клієнт не звузив запит — даємо все, що дає роль
+    given = [s for s in (registered or []) if s] or [SCOPE_READ]
+    if not asked or set(asked) >= set(given):
+        return allowed          # клієнт не звужував — даємо все, що дає роль
     return [s for s in allowed if s in asked]
 
 

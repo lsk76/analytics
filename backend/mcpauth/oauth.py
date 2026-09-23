@@ -24,7 +24,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from .models import (McpAuthCode, McpAuthRequest, McpClient, McpRole, McpToken,
                      new_secret, sha256)
 from .policy import (ACCESS_TTL, ALL_SCOPES, REFRESH_TTL, REQUEST_TTL,  # noqa: F401
-                     granted_scopes)
+                     SCOPE_READ, granted_scopes)
 
 
 def consent_url(key: str) -> str:
@@ -46,7 +46,7 @@ def _client_to_sdk(row: McpClient) -> OAuthClientInformationFull:
         redirect_uris=row.redirect_uris or [],
         grant_types=row.grant_types or ["authorization_code", "refresh_token"],
         response_types=["code"],
-        scope=row.scope or " ".join(ALL_SCOPES),
+        scope=row.scope or SCOPE_READ,
         token_endpoint_auth_method="client_secret_post" if row.client_secret else "none",
     )
 
@@ -180,7 +180,7 @@ class DjangoOAuthProvider(OAuthAuthorizationServerProvider):
         row.revoked_at = timezone.now()
         row.save(update_fields=["revoked_at"])
         asked = list(scopes) if scopes else row.scopes
-        allowed = granted_scopes(row.user, asked)
+        allowed = granted_scopes(row.user, asked, (row.client.scope or "").split())
         if not allowed:
             raise ValueError("у користувача немає активної ролі MCP")
         return self._issue(row.user, row.client, allowed, row.resource)
