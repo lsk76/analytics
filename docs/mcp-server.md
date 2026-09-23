@@ -393,8 +393,8 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |
 | `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет | ref, task, active=True, priority=0 |
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
-| `events_list` | список подій із фільтрами адмінки (період/свіжість, статус аудиту, регіон, нас. пункт, теги-фасети, канал, к-сть каналів, охоплення); дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
-| `event_show` | картка події: опис, регіон, теги, аудит, пости-джерела | ref |
+| `events_list` | список подій із фільтрами адмінки; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
+| `event_show` | картка події: id, опис, регіон, теги, аудит, пости-джерела з id поста | ref |
 | `event_update` **[пише]** | схвалити / відхилити / повернути в чергу (= дії адмінки), теги `кат:тег` (+/−), регіон, нас. пункт, дата, опис, нотатка аудиту | ref, review, notes, add_tags, remove_tags, region, settlement, event_date, summary |
 | `event_add` **[пише]** | подія за посиланням (= «Додати подію» в адмінці: fetch → скрін-промпт → Event approved; виклик LLM) | task, url |
 | `tag_categories` | категорії тегів (закриті/відкриті) з прикладами — для `tag=` і `add_tags=` | task='' |

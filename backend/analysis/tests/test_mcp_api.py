@@ -517,6 +517,7 @@ def test_events_list_filters_like_admin(events):
     task, e1, e2, e3 = events
     out = mcp_api.call("events_list", {"task": "ev-task"})           # дефолт: approved, 30 дн
     assert "бійка" in out and "стара подія" not in out and "на аудит" not in out
+    assert f"#{e1.id}" in out
     out = mcp_api.call("events_list", {"task": "ev-task", "days": 400})
     assert "стара подія" in out
     out = mcp_api.call("events_list", {"task": "ev-task", "review_status": "pending"})
@@ -533,10 +534,15 @@ def test_events_list_filters_like_admin(events):
 
 
 def test_event_show_and_update(events):
-    from analysis.models import Event, Tag
+    from analysis.models import Event, Post, Tag
     task, e1, e2, e3 = events
+    post = Post.objects.create(task=task, event=e1, url="https://t.me/dag/1",
+                               text="текст", posted_at=timezone.now(), stage="done")
     out = mcp_api.call("event_show", {"ref": str(e1.id)})
     assert "topic:мігранти" in out and "nationality:узбек" in out and "Дагестан" in out
+    assert f"#{e1.id}" in out and f"#{post.id}" in out and "https://t.me/dag/1" in out
+    listed = mcp_api.call("events_list", {"task": "ev-task", "query": "бійка"})
+    assert f"#{e1.id}" in listed and f"#{post.id}" in listed
 
     out = mcp_api.call("event_update", {"ref": str(e3.id), "review": "reject", "notes": "дубль"})
     e3.refresh_from_db()

@@ -1189,27 +1189,37 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
 
     Дефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;
     `review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).
-    Категорії тегів для фільтра `tag` — `tag_categories`; id події — для
-    `event_show`/`event_update`.
+    Категорії тегів для фільтра `tag` — `tag_categories`.
+    Колонка id — подія (`event_show` / `event_update`). Колонка пост — id
+    найранішого поста цієї події (`prompt_try` / `posts_retag`, параметр posts).
     """
+    from django.db.models import OuterRef, Subquery
     qs, desc = _event_filters(task, days, date_from, date_to, review_status, region,
                               settlement, tag, query, channel, min_channels, min_reach)
     ordering = {"newest": ("-event_date", "-id"), "oldest": ("event_date", "id"),
                 "reach": ("-reach", "-id"), "channels": ("-channel_count", "-id")}.get(order)
     if not ordering:
         raise ToolError("order: newest | oldest | reach | channels")
+    head_post = (Post.objects.filter(event_id=OuterRef("pk")).exclude(text="")
+                 .order_by("posted_at", "id").values("id")[:1])
+    qs = qs.annotate(head_post_id=Subquery(head_post))
     total = qs.count()
-    rows = [[f"#{e.id}", str(e.event_date or "—"), e.task.slug if not task else "",
-             {"approved": "✓", "pending": "?", "rejected": "✗"}.get(e.review_status, e.review_status),
-             fmt.trunc(e.region_subject.name if e.region_subject_id else (e.region or "—"), 18),
-             fmt.trunc(e.settlement, 14), e.channel_count, e.reach,
-             fmt.trunc(_tags_short(e), 40), fmt.trunc(e.summary, 90)]
-            for e in qs.select_related("task", "region_subject")
-                        .prefetch_related("tags").order_by(*ordering)[:limit]]
-    headers = ["id", "дата", "задача", "аудит", "регіон", "нас. пункт", "кан.", "охопл.", "теги", "опис"]
-    if task:
-        rows = [r[:2] + r[3:] for r in rows]
-        headers = headers[:2] + headers[3:]
+    show_task = not task
+    headers = ["id", "пост", "дата"] + (["задача"] if show_task else []) + [
+        "аудит", "регіон", "нас. пункт", "кан.", "охопл.", "теги", "опис"]
+    rows = []
+    for e in (qs.select_related("task", "region_subject").prefetch_related("tags")
+              .order_by(*ordering)[:limit]):
+        row = [f"#{e.id}", f"#{e.head_post_id}" if e.head_post_id else "—",
+               str(e.event_date or "—")]
+        if show_task:
+            row.append(e.task.slug)
+        row += [
+            {"approved": "✓", "pending": "?", "rejected": "✗"}.get(e.review_status, e.review_status),
+            fmt.trunc(e.region_subject.name if e.region_subject_id else (e.region or "—"), 18),
+            fmt.trunc(e.settlement, 14), e.channel_count, e.reach,
+            fmt.trunc(_tags_short(e), 40), fmt.trunc(e.summary, 90)]
+        rows.append(row)
     return fmt.joinsec(
         fmt.section(f"Події: {total} (показано {len(rows)})", "; ".join(desc) or "без фільтрів"),
         fmt.table(headers, rows) if rows else "нічого не знайдено",
@@ -1219,11 +1229,18 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
 
 @tool("event_show", group="monitoring", params={"ref": "id події (з events_list)."})
 def event_show(ref: str):
-    """Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями."""
+    """Картка події: id події, опис, регіон, усі теги, аудит, пости-джерела.
+
+    У таблиці постів колонка id — id поста. Його передають у `prompt_try` і
+    `posts_retag` (параметр posts).
+    """
     ev = _resolve_event(ref)
-    posts = ev.posts.select_related("channel").order_by("posted_at")[:15]
+    posts = list(ev.posts.select_related("channel").order_by("posted_at", "id")[:15])
+    n_posts = ev.posts.count()
+    post_note = f"показано {len(posts)} з {n_posts}" if n_posts > len(posts) else ""
     return fmt.joinsec(
         fmt.section(f"Подія #{ev.id} · {ev.event_date} · {ev.task.slug}", fmt.kv([
+            ("id", f"#{ev.id}"),
             ("аудит", f"{ev.review_status}" + (f" ({fmt.trunc(ev.review_notes, 80)})" if ev.review_notes else "")
                       + (f", {fmt.ago(ev.reviewed_at)}" if ev.reviewed_at else "")),
             ("регіон", (ev.region_subject.name if ev.region_subject_id else "—")
@@ -1234,9 +1251,10 @@ def event_show(ref: str):
             ("опис", ev.summary or "—"),
             ("правити", f"/admin/analysis/event/{ev.id}/change/?task={ev.task_id}"),
         ])),
-        fmt.section("Пости", fmt.table(
-            ["коли", "канал", "посилання"],
-            [[str(p.posted_at)[:16], fmt.trunc(p.channel_name or (p.channel.title if p.channel_id else ""), 24),
+        fmt.section("Пости" + (f" ({post_note})" if post_note else ""), fmt.table(
+            ["id", "коли", "канал", "посилання"],
+            [[f"#{p.id}", str(p.posted_at)[:16],
+              fmt.trunc(p.channel_name or (p.channel.title if p.channel_id else ""), 24),
               p.url] for p in posts])) if posts else "")
 
 
