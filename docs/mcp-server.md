@@ -290,6 +290,12 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 
 ### Telegram-акаунти
 
+Telegram-акаунти потрібні, щоб читати новини з каналів і чатів. Без живої
+сесії (авторизований акаунт із робочою проксі) канал чи чат прочитати не
+вийде: саме акаунт тягне пости telegram-джерел інформпростору і повідомлення
+whitelist-чатів моніторингу; руками те саме роблять `tg_*`. Пошук по індексу
+TeleZip (`tz_*`) акаунта не використовує.
+
 | інструмент | що робить | параметри |
 |------------|-----------|-----------|
 | `accounts_list` | акаунти: авторизація, SpamBot, проксі, навантаження | query='', problems_only=False, limit=100 |
@@ -363,9 +369,9 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 
 | інструмент | що робить | параметри |
 |------------|-----------|-----------|
-| `tasks_list` | задачі: конвеєр, обсяги, що підключено | pipeline='', active_only=False |
+| `tasks_list` | задачі; колонка «конвеєр» — точний ключ events/monitor/research/infospace/tgsearch | pipeline='', active_only=False |
 | `task_update` **[пише]** | параметри задачі: збір (запит TeleZip, мови, unique, чанк), назва/опис, прапорці стадій, вікно дедупу, промпт класифікації | ref, telezip_query, languages, unique, chunk_days, is_active, min_subscribers, llm_model, display_name, name, description, search_posts, search_comments, geo_enabled, review_enabled, dedup_window_days, classify_prompt |
-| `task_show` | картка моніторингу (конфіг стадій, черги, події, збори) | ref |
+| `task_show` | картка моніторингу: усі поля конвеєра (промпти повністю, порожнє = дефолт із коду), черги, події, збори | ref |
 | `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
 | `run_show` | збір детально (аналог «Збори → Статус») | run_id |
 | `run_create` **[пише]** | запустити збір за період (планує чанки) | task, date_from, date_to, chunk_days=0, title='' |
@@ -382,6 +388,15 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `event_update` **[пише]** | схвалити / відхилити / повернути в чергу (= дії адмінки), теги `кат:тег` (+/−), регіон, нас. пункт, дата, опис, нотатка аудиту | ref, review, notes, add_tags, remove_tags, region, settlement, event_date, summary |
 | `event_add` **[пише]** | подія за посиланням (= «Додати подію» в адмінці: fetch → скрін-промпт → Event approved; виклик LLM) | task, url |
 | `tag_categories` | категорії тегів (закриті/відкриті) з прикладами — для `tag=` і `add_tags=` | task='' |
+| `tag_category_show` | картка категорії: підказка, порядок, задачі | key |
+| `tag_category_create` **[пише]** | нова категорія (без рядка фасет `?tag_<ключ>` не реєструється) | key, label, closed=False, hint='', order=100 |
+| `tag_category_update` **[пише]** | назва / closed / підказка / порядок (ключ незмінний; closed бачать воркери після рестарту) | key, label, closed, hint, order=-1 |
+| `tag_category_delete` **[пише]** | видалити категорію; з тегами чи задачами — лише confirm=true | key, confirm=False |
+| `tags_list` | теги довідника | category='', query='', limit=80 |
+| `tag_show` | картка тега й аліаси | ref |
+| `tag_create` **[пише]** | канонічний тег (і сід закритої категорії); повтор не дублює | category, name |
+| `tag_update` **[пише]** | перейменувати або перенести в іншу категорію | ref, name, category |
+| `tag_delete` **[пише]** | видалити тег; якщо висить на подіях/постах — лише confirm=true | ref, confirm=False |
 | `channels_find` | знайти канал/чат у довіднику | query, limit=20 |
 | `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language |
 | `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems |

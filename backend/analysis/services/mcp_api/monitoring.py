@@ -9,15 +9,204 @@ from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, Post,
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
-PIPE_SHORT = {"events": "події", "monitor": "критика", "research": "дослідж.",
-              "infospace": "інформпр.", "tgsearch": "TG-пошук"}
+# Ключ pipeline має бути видимий агенту як є: скорочення «інформпр.» / слово
+# «моніторинг» на всі задачі змушувало плутати п'ять конвеєрів.
+_PIPELINE_HOW = {
+    "events": "events — події з TeleZip. Збір: run_create. Промпт класифікації: "
+              "classify_system_prompt (task_update classify_prompt).",
+    "monitor": "monitor — критика в чатах, не інформпростір. Чати: chats_list. "
+               "Промпти: prescreen_prompt, tagger_prompt. classify_prompt не читається.",
+    "research": "research — тематичне дослідження каналів. Чати: chats_list. "
+                "Промпт агента: tagger_prompt. Не скрін infospace і не classify_prompt.",
+    "infospace": "infospace — полінг джерел, не TeleZip. Джерела: sources_list / "
+                 "source_add. Промпти: info_screen_prompt, info_judge_prompt. "
+                 "run_create і classify_prompt цей конвеєр не читає.",
+    "tgsearch": "tgsearch — пошук у чатах Telegram, не TeleZip. Чати: chats_list. "
+                "Поля: search_terms, stream_regex. Промпти: prescreen_prompt, tagger_prompt.",
+}
+_TELEZIP_RUNS = {"events", "monitor", "research"}
+
+# Картка task_show = усі поля форми задачі для її конвеєра (ті самі fieldsets,
+# що в адмінці). Довгий текст іде окремим блоком і не обрізається.
+_TASK_GROUPS = {
+    "events": (
+        ("Збір", ("telezip_query", "telezip_unique", "search_posts", "search_comments",
+                  "drop_linked_comments", "min_channel_subscribers", "collect_chunk_days",
+                  "languages")),
+        ("Класифікація", ("classify_system_prompt", "tag_categories", "llm_model", "geo_enabled")),
+        ("Дедуплікація", ("dedup_window_days", "dedup_pre_thresh", "dedup_cand_thresh",
+                          "dedup_judge_prompt", "generic_sides")),
+        ("Авто-аудит", ("review_enabled", "review_model", "review_prompt")),
+        ("Агент-аудит", ("agent_review_prompt",)),
+    ),
+    "monitor": (
+        ("Збір", ("telezip_query", "collect_chunk_days", "languages")),
+        ("Фільтрація", ("mon_min_len", "mon_max_len")),
+        ("Прескрін", ("prescreen_model", "prescreen_prompt")),
+        ("Тегування", ("tag_categories", "tagger_prompt")),
+    ),
+    "research": (
+        ("Збір", ("collect_chunk_days", "languages")),
+        ("Класифікація", ("tagger_prompt",)),
+        ("Групування дублів", ("dedup_group_days", "dedup_group_fuzz", "dedup_llm_cluster",
+                               "dedup_cluster_prompt")),
+        ("Агент-аудит", ("research_audit_enabled", "research_audit_prompt")),
+    ),
+    "infospace": (
+        ("Джерела", ("info_max_age_days",)),
+        ("Скрін", ("info_screen_model", "info_screen_prompt", "tag_categories",
+                   "info_tagger_prompt", "geo_enabled")),
+        ("Зіставлення", ("info_judge_prompt", "info_match_window_hours",
+                         "info_update_summaries", "llm_model")),
+        ("Ретеншн", ("info_retention_days",)),
+    ),
+    "tgsearch": (
+        ("Стрім", ("stream_regex", "stream_interval_min", "stream_media_chat_id")),
+        ("Пошук", ("search_terms", "search_days", "search_limit_per_term")),
+        ("Фільтр", ("prescreen_enabled", "prescreen_model", "prescreen_prompt")),
+        ("Тегування", ("tag_categories", "tagger_prompt", "llm_model")),
+    ),
+}
+_LONG_FIELDS = {
+    "description", "telezip_query", "classify_system_prompt", "dedup_judge_prompt",
+    "review_prompt", "agent_review_prompt", "search_terms", "stream_regex",
+    "prescreen_prompt", "tagger_prompt", "dedup_cluster_prompt", "research_audit_prompt",
+    "info_screen_prompt", "info_tagger_prompt", "info_judge_prompt",
+}
+_HEAD_FIELDS = ("display_name", "name", "slug", "description", "pipeline", "is_active",
+                "owner", "created_at", "updated_at")
+
+
+def _field_label(name):
+    """Підпис із іменем поля: агент інакше не зіставляє «Скрін: системний промпт» з info_screen_prompt."""
+    return f"{AnalysisTask._meta.get_field(name).verbose_name} [{name}]"
+
+
+def _model_fallback(task, name):
+    from django.conf import settings
+    if name == "llm_model":
+        return settings.LLM_MODEL
+    if name in ("info_screen_model", "prescreen_model"):
+        return task.llm_model or settings.LLM_MODEL
+    if name == "review_model":
+        return "anthropic/claude-sonnet-4.6"
+    return ""
+
+
+def _prompt_default(task, name):
+    """Текст, який рантайм підставить, коли поле в базі порожнє. None — підстановки немає."""
+    if name == "info_screen_prompt":
+        from analysis.services.infospace.prompts import INFO_SCREEN_PROMPT
+        return INFO_SCREEN_PROMPT
+    if name == "info_judge_prompt":
+        from analysis.services.infospace.prompts import INFO_JUDGE_PROMPT
+        return INFO_JUDGE_PROMPT
+    if name == "dedup_judge_prompt":
+        from analysis.services.pipeline import _DEFAULT_JUDGE
+        return _DEFAULT_JUDGE
+    if name == "review_prompt":
+        from analysis.services.review import _DEFAULT_REVIEW_SYS
+        return _DEFAULT_REVIEW_SYS
+    if name == "agent_review_prompt":
+        from analysis.models import _default_agent_review_prompt
+        return _default_agent_review_prompt()
+    if name == "prescreen_prompt" and task.pipeline == AnalysisTask.PIPELINE_MONITOR:
+        from analysis.pilot.prompts import PRESCREEN_SYSTEM_PROMPT_COMPACT
+        return PRESCREEN_SYSTEM_PROMPT_COMPACT
+    if name == "tagger_prompt" and task.pipeline == AnalysisTask.PIPELINE_MONITOR:
+        from analysis.pilot.prompts import TAGGER_SYSTEM_PROMPT
+        return TAGGER_SYSTEM_PROMPT
+    if name == "dedup_cluster_prompt":
+        from analysis.services.research_stages import CLUSTER_PROMPT
+        return CLUSTER_PROMPT
+    if name == "research_audit_prompt":
+        from analysis.models import _default_research_audit_prompt
+        return _default_research_audit_prompt()
+    return None
+
+
+def _short_value(task, name):
+    if name == "owner":
+        return task.owner.username if task.owner_id else "—"
+    if name == "pipeline":
+        return f"{task.pipeline} — {task.get_pipeline_display()}"
+    if name in ("created_at", "updated_at"):
+        dt = getattr(task, name)
+        return f"{timezone.localtime(dt):%Y-%m-%d %H:%M} ({fmt.ago(dt)})" if dt else "—"
+    if name == "tag_categories":
+        return ", ".join(c.key for c in task.tag_categories.all()) or "—"
+    if name == "languages":
+        if task.languages:
+            return ", ".join(task.languages)
+        if task.pipeline == AnalysisTask.PIPELINE_MONITOR:
+            return "порожньо → ru"
+        return "порожньо (без фільтра)"
+    if name == "generic_sides":
+        if task.generic_sides:
+            return ", ".join(task.generic_sides)
+        from analysis.services.pipeline import GENERIC_SIDES
+        return "порожньо → " + ", ".join(sorted(GENERIC_SIDES))
+    if name in ("llm_model", "info_screen_model", "prescreen_model", "review_model"):
+        raw = (getattr(task, name) or "").strip()
+        return raw or ("порожньо → " + _model_fallback(task, name))
+    val = getattr(task, name)
+    if isinstance(val, bool):
+        return fmt.flag(val)
+    if val is None or val == "":
+        return "—"
+    return str(val)
+
+
+def _long_block(task, name):
+    raw = getattr(task, name)
+    raw = raw.strip() if isinstance(raw, str) else ("" if raw is None else str(raw).strip())
+    if raw:
+        body = raw
+    else:
+        default = _prompt_default(task, name)
+        if default and default.strip():
+            body = ("порожньо в базі — нижче дефолт із коду (саме він іде в LLM)\n\n"
+                    + default.strip())
+        elif name == "classify_system_prompt":
+            body = ("порожньо — доменних правил немає; до промпта доклеюється "
+                    "лише JSON-схема з категорій тегів")
+        elif name == "stream_regex":
+            body = "порожньо (стрім вимкнено)"
+        elif name == "info_tagger_prompt":
+            body = "порожньо (лише підказки категорій тегів)"
+        else:
+            body = "порожньо"
+    return f"### {_field_label(name)}\n{body}"
+
+
+def _task_config(task):
+    groups = (("Задача", _HEAD_FIELDS),) + _TASK_GROUPS.get(
+        task.pipeline, _TASK_GROUPS["events"])
+    parts = []
+    for i, (title, fields) in enumerate(groups):
+        shorts, longs = [], []
+        for name in fields:
+            if name in _LONG_FIELDS:
+                longs.append(_long_block(task, name))
+            else:
+                shorts.append((_field_label(name), _short_value(task, name)))
+        lead = _PIPELINE_HOW.get(task.pipeline, task.pipeline) if i == 0 else ""
+        body = fmt.joinsec(lead, fmt.kv(shorts), *longs)
+        heading = f"Задача #{task.id} {task.slug} — {task.name}" if i == 0 else title
+        parts.append(fmt.section(heading, body))
+    return fmt.joinsec(*parts)
 
 
 @tool("tasks_list", group="monitoring", params={
       "pipeline": 'Конвеєр: events | monitor | research | infospace | tgsearch. Порожньо = усі.',
       "active_only": "true — лише активні задачі."})
 def tasks_list(pipeline: str = "", active_only: bool = False):
-    """Задачі аналізу (моніторинги): конвеєр, обсяги, що до них підключено."""
+    """Список задач. Колонка «конвеєр» — точний ключ: events, monitor, research, infospace, tgsearch.
+
+    Це п'ять різних конвеєрів, не різновиди monitor. events — події TeleZip,
+    monitor — критика в чатах, research — тематичне, infospace — полінг джерел,
+    tgsearch — пошук у чатах Telegram.
+    """
     qs = common.scope_tasks(AnalysisTask.objects).order_by("id")
     if pipeline:
         qs = qs.filter(pipeline=pipeline)
@@ -40,7 +229,7 @@ def tasks_list(pipeline: str = "", active_only: bool = False):
         pa = posts_agg.get(t.id, {})
         rows.append([
             f"#{t.id}", fmt.flag(t.is_active), t.slug,
-            PIPE_SHORT.get(t.pipeline, t.pipeline),
+            t.pipeline,
             fmt.trunc(t.name, 34),
             chats_agg.get(t.id, "") or "",
             subs_agg.get(t.id, "") or "",
@@ -56,29 +245,13 @@ def tasks_list(pipeline: str = "", active_only: bool = False):
 
 @tool("task_show", group="monitoring", params={"ref": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».'})
 def task_show(ref: str):
-    """Картка моніторингу: конфіг конвеєра, підключення, черги, події, останні збори."""
+    """Картка задачі. Перший рядок — ключ pipeline і чим цей тип відрізняється від інших.
+
+    Поля підписані іменем колонки в дужках, напр. [info_screen_prompt]. Промпти
+    повністю; порожнє з підстановкою з коду позначене «дефолт із коду».
+    """
     t = common.resolve_task(ref)
-    cfg = [("конвеєр", t.get_pipeline_display()), ("активна", fmt.flag(t.is_active)),
-           ("власник", t.owner.username if t.owner_id else "—"),
-           ("опис", fmt.trunc(t.description, 200))]
-    if t.pipeline in ("events", "monitor", "research"):
-        cfg += [("запит TeleZip", fmt.trunc(t.telezip_query, 200)),
-                ("мови", t.languages or "—"),
-                ("пости/коментарі", f"{fmt.flag(t.search_posts)}/{fmt.flag(t.search_comments)}"),
-                ("чанк збору", f"{t.collect_chunk_days} дн"),
-                ("мін. підписників", t.min_channel_subscribers or "—")]
-    if t.pipeline == "events":
-        cfg += [("дедуп", f"вікно {t.dedup_window_days} дн, pre {t.dedup_pre_thresh}%, "
-                          f"cand {t.dedup_cand_thresh}%"),
-                ("авто-аудит", fmt.flag(t.review_enabled))]
-    if t.pipeline == "infospace":
-        cfg += [("свіжість", f"{t.info_max_age_days} дн"),
-                ("вікно збігу", f"{t.info_match_window_hours} год"),
-                ("жива подія", fmt.flag(t.info_update_summaries)),
-                ("ретеншн сирих", f"{t.info_retention_days} дн")]
-    cfg += [("категорії тегів", ", ".join(c.key for c in t.tag_categories.all()) or "—"),
-            ("модель LLM", t.llm_model or "дефолт")]
-    parts = [fmt.section(f"Задача #{t.id} {t.slug} — {t.name}", fmt.kv(cfg))]
+    parts = [_task_config(t)]
 
     stages = (Post.objects.filter(task=t).order_by().values("stage")
               .annotate(n=Count("id")))
@@ -213,12 +386,17 @@ def run_show(run_id: int):
       "title": "Необовʼязкова назва збору для списку."})
 def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
                title: str = ""):
-    """Запустити збір за період — створює ResearchRun і планує чанки (як «Збори → Додати»).
+    """Збір TeleZip за період для конвеєрів events, monitor, research. Не для infospace і tgsearch.
 
-    Далі все ведуть воркери. Ідемпотентно за діапазонами: вже покриті чанки не дублюються.
+    Створює ResearchRun і планує чанки (як «Збори → Додати»). Далі все ведуть
+    воркери. Ідемпотентно за діапазонами: вже покриті чанки не дублюються.
     """
     from analysis.services import stages as _stages
     t = common.resolve_task(task)
+    if t.pipeline not in _TELEZIP_RUNS:
+        raise ToolError(
+            f"{t.slug} — конвеєр {t.pipeline}, run_create збирає TeleZip і його не чіпає. "
+            + _PIPELINE_HOW.get(t.pipeline, ""))
     d_from = common.parse_date(date_from, "date_from")
     d_to = common.parse_date(date_to, "date_to")
     if d_to < d_from:
@@ -446,7 +624,7 @@ def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = Non
 @tool("events_stats", group="monitoring", params={
       "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
       "days": "Скільки останніх діб узяти.",
-      "group_by": "Розріз: day | week | month | region | task | tag:<ключ категорії> (напр. tag:importance). Ключі категорій окремим інструментом не віддаються — їх видно в адмінці, /admin/analysis/tagcategory/.",
+      "group_by": "Розріз: day | week | month | region | task | tag:<ключ категорії> (напр. tag:importance). Ключі — tag_categories.",
       "region": "Назва субʼєкта РФ або її частина (напр. Дагестан).",
       "limit": "Скільки рядків показати.",
       "review_status": "Статус аудиту подій: approved (дефолт) | pending | rejected | all."})
@@ -959,6 +1137,10 @@ def source_add(url: str, kind: str = "", task: str = "", name: str = "", region:
         raise ToolError(f"kind: очікується одне з {', '.join(dict(Source.KIND_CHOICES))}")
     reg = common.resolve_region(region) if region else None
     t = common.resolve_task(task) if task else None
+    if t is not None and t.pipeline != AnalysisTask.PIPELINE_INFOSPACE:
+        raise ToolError(
+            f"{t.slug} — конвеєр {t.pipeline}, джерела підключаються лише до infospace. "
+            + _PIPELINE_HOW.get(t.pipeline, ""))
     acc = common.resolve_account(account) if account else None
     if acc is not None and kind != Source.KIND_TELEGRAM:
         raise ToolError("акаунт має сенс лише для kind=telegram")
@@ -1009,13 +1191,17 @@ def _guess_kind(url: str) -> str:
       "active": "true — підписати/увімкнути; false — вимкнути підписку (історія лишається).",
       "priority": "Пріоритет підписки (менше = вище). 0 = не змінювати."})
 def source_subscribe(ref: str, task: str, active: bool = True, priority: int = 0):
-    """Підписати задачу на джерело (або вимкнути підписку) — `SourceSubscription`.
+    """Підписати infospace-задачу на джерело (або вимкнути підписку).
 
-    Саме підписка робить джерело «робочим» для `info_collect`. Вимкнення не
-    видаляє ні джерело, ні зібране — лише виключає з наступних зборів.
+    Лише конвеєр infospace. Підписка робить джерело «робочим» для info_collect.
+    Вимкнення не видаляє ні джерело, ні зібране.
     """
     src = common.resolve_source(ref)
     t = common.resolve_task(task)
+    if t.pipeline != AnalysisTask.PIPELINE_INFOSPACE:
+        raise ToolError(
+            f"{t.slug} — конвеєр {t.pipeline}, підписка на джерело лише для infospace. "
+            + _PIPELINE_HOW.get(t.pipeline, ""))
     sub, created = SourceSubscription.objects.get_or_create(
         task=t, source=src, defaults={"is_active": bool(active)})
     changed = []
@@ -1046,12 +1232,12 @@ def source_subscribe(ref: str, task: str, active: bool = True, priority: int = 0
 def task_create(slug: str, name: str, pipeline: str = "events", description: str = "",
                 telezip_query: str = "", languages: str = "", tag_categories: str = "",
                 display_name: str = "", is_active: bool = True):
-    """Створити дослідження (`AnalysisTask`) — власник = ти, далі воно видиме
-    лише тобі (і суперюзерам), як в адмінці.
+    """Створити задачу (`AnalysisTask`). Власник = ти; видно лише тобі і суперюзерам.
 
-    Мінімум — slug, назва і конвеєр; решту (запит, промпти, стадії) правиш
-    `task_update`, канали/джерела підключаєш `source_add`/`source_subscribe`,
-    збір запускаєш `run_create`. Промпти класифікації за замовчуванням — із коду.
+    pipeline обовʼязково розрізняй: events (події TeleZip), monitor (критика
+    в чатах), research (тематичне), infospace (полінг джерел), tgsearch
+    (пошук у чатах). Дефолт events — це не інформпростір. Відповідь каже,
+    чим цей тип збирається і яке в нього поле промпта.
     """
     import re as _re
     from analysis.models import TagCategory
@@ -1080,15 +1266,15 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
         t.tag_categories.set(cats)
     return fmt.joinsec(
         fmt.section(f"Задача #{t.id} {t.slug} створена", fmt.kv([
-            ("назва", t.name), ("конвеєр", PIPE_SHORT.get(t.pipeline, t.pipeline)),
+            ("назва", t.name), ("конвеєр", f"{t.pipeline} — {t.get_pipeline_display()}"),
             ("власник", who.user.username if who.user else "— (спільна)"),
             ("мови", ", ".join(t.languages) or "—"),
             ("категорії тегів", ", ".join(c.key for c in cats) or "—"),
             ("запит", fmt.trunc(t.telezip_query, 160) or "—"),
             ("активна", fmt.flag(t.is_active)),
         ])),
-        "Далі: task_update (промпти/стадії), source_add/source_subscribe (джерела), "
-        f"run_create task={t.slug} (збір), /admin/analysis/analysistask/{t.id}/change/")
+        _PIPELINE_HOW.get(t.pipeline, ""),
+        f"/admin/analysis/analysistask/{t.id}/change/")
 
 
 @tool("task_update", group="monitoring", mutates=True, params={
@@ -1108,7 +1294,7 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
       "geo_enabled": "Визначати регіон подій (гео-стадія). Не передавати = не змінювати.",
       "review_enabled": "Авто-аудит подій LLM після створення. Не передавати = не змінювати.",
       "dedup_window_days": "Вікно дедупу подій у днях. 0 = не змінювати.",
-      "classify_prompt": "System-промпт класифікації постів (повний текст). Порожньо = не змінювати; '-' = повернути дефолт із коду. Перед зміною подивись поточний: task_show."})
+      "classify_prompt": "Лише конвеєр events: system-промпт класифікації (поле classify_system_prompt). Порожньо = не змінювати; '-' = очистити поле. Для infospace промпт інший — info_screen_prompt, його показує task_show. Перед зміною подивись поточний: task_show."})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
                 min_subscribers: int = -1, llm_model: str = "", display_name: str = "",
@@ -1116,14 +1302,17 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 search_comments: bool = None, geo_enabled: bool = None,
                 review_enabled: bool = None, dedup_window_days: int = 0,
                 classify_prompt: str = ""):
-    """Змінити параметри задачі: збір (запит TeleZip, мови, unique, чанк), назву/опис,
-    прапорці стадій (пости/коментарі, гео, аудит), вікно дедупу, промпт класифікації.
+    """Змінити параметри задачі. classify_prompt пише лише конвеєр events.
 
-    Замикає маршрут розвідки: `tz_find(stats=true)` показав, що обсяг здоровий →
-    фіксуємо його в задачі → `run_create` збирає ним period. Старий запит
-    друкується у відповіді — щоб було куди відкотитись.
+    Який тип у задачі — перший рядок task_show. Запит TeleZip (events/monitor):
+    `tz_find(stats=true)` показав обсяг → фіксуємо тут → `run_create`. Старий
+    запит друкується у відповіді — щоб було куди відкотитись.
     """
     t = common.resolve_task(ref)
+    if classify_prompt and t.pipeline != AnalysisTask.PIPELINE_EVENTS:
+        raise ToolError(
+            f"{t.slug} — конвеєр {t.pipeline}, classify_prompt пише лише events. "
+            + _PIPELINE_HOW.get(t.pipeline, ""))
     changed = []
     if telezip_query:
         old = t.telezip_query
@@ -1177,7 +1366,12 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
     if not changed:
         return f"#{t.id} {t.slug}: нічого не змінено (жоден параметр не передано)"
     t.save()
+    follow = ""
+    if telezip_query and t.pipeline in _TELEZIP_RUNS:
+        follow = "Зібрати ним період: run_create task=" + t.slug
+    elif telezip_query:
+        follow = _PIPELINE_HOW.get(t.pipeline, "")
     return fmt.joinsec(
-        fmt.section(f"Задача #{t.id} {t.slug}", "\n".join(changed)),
+        fmt.section(f"Задача #{t.id} {t.slug} · {t.pipeline}", "\n".join(changed)),
         f"новий запит: {fmt.trunc(t.telezip_query, 300)}" if telezip_query else "",
-        "Зібрати ним період: run_create task=" + t.slug)
+        follow)

@@ -88,7 +88,8 @@ def test_parse_date_rejects_garbage():
 # --- збори ------------------------------------------------------------------
 
 def test_run_create_plans_chunks_and_is_idempotent():
-    task = TaskFactory(slug="run-task", collect_chunk_days=1)
+    task = TaskFactory(slug="run-task", collect_chunk_days=1,
+                       pipeline=AnalysisTask.PIPELINE_EVENTS)
     out = mcp_api.call("run_create", {"task": "run-task", "date_from": "2026-01-01",
                                       "date_to": "2026-01-03"})
     run = ResearchRun.objects.get()
@@ -106,7 +107,7 @@ def test_run_create_plans_chunks_and_is_idempotent():
 
 
 def test_run_create_validates_period():
-    TaskFactory(slug="v-task")
+    TaskFactory(slug="v-task", pipeline=AnalysisTask.PIPELINE_EVENTS)
     with pytest.raises(ToolError, match="раніше за"):
         mcp_api.call("run_create", {"task": "v-task", "date_from": "2026-02-01",
                                     "date_to": "2026-01-01"})
@@ -116,7 +117,8 @@ def test_run_create_validates_period():
 
 
 def test_run_cancel_drops_pending_chunks_only():
-    task = TaskFactory(slug="c-task", collect_chunk_days=1)
+    task = TaskFactory(slug="c-task", collect_chunk_days=1,
+                       pipeline=AnalysisTask.PIPELINE_EVENTS)
     mcp_api.call("run_create", {"task": "c-task", "date_from": "2026-03-01",
                                 "date_to": "2026-03-03"})
     run = ResearchRun.objects.get()
@@ -245,7 +247,8 @@ def test_account_warm_up_needs_channels(account):
 
 
 def test_task_update_changes_collection_params_and_shows_old_query():
-    task = TaskFactory(slug="q-task", telezip_query="старий запит")
+    task = TaskFactory(slug="q-task", telezip_query="старий запит",
+                       pipeline=AnalysisTask.PIPELINE_EVENTS)
     out = mcp_api.call("task_update", {"ref": "q-task", "telezip_query": "новий +(запит)",
                                        "languages": "ru,uk", "unique": True,
                                        "chunk_days": 2})
@@ -319,8 +322,24 @@ def test_source_subscribe_toggle_and_priority():
 
 # --- задачі: розширене редагування ------------------------------------------
 
+def test_infospace_is_not_treated_as_events_or_monitor():
+    TaskFactory(slug="info-only")
+    listed = mcp_api.call("tasks_list")
+    assert "infospace" in listed and "інформпр" not in listed
+    with pytest.raises(ToolError, match="classify_prompt пише лише events"):
+        mcp_api.call("task_update", {"ref": "info-only", "classify_prompt": "чужий промпт"})
+    with pytest.raises(ToolError, match="run_create збирає TeleZip"):
+        mcp_api.call("run_create", {"task": "info-only", "date_from": "2026-01-01",
+                                    "date_to": "2026-01-02"})
+    ev = TaskFactory(slug="ev-only", pipeline=AnalysisTask.PIPELINE_EVENTS)
+    src = SourceFactory()
+    with pytest.raises(ToolError, match="лише для infospace"):
+        mcp_api.call("source_subscribe", {"ref": str(src.id), "task": ev.slug})
+    assert AnalysisTask.objects.get(slug="info-only").classify_system_prompt != "чужий промпт"
+
+
 def test_task_update_extended_fields():
-    TaskFactory(slug="t-ext", description="старий")
+    TaskFactory(slug="t-ext", description="старий", pipeline=AnalysisTask.PIPELINE_EVENTS)
     out = mcp_api.call("task_update", {"ref": "t-ext", "name": "Нова назва", "description": "-",
                                        "search_comments": False, "geo_enabled": True,
                                        "dedup_window_days": 9, "classify_prompt": "Класифікуй"})
@@ -330,6 +349,35 @@ def test_task_update_extended_fields():
     assert t.classify_system_prompt == "Класифікуй" and "опис очищено" in out
     mcp_api.call("task_update", {"ref": "t-ext", "classify_prompt": "-"})
     assert AnalysisTask.objects.get(slug="t-ext").classify_system_prompt == ""
+
+
+def test_task_show_returns_every_pipeline_field_including_prompts():
+    from analysis.services.infospace.prompts import INFO_JUDGE_PROMPT
+    TaskFactory(slug="show-info", description="повний опис задачі без обрізання",
+                info_screen_prompt="МІЙ СКРІН ПРОМПТ УНІКАЛЬНИЙ",
+                info_judge_prompt="", info_tagger_prompt="")
+    out = mcp_api.call("task_show", {"ref": "show-info"})
+    assert "infospace —" in out and "[info_screen_prompt]" in out
+    assert "run_create і classify_prompt цей конвеєр не читає" in out
+    assert "МІЙ СКРІН ПРОМПТ УНІКАЛЬНИЙ" in out
+    assert "повний опис задачі без обрізання" in out
+    assert "порожньо в базі — нижче дефолт із коду" in out
+    assert "deduplication judge for a live news-event feed" in out
+    assert INFO_JUDGE_PROMPT.strip() in out
+    assert "порожньо (лише підказки категорій тегів)" in out
+    assert "Свіжість: макс. вік новини (днів)" in out
+
+    long_query = "довгий-запит-" + ("x" * 240)
+    TaskFactory(slug="show-ev", pipeline=AnalysisTask.PIPELINE_EVENTS,
+                classify_system_prompt="КЛАСИФІКУЙ ЦЕ ПОВНІСТЮ",
+                telezip_query=long_query)
+    ev = mcp_api.call("task_show", {"ref": "show-ev"})
+    assert "events —" in ev and "[classify_system_prompt]" in ev
+    assert "КЛАСИФІКУЙ ЦЕ ПОВНІСТЮ" in ev
+    assert long_query in ev
+    assert "Вікно дедупу (днів)" in ev
+    assert "Свіжість: макс. вік новини (днів)" not in ev
+    assert "deduplication judge" not in ev
 
 
 # --- події: список, картка, аудит, теги --------------------------------------
@@ -409,6 +457,59 @@ def test_event_show_and_update(events):
 def test_tag_categories_lists_examples(events):
     out = mcp_api.call("tag_categories", {"task": "ev-task"})
     assert "topic" in out and "мігранти(1)" in out and "закрита" in out
+
+
+def test_tag_category_and_tag_crud(events):
+    from analysis.models import Event, ResearchRubric, Tag, TagCategory
+    task, e1, *_ = events
+    out = mcp_api.call("tag_category_create", {
+        "key": "Importance", "label": "Важливість", "closed": True,
+        "hint": "шкала 1–5", "order": 3})
+    assert "створена" in out and "закрита" in out
+    cat = TagCategory.objects.get(key="importance")
+    assert cat.closed and cat.order == 3 and cat.hint == "шкала 1–5"
+    with pytest.raises(ToolError, match="уже є"):
+        mcp_api.call("tag_category_create", {"key": "importance", "label": "ще"})
+    mcp_api.call("tag_category_update", {"key": "importance", "closed": False, "hint": "-"})
+    cat.refresh_from_db()
+    assert cat.closed is False and cat.hint == ""
+    card = mcp_api.call("tag_category_show", {"key": "importance"})
+    assert "відкрита" in card and "підказка" in card
+
+    made = mcp_api.call("tag_create", {"category": "importance", "name": "важливість_4"})
+    assert "створено" in made
+    again = mcp_api.call("tag_create", {"category": "importance", "name": "Важливість_4"})
+    assert "уже був" in again and Tag.objects.filter(category="importance").count() == 1
+    with pytest.raises(ToolError, match="немає"):
+        mcp_api.call("tag_create", {"category": "немає", "name": "x"})
+
+    listed = mcp_api.call("tags_list", {"category": "importance", "query": "важлив"})
+    assert "важливість_4" in listed
+    mcp_api.call("tag_update", {"ref": "importance:важливість_4", "name": "важливість_5"})
+    tag = Tag.objects.get(category="importance")
+    assert tag.name == "важливість_5"
+    shown = mcp_api.call("tag_show", {"ref": str(tag.id)})
+    assert "важливість_5" in shown
+
+    e1.tags.add(tag)
+    with pytest.raises(ToolError, match="confirm=true"):
+        mcp_api.call("tag_delete", {"ref": f"#{tag.id}"})
+    gone = mcp_api.call("tag_delete", {"ref": str(tag.id), "confirm": True})
+    assert "видалено" in gone and "подій 1" in gone
+    assert not Tag.objects.filter(pk=tag.id).exists()
+    assert not e1.tags.filter(category="importance").exists()
+
+    task.tag_categories.add(cat)
+    with pytest.raises(ToolError, match="confirm=true"):
+        mcp_api.call("tag_category_delete", {"key": "importance"})
+    ResearchRubric.objects.create(task=task, tag_category="importance", tag_name="рубрика")
+    with pytest.raises(ToolError, match="рубрики"):
+        mcp_api.call("tag_category_delete", {"key": "importance", "confirm": True})
+    ResearchRubric.objects.filter(task=task).delete()
+    out = mcp_api.call("tag_category_delete", {"key": "importance", "confirm": True})
+    assert "видалено" in out and not TagCategory.objects.filter(key="importance").exists()
+    assert not task.tag_categories.filter(key="importance").exists()
+    assert Event.objects.filter(pk=e1.pk).exists()
 
 
 def test_event_add_uses_link_service(events, monkeypatch):

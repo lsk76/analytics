@@ -36,6 +36,13 @@ PERMS = {
     "events_stats": "analysis.view_event", "events_list": "analysis.view_event",
     "event_show": "analysis.view_event", "event_update": "analysis.change_event",
     "event_add": "analysis.add_event", "tag_categories": "analysis.view_tagcategory",
+    "tag_category_show": "analysis.view_tagcategory",
+    "tag_category_create": "analysis.add_tagcategory",
+    "tag_category_update": "analysis.change_tagcategory",
+    "tag_category_delete": "analysis.delete_tagcategory",
+    "tags_list": "analysis.view_tag", "tag_show": "analysis.view_tag",
+    "tag_create": "analysis.add_tag", "tag_update": "analysis.change_tag",
+    "tag_delete": "analysis.delete_tag",
     "channels_find": "analysis.view_channel", "channel_add": "analysis.add_channel",
     "channel_update": "analysis.change_channel",
     # --- TeleZip: розвідка для задач
