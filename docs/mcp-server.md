@@ -278,7 +278,8 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 |------------|-----------|-----------|
 | `service_health` | стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація | — |
 | `service_queues` | черги детально: стадії×задачі, застряглі claim'и, свіжі помилки | task='', stage='', errors=3 |
-| `settings_list` | key-value налаштування (`Setting`) | prefix='' |
+| `settings_list` | key-value налаштування (`Setting`); довгий текст обрізаний | prefix='' |
+| `setting_show` | повне значення одного ключа (промпт, прапорець) | key |
 | `setting_set` **[пише]** | записати налаштування | key, value, description='' |
 | `publish_status` | профілі публікації + останні публікації (зведення) | limit=10 |
 | `publish_config_show` | картка профілю публікації: канал, режим, відбір, лічильники | ref |
@@ -373,6 +374,8 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `task_create` **[пише]** | створити задачу і одразу поля етапів (ті самі імена, що в task_update / task_show) | slug, name, pipeline + поля форми цього конвеєра |
 | `task_update` **[пише]** | будь-яке поле етапу з картки `task_show` (ім'я параметра = ім'я в дужках). Чуже для конвеєра поле відхиляється. Аліаси: `classify_prompt`, `unique`, `chunk_days`, `min_subscribers` | ref + поля форми задачі для її конвеєра |
 | `task_show` | картка задачі: зібраний промпт LLM, поля конвеєра, блок «Щоб запустити, бракує» (чати, рубрики, джерела, запит) | ref |
+| `prompt_try` **[пише]** | проба скрін-промпта infospace на кількох постах із текстом: вердикт і теги, у БД не пише і чернетку не зберігає. Кожен пост — виклик LLM, стеля 8 | task, limit=3, posts='', days=14, date_from, date_to, only_with_event=true, info_screen_prompt='', info_tagger_prompt='' |
+| `posts_retag` **[пише]** | перетегувати вже зібрані події поточним збереженим промптом (лише теги категорій задачі; події не видаляє). confirm=false лише рахує. Стелі 25; повтор із тими самими датами бере ті самі найсвіжіші | task, limit=5, days=14, date_from, date_to, posts='', confirm=false |
 | `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
 | `run_show` | збір детально (аналог «Збори → Статус») | run_id |
 | `run_create` **[пише]** | запустити збір за період (планує чанки) | task, date_from, date_to, chunk_days=0, title='' |
@@ -416,7 +419,9 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 «акаунт не резолвить»       account_spam_check → (limited?) account_warm_up → account_jobs
 «джерело не оновлюється»    sources_list(problems_only) → source_update(poll_now) → worker_once(info_collect)
 «зібрати період»            run_create → run_show → (ready) events_stats
-«поміняти промпт»           settings_list → setting_set → service_restart(worker-…)
+«поміняти промпт»           task_show → prompt_try (чернетка) → task_update
+                            → posts_retag(confirm=false) → posts_retag(confirm=true, limit=…)
+                            глобальне Setting: settings_list → setting_show → setting_set
 «новий запит до TeleZip»    tz_find(stats=true) → tz_find (тексти)
                             → task_update → run_create
 «хто пише про тему»         tz_channels(term=…) → chats_list/chat_update
@@ -460,6 +465,11 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 - **`tz_find` віддає максимум 10 000 за виклик** (`page_size` — максимум 1000).
   Якщо віддано рівно стільки — вибірку ОБРІЗАЛО: ділити вікно навпіл і качати
   половини (дешевше за сторінки: 20 тис. = 4 виклики проти 20).
+- **Перетегування infospace — `prompt_try`, потім `posts_retag`.** Повний скид
+  постів у `info_collected` (`rescreen_task_now`) видаляє всі події задачі й
+  кличе LLM на кожен пост; у MCP його немає. Ретеншн уже вирізав тексти
+  нерелевантних done старші за `info_retention_days` — їх перепрогнати нічим.
+  `posts_retag` міняє лише теги категорій задачі, стеля 25 подій за виклик.
 - **Нові інструменти пиши в Django-шарі**, не в `server.py`: host бере їх із
   маніфесту автоматично. Докстрінг першим абзацом — це опис, який бачить
   модель; параметри анотуй типами (`str`/`int`/`float`/`bool`) — з них

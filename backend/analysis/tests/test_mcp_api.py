@@ -692,3 +692,126 @@ def test_published_list_and_show():
         mcp_api.call("published_list", {"status": "bogus"})
     out = mcp_api.call("published_show", {"ref": str(p1.id)})
     assert "Пост про бійку" in out and "t.me/c/1234567890/42" in out
+
+
+# --- промпти й налаштування -------------------------------------------------
+
+def test_setting_show_returns_full_value():
+    long = "ПРАВИЛО " + ("а" * 200)
+    Setting.objects.create(key="digest_report_prompt", value=long, description="промпт")
+    listed = mcp_api.call("settings_list", {"prefix": "digest_report"})
+    assert "…" in listed
+    shown = mcp_api.call("setting_show", {"key": "digest_report_prompt"})
+    assert long in shown
+    with pytest.raises(ToolError, match="немає"):
+        mcp_api.call("setting_show", {"key": "нема_такого"})
+
+
+def _info_post(task, url, text, event, posted_at, **kw):
+    from analysis.models import Post
+    return Post.objects.create(
+        task=task, url=url, text=text, title="заголовок", event=event,
+        stage=Post.STAGE_DONE, is_relevant=True, posted_at=posted_at, **kw)
+
+
+def test_prompt_try_does_not_save_draft_or_touch_posts(monkeypatch):
+    from analysis.models import Event, Tag, TagCategory
+    task = TaskFactory(slug="info-try", info_tagger_prompt="СТАРЕ ПРАВИЛО",
+                       pipeline=AnalysisTask.PIPELINE_INFOSPACE)
+    cat = TagCategory.objects.create(key="topic", label="Тема", closed=True)
+    task.tag_categories.add(cat)
+    old = Tag.objects.create(name="тиха", category="topic")
+    now = timezone.now()
+    ev = Event.objects.create(task=task, event_date=now.date(), summary="стара",
+                              review_status="approved")
+    ev.tags.add(old)
+    post = _info_post(task, "https://ex.org/1", "Текст новини про тиск.", ev, now,
+                      classification={"tags": {"topic": ["тиха"]}, "summary": "стара"})
+    seen = {}
+
+    async def _fake(posts, system, model, api_key=None):
+        seen["system"] = system
+        seen["ids"] = [p.id for p in posts]
+        return {p.id: ({"relevant": True, "reason": "бо правило",
+                        "tags": {"topic": ["гучна"]}}, False) for p in posts}
+
+    monkeypatch.setattr("analysis.services.infospace.stages._llm_screen", _fake)
+    out = mcp_api.call("prompt_try", {
+        "task": "info-try", "limit": 3,
+        "info_tagger_prompt": "ЧЕРНЕТКА УНІКАЛЬНА",
+    })
+    task.refresh_from_db()
+    post.refresh_from_db()
+    assert task.info_tagger_prompt == "СТАРЕ ПРАВИЛО"
+    assert post.classification["tags"] == {"topic": ["тиха"]}
+    assert "ЧЕРНЕТКА УНІКАЛЬНА" in seen["system"]
+    assert seen["ids"] == [post.id]
+    assert "гучна" in out and "тиха" in out and "не збережено" in out
+    assert list(ev.tags.values_list("name", flat=True)) == ["тиха"]
+
+
+def test_prompt_try_rejects_other_pipeline_and_huge_limit():
+    TaskFactory(slug="ev-try", pipeline=AnalysisTask.PIPELINE_EVENTS)
+    with pytest.raises(ToolError, match="лише infospace"):
+        mcp_api.call("prompt_try", {"task": "ev-try"})
+    task = TaskFactory(slug="info-cap", pipeline=AnalysisTask.PIPELINE_INFOSPACE)
+    with pytest.raises(ToolError, match="1\\.\\.8"):
+        mcp_api.call("prompt_try", {"task": task.slug, "limit": 100})
+
+
+def test_posts_retag_updates_tags_only(monkeypatch):
+    from datetime import timedelta
+    from analysis.models import Event, Post, Tag, TagCategory
+    task = TaskFactory(slug="info-retag", info_tagger_prompt="ПРАВИЛО ГУЧНА",
+                       pipeline=AnalysisTask.PIPELINE_INFOSPACE)
+    topic = TagCategory.objects.create(key="loud", label="Гучність", closed=True)
+    task.tag_categories.add(topic)
+    quiet = Tag.objects.create(name="тиха", category="loud")
+    loud = Tag.objects.create(name="гучна", category="loud")
+    place = Tag.objects.create(name="Якутськ", category="settlement")
+    now = timezone.now()
+    ev = Event.objects.create(task=task, event_date=now.date(), summary="опис лишається",
+                              review_status="approved")
+    ev.tags.add(quiet, place)
+    older = _info_post(task, "https://ex.org/old", "Ранній текст.", ev,
+                       now - timedelta(hours=2),
+                       classification={"summary": "опис лишається", "tags": {"loud": ["тиха"]}})
+    newer = _info_post(task, "https://ex.org/new", "Пізніший текст.", ev, now)
+    stale = Event.objects.create(task=task, event_date=now.date() - timedelta(days=40),
+                                 summary="стара подія", review_status="approved")
+    stale.tags.add(quiet)
+    _info_post(task, "https://ex.org/stale", "Давній текст.", stale,
+               now - timedelta(days=40))
+    called = []
+
+    async def _fake(posts, system, model, api_key=None):
+        called.append([p.id for p in posts])
+        return {p.id: ({"relevant": False, "reason": "перетег",
+                        "tags": {"loud": ["гучна", "немаєтакого"]}}, False)
+                for p in posts}
+
+    monkeypatch.setattr("analysis.services.infospace.stages._llm_screen", _fake)
+
+    preview = mcp_api.call("posts_retag", {"task": "info-retag", "limit": 5, "days": 14})
+    assert "LLM не викликався" in preview and called == []
+    assert set(ev.tags.values_list("name", flat=True)) == {"Якутськ", "тиха"}
+
+    out = mcp_api.call("posts_retag", {"task": "info-retag", "limit": 5, "days": 14,
+                                       "confirm": True})
+    assert called == [[older.id]]          # голова події, не пізніший і не стара
+    ev.refresh_from_db()
+    older.refresh_from_db()
+    newer.refresh_from_db()
+    stale.refresh_from_db()
+    assert set(ev.tags.values_list("name", flat=True)) == {"гучна", "Якутськ"}
+    assert ev.summary == "опис лишається"
+    assert older.stage == Post.STAGE_DONE and older.is_relevant is True
+    assert older.classification["tags"] == {"loud": ["гучна"]}
+    assert "не релевантний" in out and "відкинуто" in out
+    assert set(stale.tags.values_list("name", flat=True)) == {"тиха"}
+    assert newer.classification == {} or "tags" not in (newer.classification or {})
+    assert loud.name == "гучна"
+    called.clear()
+    old = mcp_api.call("posts_retag", {"task": "info-retag", "confirm": True,
+                                       "date_to": "2020-01-01"})
+    assert called == [] and "Нічого перетегувати" in old

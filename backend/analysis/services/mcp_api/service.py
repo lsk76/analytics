@@ -7,7 +7,7 @@ from django.utils import timezone
 from analysis.models import (AnalysisTask, CollectChunk, Event, Post, PublishConfig,
                              PublishedEvent, ResearchRun, Setting, Source)
 from analysis.services.mcp_api import common, fmt, registry
-from analysis.services.mcp_api.registry import SCOPE_ADMIN, tool
+from analysis.services.mcp_api.registry import SCOPE_ADMIN, ToolError, tool
 
 TERMINAL = (Post.STAGE_DONE, Post.STAGE_FAILED)
 NON_TERMINAL = [s for s, _ in Post.STAGE_CHOICES if s not in TERMINAL]
@@ -237,7 +237,10 @@ def service_queues(task: str = "", stage: str = "", errors: int = 3):
 @tool("settings_list", group="service", params={
       "prefix": "Показати лише ключі, що містять цей текст."})
 def settings_list(prefix: str = ""):
-    """Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою."""
+    """Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.
+
+    Довге значення тут обрізане. Повний текст одного ключа — `setting_show`.
+    """
     qs = Setting.objects.all()
     if prefix:
         qs = qs.filter(key__icontains=prefix)
@@ -247,6 +250,23 @@ def settings_list(prefix: str = ""):
             for s in qs.order_by("key")]
     return fmt.table(["ключ", "опис", "симв.", "значення", "оновлено"], rows) \
         if rows else "налаштувань немає"
+
+
+@tool("setting_show", group="service", params={
+      "key": "Точний ключ (як у settings_list), напр. digest_report_prompt."})
+def setting_show(key: str):
+    """Повне значення одного Setting. Список із обрізаним текстом — settings_list."""
+    key = (key or "").strip()
+    obj = Setting.objects.filter(key=key).first()
+    if obj is None:
+        raise ToolError(f"налаштування «{key}» немає. Список ключів: settings_list.")
+    value = common.mask_setting(obj.key, obj.value)
+    return fmt.joinsec(fmt.kv([
+        ("ключ", obj.key),
+        ("опис", obj.description or ""),
+        ("символів", len(obj.value or "")),
+        ("оновлено", fmt.ago(obj.updated_at)),
+    ]), value or "(порожньо — код бере дефолт)")
 
 
 @tool("setting_set", mutates=True, group="service", scope=SCOPE_ADMIN, params={
