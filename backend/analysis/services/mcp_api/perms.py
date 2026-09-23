@@ -24,7 +24,7 @@ PERMS = {
     "account_jobs": "accounts.view_warmupjob",
     "account_repair": C_ACC, "account_spam_check": C_ACC, "account_update": C_ACC,
     "account_warm_up": C_ACC, "account_import": A_ACC, "account_import_batch": A_ACC,
-    "proxies_list": V_ACC, "proxy_check": C_ACC,
+    "proxies_list": "accounts.view_proxy", "proxy_check": "accounts.change_proxy",
     # --- задачі, збори, чати, джерела, події, довідник
     "tasks_list": V_TASK, "task_show": V_TASK, "task_update": "analysis.change_analysistask",
     "task_create": "analysis.add_analysistask",

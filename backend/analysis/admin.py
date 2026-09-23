@@ -65,6 +65,20 @@ from .multiselect_filter import (
     multiselect_filter, autocomplete_filter, MultiSelectFilter,
 )
 
+class ScopedAdminMixin:
+    """Видимість рядків в адмінці = правило з `analysis/services/access.py`.
+
+    Те саме правило застосовує MCP (`mcp_api/common.scope`), тож «що бачу в
+    адмінці» і «що бачу через асистента» більше не можуть розійтися. Django
+    бере об'єкт сторінки з get_queryset, тож чужий id → 404 і на перегляді, і
+    на зміні, і на видаленні.
+    """
+
+    def get_queryset(self, request):
+        from analysis.services import access
+        return access.visible(super().get_queryset(request), request.user)
+
+
 # --- reusable filter widgets (pso-style) -----------------------------------
 TaskFilter = multiselect_filter(AnalysisTask, "Задача", "task", ordering="name")
 
@@ -317,7 +331,7 @@ def study_from_changelist_filters(request):
     return int(tid) if tid and str(tid).isdigit() else None
 
 
-class StudyOwnedAdminMixin:
+class StudyOwnedAdminMixin(ScopedAdminMixin):
     """Список сутностей, що належать дослідженню (підписки, чати, збори):
     коли дослідження обране (?task__id__exact=), колонка «Дослідження» зникає —
     її показує панель зверху. Стокове «Видалити» прибране: замість нього
@@ -448,7 +462,7 @@ class FastDeleteAdminMixin:
 
 
 @admin.register(ResearchRun)
-class ResearchRunAdmin(admin.ModelAdmin):
+class ResearchRunAdmin(ScopedAdminMixin, admin.ModelAdmin):
     list_display = ("__str__", "task", "date_from", "date_to", "status",
                     "chunk_progress", "stage_progress", "posts_collected", "created_at")
     list_filter = (StudyTaskFilter, "status")
@@ -699,7 +713,7 @@ class ResearchRunAdmin(admin.ModelAdmin):
 
 
 @admin.register(CollectChunk)
-class CollectChunkAdmin(admin.ModelAdmin):
+class CollectChunkAdmin(ScopedAdminMixin, admin.ModelAdmin):
     list_display = ("task", "date_from", "date_to", "status", "attempts",
                     "posts_collected", "finished_at")
     list_filter = ("task", "status")
@@ -722,20 +736,11 @@ class SettingAdmin(admin.ModelAdmin):
     readonly_fields = ("updated_at",)
 
 
-class OwnedAdminMixin:
-    """Ізоляція по власнику (owner): не-суперюзер бачить/редагує в адмінці лише
-    свої рядки; owner авто-ставиться на створенні й не редагується. Суперюзер
-    бачить усе, може призначати owner і фільтрувати за ним.
-
-    Об'єктний доступ (перегляд/зміна/видалення однієї сторінки) теж обмежений —
-    Django бере об'єкт через get_queryset, тож чужий id → 404."""
+class OwnedAdminMixin(ScopedAdminMixin):
+    """Власник (owner) авто-ставиться на створенні й не редагується; суперюзер
+    може призначати owner і фільтрувати за ним. Саму ВИДИМІСТЬ дає
+    ScopedAdminMixin (правило — в services/access.py)."""
     owner_field = "owner"
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(**{self.owner_field: request.user})
 
     def save_model(self, request, obj, form, change):
         if not request.user.is_superuser:
@@ -828,7 +833,7 @@ class OwnedConfigListFilter(admin.RelatedFieldListFilter):
 
 
 @admin.register(PublishedEvent)
-class PublishedEventAdmin(admin.ModelAdmin):
+class PublishedEventAdmin(ScopedAdminMixin, admin.ModelAdmin):
     list_display = ("id", "config", "event", "status", "ai_verdict",
                     "tg_message_id", "published_at", "attempts", "created_at")
     list_filter = ("status", "ai_verdict", ("config", OwnedConfigListFilter))
@@ -837,13 +842,6 @@ class PublishedEventAdmin(admin.ModelAdmin):
                        "tg_message_id", "published_at", "attempts", "locked_at",
                        "error", "created_at")
     actions = ("requeue",)
-
-    def get_queryset(self, request):
-        # Ізоляція: не-суперюзер бачить лише публікації СВОЇХ профілів (config__owner).
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(config__owner=request.user)
 
     @admin.action(description="Перечергувати (видалити рядок — воркер обробить наново)")
     def requeue(self, request, queryset):
@@ -1418,7 +1416,7 @@ class SourceHealthFilter(admin.SimpleListFilter):
 
 
 @admin.register(Source)
-class SourceAdmin(admin.ModelAdmin):
+class SourceAdmin(ScopedAdminMixin, admin.ModelAdmin):
     """Довідник джерел infospace: health, розклад полінгу, дії."""
     list_select_related = ("channel", "channel__region_subject")
     list_display = ("name_col", "kind", "directory_link", "region_col", "health_badge", "posts_24h",
@@ -2162,7 +2160,7 @@ class EstimatedCountPaginator(Paginator):
 
 
 @admin.register(Post)
-class PostAdmin(admin.ModelAdmin):
+class PostAdmin(ScopedAdminMixin, admin.ModelAdmin):
     # Default model ordering is `posted_at` (unindexed) → full-sort of millions of
     # rows on every unfiltered changelist. Order by the PK (indexed) instead for an
     # instant default load; column headers still let you sort by posted_at on demand.
@@ -2375,7 +2373,7 @@ class PostAdmin(admin.ModelAdmin):
 
 
 @admin.register(Event)
-class EventAdmin(admin.ModelAdmin):
+class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
     change_form_template = "admin/analysis/event/change_form.html"
     list_display = ("event_date", "review_badge",
                     "region_subject",
@@ -3368,10 +3366,8 @@ class EventAdmin(admin.ModelAdmin):
         from django.contrib.postgres.aggregates import StringAgg
         from django.db.models import Case, CharField, Max, Value, When
         from django.db.models.functions import Concat
+        # видимість (події СВОЇХ задач) — ScopedAdminMixin/services.access
         qs = super().get_queryset(request).prefetch_related("posts__channel", "tags")
-        # Ізоляція: не-суперюзер бачить лише події СВОЇХ задач (Event.task__owner).
-        if not request.user.is_superuser:
-            qs = qs.filter(task__owner=request.user)
         # Ключ сортування колонки «Теги»: важливість_N спереду (домінує), далі всі
         # інші теги за абеткою. Події без важливості («яяя») — у кінець (ASC).
         # StringAgg — Postgres; агрегати всередині Concat → GROUP BY по події.

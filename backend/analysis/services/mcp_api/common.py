@@ -179,49 +179,42 @@ def pollable_source_ids():
 
 
 # --------------------------------------------------------------------------- видимість
-# Те саме розмежування, що й в адмінці: суперюзер бачить усе, решта — свої
-# задачі (`owner`) і свої або спільні Telegram-акаунти (`visible_to`). Інакше
-# мережевий MCP став би дірою в обхід адмінки.
+# Правило видимості одне на всю систему — `analysis/services/access.py`; тут
+# лише застосування для поточного викликача MCP. Раніше фільтри жили й тут, і
+# в адмінці окремо — і розходились (MCP ховав чужі збори, адмінка показувала).
+
+def _who():
+    from analysis.services.mcp_api.registry import actor
+    return actor()
+
+
+def scope(qs):
+    """Вибірка, звужена до видимого поточному викликачу (будь-яка модель)."""
+    from analysis.services import access
+    who = _who()
+    return access.visible(qs, who.user, unrestricted=who.unrestricted)
+
 
 def scope_tasks(qs):
-    from analysis.services.mcp_api.registry import actor
-    who = actor()
-    return qs if who.is_superuser else qs.filter(owner=who.user)
+    return scope(qs)
 
 
 def scope_by_task(qs, field="task"):
-    """Вибірка об'єктів, що належать задачам (чати, підписки, збори, події)."""
-    from analysis.services.mcp_api.registry import actor
-    who = actor()
-    return qs if who.is_superuser else qs.filter(**{f"{field}__owner": who.user})
+    """Об'єкти, що належать задачам (чати, підписки, збори, події, пости)."""
+    return scope(qs)
 
 
 def scope_accounts(qs):
-    from analysis.services.mcp_api.registry import actor
-    who = actor()
-    return qs if who.is_superuser else qs.visible_to(who.user)
+    return scope(qs)
 
 
 def scope_proxies(qs):
-    """Проксі, з якими користувач має справу: вільні або призначені його акаунтам.
-
-    Чужу проксі не можна ні побачити, ні «полагодити» (`proxy_check` лагодить
-    сесії реальних акаунтів на ній), а вільну — можна призначити своєму акаунту.
-    """
-    from django.db.models import Q
-    from accounts.models import TelegramAccount
-    from analysis.services.mcp_api.registry import actor
-    who = actor()
-    if who.is_superuser:
-        return qs
-    mine = TelegramAccount.objects.visible_to(who.user).values("proxy_id")
-    return qs.filter(Q(accounts__isnull=True) | Q(id__in=mine)).distinct()
+    return scope(qs)
 
 
 def scope_jobs(qs):
-    """Завдання акаунтів (прогрів, тест-бот) — лише по видимих акаунтах."""
-    from accounts.models import TelegramAccount
-    return qs.filter(account__in=scope_accounts(TelegramAccount.objects))
+    """Завдання акаунтів (прогрів, тест-бот) — за видимістю акаунта."""
+    return scope(qs)
 
 
 def mask_proxy(proxy_string: str) -> str:

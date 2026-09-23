@@ -29,6 +29,12 @@
   Telegram «руками» акаунтів — `tg_*` (`mcp_api/telegram.py` → `ManagedAccount.tg()` →
   gateway `accounts/gateway/_tg_tools.py`): нову операцію додавай у `_tg_tools.OPS`
   і рестартуй `tg-gateway`; надсилання — `mcp:admin`.
+- **Хто що бачить — ОДНЕ місце: `analysis/services/access.py`** (`RULES`:
+  модель → правило, `PUBLIC` = спільний довідник). Адмінка бере його через
+  `ScopedAdminMixin`, MCP — через `mcp_api.common.scope`; свій фільтр
+  `owner=request.user` у ModelAdmin писати не можна (є тест). Права розділів —
+  `mcp_api/perms.py`: інструмент → `app.codename`, те саме право, що пускає в
+  розділ адмінки.
 - **Доступ інших людей до MCP — лише через мережевий режим на проді**
   (`manage.py run_mcp_server`, застосунок `mcpauth`): OAuth + Django-юзери +
   ролі (reader/operator/admin) + аудит. Видимість даних там ТАКА САМА, як в

@@ -370,7 +370,7 @@
   "group": "accounts",
   "mutates": false,
   "scope": "mcp:read",
-  "perm": "accounts.view_telegramaccount",
+  "perm": "accounts.view_proxy",
   "doc": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
   "summary": "Пул проксі: хто живий, скільки збоїв, кому призначені.",
   "params": [
@@ -395,7 +395,7 @@
   "group": "accounts",
   "mutates": true,
   "scope": "mcp:write",
-  "perm": "accounts.change_telegramaccount",
+  "perm": "accounts.change_proxy",
   "doc": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).\n\nref — id/частина рядка, або `all` / `broken`. repair=False — лише діагноз.",
   "summary": "Перевірити проксі наживо; при збої — спробувати нову sticky-сесію (як воркер).",
   "params": [

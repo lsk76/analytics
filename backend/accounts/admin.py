@@ -86,14 +86,12 @@ class AccountTagFilter(MultiSelectFilter):
 
 
 class AccountVisibilityAdminMixin:
-    """Боти/завдання видно лише тим, кому видно їхній акаунт
-    (TelegramAccountQuerySet.visible_to: суперюзер — усі, решта — свої + без власника)."""
+    """Боти/завдання видно лише тим, кому видно їхній акаунт. Правило —
+    `analysis/services/access.py` (те саме застосовує MCP)."""
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        return qs.filter(account__in=TelegramAccount.objects.visible_to(request.user))
+        from analysis.services import access
+        return access.visible(super().get_queryset(request), request.user)
 
 
 class VisibleAccountListFilter(admin.RelatedFieldListFilter):
@@ -114,7 +112,7 @@ class AccountTagAdmin(admin.ModelAdmin):
 
 
 @admin.register(Proxy)
-class ProxyAdmin(admin.ModelAdmin):
+class ProxyAdmin(AccountVisibilityAdminMixin, admin.ModelAdmin):
     list_display = ("proxy_string", "proxy_type", "is_active", "is_working", "fail_count",
                     "last_tested_at")
     list_filter = ("proxy_type", "is_active", "is_working")
@@ -303,7 +301,8 @@ class TelegramAccountAdmin(admin.ModelAdmin):
     # (вони беруть акаунт через _get_account / self.get_queryset), і autocomplete
     # tg_account в адмінці analysis.
     def get_queryset(self, request):
-        return super().get_queryset(request).visible_to(request.user)
+        from analysis.services import access
+        return access.visible(super().get_queryset(request), request.user)
 
     def _get_account(self, request, account_id):
         return get_object_or_404(self.get_queryset(request), pk=account_id)
