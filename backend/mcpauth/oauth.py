@@ -23,7 +23,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from .models import (McpAuthCode, McpAuthRequest, McpClient, McpRole, McpToken,
                      new_secret, sha256)
-from .policy import ACCESS_TTL, REFRESH_TTL, REQUEST_TTL, granted_scopes  # noqa: F401
+from .policy import (ACCESS_TTL, ALL_SCOPES, REFRESH_TTL, REQUEST_TTL,  # noqa: F401
+                     granted_scopes)
 
 
 def consent_url(key: str) -> str:
@@ -45,7 +46,7 @@ def _client_to_sdk(row: McpClient) -> OAuthClientInformationFull:
         redirect_uris=row.redirect_uris or [],
         grant_types=row.grant_types or ["authorization_code", "refresh_token"],
         response_types=["code"],
-        scope=row.scope or "mcp:read",
+        scope=row.scope or " ".join(ALL_SCOPES),
         token_endpoint_auth_method="client_secret_post" if row.client_secret else "none",
     )
 
