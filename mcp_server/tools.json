@@ -796,8 +796,8 @@
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_event",
-  "doc": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
-  "summary": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
+  "doc": "Картка події: id події, опис, регіон, усі теги, аудит, пости-джерела.\n\nУ таблиці постів колонка id — id поста. Його передають у `prompt_try` і\n`posts_retag` (параметр posts).",
+  "summary": "Картка події: id події, опис, регіон, усі теги, аудит, пости-джерела.",
   "params": [
    {
     "name": "ref",
@@ -888,7 +888,7 @@
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_event",
-  "doc": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,\nрегіон, теги (фасети), канал, кількість каналів, охоплення.\n\nДефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;\n`review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).\nКатегорії тегів для фільтра `tag` — `tag_categories`; id події — для\n`event_show`/`event_update`.",
+  "doc": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,\nрегіон, теги (фасети), канал, кількість каналів, охоплення.\n\nДефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;\n`review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).\nКатегорії тегів для фільтра `tag` — `tag_categories`.\nКолонка id — подія (`event_show` / `event_update`). Колонка пост — id\nнайранішого поста цієї події (`prompt_try` / `posts_retag`, параметр posts).",
   "summary": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту, регіон, теги (фасети), канал, кількість каналів, охоплення.",
   "params": [
    {
@@ -1040,6 +1040,172 @@
     "type": "str",
     "doc": "Статус аудиту подій: approved (дефолт) | pending | rejected | all.",
     "default": "approved",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "post_show",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_post",
+  "doc": "Картка поста: текст, стадія, помилка, класифікація, теги, подія, посилання.",
+  "summary": "Картка поста: текст, стадія, помилка, класифікація, теги, подія, посилання.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Id поста (з posts_list або з колонки пост у events_list).",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "posts_list",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_post",
+  "doc": "Список зібраних постів: id, стадія, релевантність, подія, уривок тексту.\n\nБез task, event або posts інструмент не стартує — інакше це сканування\nвсієї таблиці. Повний текст і класифікація — `post_show`.",
+  "summary": "Список зібраних постів: id, стадія, релевантність, подія, уривок тексту.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача: id, slug або частина назви. Порожньо лише якщо задано event або posts.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "event",
+    "type": "str",
+    "doc": "Id подій через кому — пости цих подій.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stage",
+    "type": "str",
+    "doc": "Стадія конвеєра (collected, info_collected, done, failed, …). Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "Пости не старші за стільки діб. 0 = без обмеження. Ігнорується, якщо задано id постів/подій і немає дат.",
+    "default": 14,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Дата публікації від, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Дата публікації до, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "relevant",
+    "type": "str",
+    "doc": "yes | no | unknown. Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "has_event",
+    "type": "str",
+    "doc": "yes — лише вже на події; no — без події. Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Текст поста містить цей рядок.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки рядків (1..40).",
+    "default": 20,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "posts_requeue",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_analysistask",
+  "doc": "Повернути названі пости в чергу їхнього конвеєра.\n\nПотрібен posts або events. Усю задачу одним викликом не скинути.\nПости, вже привʼязані до події, без drop_events=true лишаються на місці:\nінакше скрін створив би другу подію. Для infospace оновити лише теги,\nне чіпаючи подію, — `posts_retag`. confirm=false нічого не пише.",
+  "summary": "Повернути названі пости в чергу їхнього конвеєра.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача, чиї пости повертаємо. id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "events",
+    "type": "str",
+    "doc": "Id подій через кому — усі їхні пости. Разом із posts це обʼєднання.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stage",
+    "type": "str",
+    "doc": "Куди повернути. Порожньо = початок обробки цього конвеєра (infospace: info_collected, events: collected, monitor: mon_filtered).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "drop_events",
+    "type": "bool",
+    "doc": "Пости, що вже на події, без цього не чіпаються: скидання стадії народило б другі події. true = відчепити і видалити подію, якщо постів на ній не лишилось. Опубліковану подію не видаляє.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "false = лише показати, що буде. true = повернути в чергу.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Стеля вибірки (1..50). Більше за стелю — відмова, не обрізання.",
+    "default": 20,
     "required": false
    }
   ]

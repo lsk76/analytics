@@ -395,6 +395,9 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
 | `events_list` | список подій із фільтрами адмінки; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
 | `event_show` | картка події: id, опис, регіон, теги, аудит, пости-джерела з id поста | ref |
+| `posts_list` | зібрані пости задачі: id, стадія, релевантність, подія, уривок. Потрібен task, event або posts | task, event, posts, stage, days=14, date_from, date_to, relevant, has_event, query, limit=20 |
+| `post_show` | картка поста: текст, класифікація, помилка стадії, теги, посилання | ref |
+| `posts_requeue` **[пише]** | повернути названі пости (або пости названих подій) у чергу конвеєра. confirm=false лише показує. Пости на події — лише з drop_events=true; стеля 50, усю задачу не скидає | task, posts, events, stage, drop_events=false, confirm=false, limit=20 |
 | `event_update` **[пише]** | схвалити / відхилити / повернути в чергу (= дії адмінки), теги `кат:тег` (+/−), регіон, нас. пункт, дата, опис, нотатка аудиту | ref, review, notes, add_tags, remove_tags, region, settlement, event_date, summary |
 | `event_add` **[пише]** | подія за посиланням (= «Додати подію» в адмінці: fetch → скрін-промпт → Event approved; виклик LLM) | task, url |
 | `tag_categories` | категорії тегів (закриті/відкриті) з прикладами — для `tag=` і `add_tags=` | task='' |
@@ -465,6 +468,10 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 - **`tz_find` віддає максимум 10 000 за виклик** (`page_size` — максимум 1000).
   Якщо віддано рівно стільки — вибірку ОБРІЗАЛО: ділити вікно навпіл і качати
   половини (дешевше за сторінки: 20 тис. = 4 виклики проти 20).
+- **Пости і точковий перепрогін — `posts_list` / `post_show` / `posts_requeue`.**
+  Усю задачу в чергу цей інструмент не скидає. Пост, що вже на події, без
+  `drop_events=true` не чіпається: інакше скрін створив би другу подію.
+  Опубліковану подію видалення не зачіпає.
 - **Перетегування infospace — `prompt_try`, потім `posts_retag`.** Повний скид
   постів у `info_collected` (`rescreen_task_now`) видаляє всі події задачі й
   кличе LLM на кожен пост; у MCP його немає. Ретеншн уже вирізав тексти

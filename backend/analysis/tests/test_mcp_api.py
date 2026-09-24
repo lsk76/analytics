@@ -821,3 +821,55 @@ def test_posts_retag_updates_tags_only(monkeypatch):
     old = mcp_api.call("posts_retag", {"task": "info-retag", "confirm": True,
                                        "date_to": "2020-01-01"})
     assert called == [] and "Нічого перетегувати" in old
+
+
+def test_posts_list_show_and_requeue():
+    from analysis.models import Event, Post
+    task = TaskFactory(slug="info-posts", pipeline=AnalysisTask.PIPELINE_INFOSPACE)
+    now = timezone.now()
+    ev = Event.objects.create(task=task, event_date=now.date(), summary="жива",
+                              review_status="approved", post_count=2)
+    linked = Post.objects.create(
+        task=task, event=ev, url="https://ex.org/a", text="ПОВНИЙ ТЕКСТ ПОСТА",
+        stage=Post.STAGE_DONE, is_relevant=True, posted_at=now,
+        classification={"screen_reason": "бо тема", "tags": {"loud": ["гучна"]}})
+    mate = Post.objects.create(
+        task=task, event=ev, url="https://ex.org/b", text="другий пост події",
+        stage=Post.STAGE_DONE, is_relevant=True, posted_at=now)
+    loose = Post.objects.create(
+        task=task, url="https://ex.org/c", text="відсіяний без події",
+        stage=Post.STAGE_FAILED, is_relevant=False, posted_at=now,
+        stage_error="info_screen: битий JSON")
+    with pytest.raises(ToolError, match="завелика"):
+        mcp_api.call("posts_list", {})
+    listed = mcp_api.call("posts_list", {"task": "info-posts", "days": 0, "has_event": "no"})
+    assert f"#{loose.id}" in listed and "битий JSON" in listed and f"#{linked.id}" not in listed
+    shown = mcp_api.call("post_show", {"ref": str(linked.id)})
+    assert "ПОВНИЙ ТЕКСТ ПОСТА" in shown and "бо тема" in shown and f"#{ev.id}" in shown
+
+    preview = mcp_api.call("posts_requeue", {"task": "info-posts", "posts": str(loose.id)})
+    loose.refresh_from_db()
+    assert "confirm=false" in preview and loose.stage == Post.STAGE_FAILED
+
+    blocked = mcp_api.call("posts_requeue", {"task": "info-posts", "events": str(ev.id),
+                                            "confirm": True})
+    linked.refresh_from_db()
+    assert "drop_events" in blocked and linked.event_id == ev.id
+
+    out = mcp_api.call("posts_requeue", {"task": "info-posts", "posts": str(loose.id),
+                                        "confirm": True})
+    loose.refresh_from_db()
+    assert loose.stage == Post.STAGE_INFO_COLLECTED and loose.stage_error == ""
+    assert loose.is_relevant is None and "у чергу info_collected: 1" in out
+
+    out = mcp_api.call("posts_requeue", {
+        "task": "info-posts", "posts": str(linked.id), "drop_events": True, "confirm": True})
+    linked.refresh_from_db()
+    mate.refresh_from_db()
+    ev.refresh_from_db()
+    assert linked.event_id is None and linked.stage == Post.STAGE_INFO_COLLECTED
+    assert mate.event_id == ev.id and ev.post_count == 1
+    assert "перераховано" in out and f"#{ev.id}" in out
+    with pytest.raises(ToolError, match="не для конвеєра"):
+        mcp_api.call("posts_requeue", {"task": "info-posts", "posts": str(mate.id),
+                                      "stage": "collected", "drop_events": True})

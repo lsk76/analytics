@@ -29,6 +29,8 @@ PERMS = {
     # --- задачі, збори, чати, джерела, події, довідник
     "tasks_list": V_TASK, "task_show": V_TASK, "task_update": "analysis.change_analysistask",
     "prompt_try": "analysis.change_analysistask", "posts_retag": "analysis.change_event",
+    "posts_list": "analysis.view_post", "post_show": "analysis.view_post",
+    "posts_requeue": "analysis.change_analysistask",
     "task_create": "analysis.add_analysistask",
     "runs_list": "analysis.view_researchrun", "run_show": "analysis.view_researchrun",
     "run_create": "analysis.add_researchrun", "run_cancel": "analysis.change_researchrun",
