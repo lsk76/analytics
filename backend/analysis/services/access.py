@@ -89,7 +89,7 @@ RULES = {
     "analysis.UserProfile": PUBLIC,
     "mcpauth.McpRole": PUBLIC, "mcpauth.McpClient": PUBLIC, "mcpauth.McpToken": PUBLIC,
     "mcpauth.McpAuthCode": PUBLIC, "mcpauth.McpAuditLog": PUBLIC,
-    "mcpauth.McpAuthRequest": PUBLIC,
+    "mcpauth.McpAuthRequest": PUBLIC, "mcpauth.McpPendingCall": PUBLIC,
 }
 
 

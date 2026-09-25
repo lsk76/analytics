@@ -131,6 +131,74 @@ def charge(n_requests: int = 1) -> None:
     _charged.set(_charged.get() + n_requests)
 
 
+class NeedsConfirmation(ToolError):
+    """Платний виклик без згоди людини: текст уже містить кошторис і код."""
+
+
+CONFIRM_SETTING = "mcp_telezip_confirm"
+
+
+def confirmation_required() -> bool:
+    """Чи питати згоду перед платним викликом. Вимикається без деплою:
+    `Setting mcp_telezip_confirm = 0`."""
+    from analysis.models import Setting
+    return str(Setting.get(CONFIRM_SETTING, "1")).strip().lower() not in ("0", "false", "no")
+
+
+def require_confirmation(tool_name: str, payload: dict, *, n_requests: int = 1,
+                         what: str = "") -> None:
+    """Пропустити платний виклик лише зі згодою людини на ЦІ параметри.
+
+    Гроші за TeleZip платить власник, а не той, хто питає, тож рішення «шукати»
+    належить людині. Без `confirm` інструмент нічого не шукає (це безкоштовно),
+    а віддає кошторис і одноразовий код; з правильним кодом — виконується.
+    Код привʼязаний до інструмента Й параметрів, живе 15 хв і згорає після
+    використання, тож «одна згода на сесію» не вийде.
+
+    Викликати ПІСЛЯ розбору параметрів і ПЕРЕД `charge()`.
+    """
+    import hashlib
+    import json
+    from django.utils import timezone as djtz
+    from mcpauth.models import McpPendingCall, new_secret
+
+    if not confirmation_required():
+        return
+    who = actor()
+    given = str(payload.get("confirm") or "").strip()
+    body = {k: v for k, v in payload.items() if k != "confirm" and v not in (None, "", [], {})}
+    digest = hashlib.sha256(
+        json.dumps([tool_name, body], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+    if given:
+        exact = McpPendingCall.objects.filter(code=given, tool=tool_name,
+                                              payload_hash=digest).first()
+        if exact and exact.is_valid:
+            McpPendingCall.objects.filter(pk=exact.pk).update(used_at=djtz.now())
+            return
+        if exact:
+            why = "він уже використаний або протермінований (15 хв)"
+        elif McpPendingCall.objects.filter(code=given).exists():
+            why = "параметри пошуку змінилися — згода була на інші"
+        else:
+            why = "такого коду немає"
+        raise NeedsConfirmation(
+            f"код «{given}» не підходить: {why}. Попроси у людини згоду ще раз — "
+            "виклич цей інструмент без confirm.")
+
+    code = new_secret(4)[:8]
+    McpPendingCall.objects.create(user=who.user, tool=tool_name, payload=body,
+                                 payload_hash=digest, code=code, requests=n_requests)
+    raise NeedsConfirmation(
+        "ПОТРІБНА ЗГОДА ЛЮДИНИ — платний пошук ще НЕ виконано.\n"
+        f"інструмент : {tool_name}\n"
+        f"{'запит      : ' + what if what else 'параметри  : ' + ', '.join(f'{k}={v}' for k, v in body.items())}\n"
+        f"ціна       : {n_requests} × ≈$0.10 = ≈${n_requests * 0.10:.2f} (гроші власника)\n\n"
+        "Покажи це людині, спитай згоди і лише після її «так» повтори виклик "
+        f"з тими самими параметрами і confirm=\"{code}\" (код одноразовий, 15 хв). "
+        "Сама собі згоду не вигадуй.")
+
+
 def readonly() -> bool:
     return os.environ.get("MCP_READONLY", "").strip().lower() in ("1", "true", "yes")
 

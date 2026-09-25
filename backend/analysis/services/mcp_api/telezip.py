@@ -314,6 +314,77 @@ def _samples(rows, n, chars):
 
 # --------------------------------------------------------------------------- стан
 
+def _local_lookup(names, ids) -> tuple[list, list[str]]:
+    """Конкретні канали спершу шукаємо БЕЗ грошей: свій довідник → резолв акаунтом.
+
+    → (знайдені рядки для таблиці, ті, кого немає ніде). Резолв іде через
+    gateway (той самий акаунт, що й у воркерів) і безкоштовний, але витрачає
+    резолв-ліміт акаунта, тож більше за 5 незнайомих імен за раз не резолвимо —
+    решту дешевше знайти одним викликом TeleZip.
+    """
+    from django.db.models import Q
+    wanted = [str(n).lstrip("@") for n in names] + [str(i) for i in ids]
+    q = Q(pk__in=[])
+    for w in wanted:
+        q |= Q(tg_id=int(w)) if w.isdigit() else Q(username__iexact=w)
+    found, seen = [], set()
+    for ch in Channel.objects.filter(q).select_related("region_subject"):
+        key = (ch.username or "").lower() or str(ch.tg_id)
+        found.append({"src": "довідник", "id": ch.tg_id, "username": ch.username,
+                      "title": ch.title, "subs": ch.subscribers,
+                      "ours": f"#{ch.id}"})
+        seen.add(key)
+        if ch.tg_id:
+            seen.add(str(ch.tg_id))
+    missing = [w for w in wanted if w.lower() not in seen]
+    if missing:
+        resolved, missing = _resolve_by_account(missing)
+        found += resolved
+    return found, missing
+
+
+def _resolve_by_account(handles: list[str], limit: int = 5) -> tuple[list, list[str]]:
+    """Резолв через Telegram-акаунт (безкоштовно) — і рядок довідника на знайдене."""
+    from accounts.models import TelegramAccount
+    from accounts.services import registry as acc_registry
+    from accounts.services.managed import AccountUnavailable, RateLimited, TelegramOpError
+    from analysis.services.mcp_api import common
+
+    acc = next((a for a in common.scope_accounts(TelegramAccount.objects.filter(
+        is_active=True, is_authenticated=True)).order_by("id") if a.is_available and a.can_resolve()),
+        None)
+    if acc is None:
+        return [], handles
+    out, left = [], []
+    for h in handles:
+        if len(out) >= limit:
+            left.append(h)
+            continue
+        try:
+            meta = acc_registry.get(acc.id).channel_meta(h)
+        except (RateLimited, AccountUnavailable, TelegramOpError):
+            left.append(h)
+            continue
+        if not meta or not meta.get("tg_id"):
+            left.append(h)
+            continue
+        ch, _ = Channel.objects.get_or_create(
+            tg_id=meta["tg_id"],
+            defaults={"username": meta.get("username") or "", "title": meta.get("title") or "",
+                      "description": meta.get("description") or "",
+                      "subscribers": meta.get("subscribers") or 0,
+                      "url": f"https://t.me/{meta['username']}" if meta.get("username") else ""})
+        out.append({"src": f"акаунт #{acc.id}", "id": ch.tg_id, "username": ch.username,
+                    "title": ch.title, "subs": ch.subscribers, "ours": f"#{ch.id}"})
+    return out, left
+
+
+def _local_table(rows) -> str:
+    return fmt.table(["звідки", "id", "username", "назва", "підп.", "у нас"],
+                     [[r["src"], r["id"] or "—", f"@{r['username']}" if r["username"] else "—",
+                       fmt.trunc(r["title"], 30), r["subs"] or "", r["ours"]] for r in rows])
+
+
 @tool("tz_status", group="telezip", params={
       "deep": "true — додатково сходити в API по статистику індексу (глибина, лаг). Один безкоштовний службовий виклик."})
 def tz_status(deep: bool = True):
@@ -389,6 +460,7 @@ async def _index_stats():
 
 
 @tool("tz_find", group="telezip", params={**CRITERIA_DOCS,
+      "confirm": "Код згоди людини на цей платний пошук. Порожньо = інструмент НІЧОГО не шукає, а повертає кошторис і код: покажи його людині, спитай згоди і повтори виклик із цим кодом. Код одноразовий, 15 хв, звʼязаний із цими самими параметрами.",
       "stats": "true — повернути ЛІЧИЛЬНИКИ (скільки повідомлень, каналів, авторів + динаміка) замість самих повідомлень. Ендпоінт /FindStats: працює там, де звичайний пошук відлупило б за обсягом, і не тягне тексти. УВАГА №1: цей режим розбирає запит як АБО, тоді як сам пошук — як І. На запиті з І-групами («(тема | тема2) (дія | дія2)») лічильники завищені на порядки й у топ лізуть чати знайомств і вантажоперевезень — вір їм ЛИШЕ на чисто-АБО запиті (самі синоніми через |), інакше обсяг питай самим зметом. УВАГА №2: `unique` тут не діє — API його не приймає.",
       "by": "Для stats=true: гранулярність динаміки — day або hour.",
       "limit": "Стеля викачування повідомлень, до 10000 (більше API не віддає за виклик). Діє лише коли page_size=0: заданий page_size перебиває limit. Якщо «віддано» дорівнює limit — вибірку ОБРІЗАЛО: ділити вікно навпіл і качати половини окремими викликами (дешевше за сторінки).",
@@ -398,14 +470,19 @@ async def _index_stats():
       "samples": "Скільки вже викачаних повідомлень надрукувати текстом у відповіді (на ціну й на обсяг запиту не впливає). Не плутай із sample.",
       "chars": "Обрізати текст кожного прикладу до N символів.",
       "top": "Скільки каналів показати в топі."})
-def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "",
+def tz_find(text: str = "", confirm: str = "", days: int = 1, date_from: str = "",
+            date_to: str = "",
             exact: str = "", regex: str = "", channeltext: str = "", channel: str = "",
             user: str = "", lang: str = "ru", hasmedia: bool = None, unique: bool = True,
             source: str = "", thread: int = 0, extra: str = "", stats: bool = False,
             by: str = "day", limit: int = 200, sample: bool = False, page_size: int = 0,
             page_token: str = "", samples: int = 5, chars: int = 220, top: int = 15,
             timeout: int = 180):
-    """Пошук у текстах повідомлень Telegram (`POST /v4/messages`).
+    """Пошук у текстах повідомлень Telegram (`POST /v4/messages`). За гроші й ЗА ЗГОДОЮ.
+
+    Перший виклик нічого не шукає: повертає кошторис і код — покажи людині,
+    спитай згоди і повтори з `confirm=<код>`. Без згоди гроші власника не
+    витрачаються. Обсяг спершу питай `stats=true` (той самий 1 виклик).
 
     Потрібен хоча б один критерій: text, exact, regex, channel або user.
 
@@ -441,6 +518,12 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
                      channels=channel, users=user, languages=lang, has_media=hasmedia,
                      unique=None if stats else unique, source=source, thread=thread,
                      extra=extra, d_from=d_from, d_to=d_to)
+    _payload = {"text": text, "days": days, "date_from": date_from, "date_to": date_to,
+                "exact": exact, "regex": regex, "channeltext": channeltext, "channel": channel,
+                "user": user, "lang": lang, "hasmedia": hasmedia, "unique": unique,
+                "source": source, "thread": thread, "extra": extra, "stats": stats,
+                "limit": limit, "page_size": page_size, "page_token": page_token,
+                "sample": sample, "confirm": confirm}
     head_common = [("критерії", _crit_line(crit)),
                    ("вікно", f"{d_from:%Y-%m-%d} … {d_to:%Y-%m-%d} ({span} дн)")]
     warn = _warnings(crit, span)
@@ -449,6 +532,7 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
         async def go_stats():
             async with _client(timeout) as tz:
                 return await tz.search_stats(crit)
+        registry.require_confirmation("tz_find", _payload, what=f"{_crit_line(crit)} (лічильники)")
         registry.charge(1)
         st = _run(go_stats())
         total = st.get("messageCount", 0)
@@ -484,6 +568,7 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
             return await tz.search(crit, limit=0 if page_size else max(1, int(limit)),
                                    page_size=int(page_size), page_token=page_token,
                                    sample_only=bool(sample))
+    registry.require_confirmation("tz_find", _payload, what=_crit_line(crit))
     registry.charge(1)
     res = _run(go())
     rows = res["messages"]
@@ -512,6 +597,8 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
 
 
 @tool("tz_channels", group="telezip", params={
+      "confirm": "Код згоди людини на цей платний пошук. Порожньо = інструмент НІЧОГО не шукає, а повертає кошторис і код: покажи його людині, спитай згоди і повтори виклик із цим кодом. Код одноразовий, 15 хв, звʼязаний із цими самими параметрами.",
+      "skip_local": "true — не перевіряти наш довідник і не резолвити акаунтом, одразу в TeleZip (лише коли точно знаєш, що локально їх немає).",
       "term": "Вільний пошук по назві, опису й юзернейму разом. Синтаксис як у tz_find: пробіл = І, АБО = |. Приклад: \"Якутия (новости | чат)\".",
       "name": "Юзернейм каналу, точний збіг, без @ (напр. sakhaday).",
       "title": "Пошук лише по НАЗВІ каналу (з відмінками, оператори працюють).",
@@ -521,10 +608,22 @@ def tz_find(text: str = "", days: int = 1, date_from: str = "", date_to: str = "
       "page_size": "Скільки каналів на сторінку.",
       "page_token": "Токен наступної сторінки з попередньої відповіді.",
       "timeout": _TIMEOUT})
-def tz_channels(term: str = "", name: str = "", title: str = "", about: str = "",
+def tz_channels(term: str = "", confirm: str = "", skip_local: bool = False,
+                name: str = "", title: str = "", about: str = "",
                 id: str = "", source: str = "", page_size: int = 30,
                 page_token: str = "", timeout: int = 120):
-    """/CHANNELS — пошук каналів і чатів у базі TeleZip (не в Телеграмі загалом).
+    """/CHANNELS — пошук каналів і чатів у базі TeleZip. ОСТАННІЙ крок, за гроші.
+
+    ПОРЯДОК ДІЙ, коли треба знайти КОНКРЕТНІ канали (`name`/`id`):
+    1. наш довідник (`Channel`) — безкоштовно;
+    2. резолв Telegram-акаунтом через gateway — безкоштовно;
+    3. і лише те, чого немає ніде, — тут, за ≈$0.10 і ЗА ЗГОДОЮ ЛЮДИНИ.
+    Кроки 1–2 інструмент робить САМ і в TeleZip іде тільки з рештою (`skip_local=true`
+    їх пропускає — лише коли точно знаєш, що локально каналів немає). Знайдене
+    акаунтом одразу лягає в довідник, тож удруге воно вже безкоштовне.
+
+    Вільний пошук по змісту (`term`/`title`/`about`) локально не перевіриш — там
+    одразу згода людини.
 
     Канали, яких TeleZip не вантажить, тут не знайдуться. Межа саме цього
     ендпоінта — 10 000 знайдених каналів; більше = відлуп, треба звужувати.
@@ -538,11 +637,39 @@ def tz_channels(term: str = "", name: str = "", title: str = "", about: str = ""
     Звідси беруть `id`/`name` для `tz_find(channel=...)`.
 
     Кожен виклик ≈ $0.10 (платиться за виклик, не за обсяг); наступна сторінка
-    через `page_token` — це ще один виклик.
+    через `page_token` — це ще один виклик, і на нього потрібна нова згода.
     """
     if not any([term, name, title, about, id]):
         raise ToolError("дай критерій: term / name / title / about / id")
     names, ids = _split_refs(", ".join(x for x in (name, id) if x))
+    payload = {"term": term, "name": name, "title": title, "about": about, "id": id,
+               "source": source, "page_size": page_size, "page_token": page_token,
+               "confirm": confirm}
+
+    # Платний TeleZip — ОСТАННІЙ крок. Коли шукають конкретні канали (name/id, а
+    # не вільний текст), спершу дивимось у свій довідник, потім пробуємо
+    # резолвити акаунтом (безкоштовно) — і лише невідоме йде в TeleZip.
+    if not skip_local and (names or ids) and not page_token:
+        found, missing = _local_lookup(names, ids)
+        if found:
+            head = fmt.section(f"Знайдено без TeleZip ({len(found)})", _local_table(found))
+        else:
+            head = ""
+        if not missing:
+            return fmt.joinsec(head, "Усі канали вже відомі — платний пошук не потрібен.")
+        payload = {**payload, "name": ",".join(m for m in missing if not m.isdigit()),
+                   "id": ",".join(m for m in missing if m.isdigit())}
+        names = [m for m in missing if not m.isdigit()]
+        ids = [int(m) for m in missing if m.isdigit()]
+        registry.require_confirmation(
+            "tz_channels", payload, n_requests=1,
+            what=f"{len(missing)} каналів немає ні в довіднику, ні через акаунт: "
+                 + ", ".join(missing[:10]))
+        prefix = head
+    else:
+        registry.require_confirmation("tz_channels", payload,
+                                      what=term or name or title or about or id)
+        prefix = ""
 
     async def go():
         async with _client(timeout) as tz:
@@ -556,8 +683,10 @@ def tz_channels(term: str = "", name: str = "", title: str = "", about: str = ""
     known = {c.tg_id: c for c in Channel.objects.filter(
         tg_id__in=[r.get("id") for r in rows if r.get("id")])}
     if not rows:
-        return "За цим критерієм каналів немає. Точний збіг — у `name`; за описом — `term`/`about`."
+        return fmt.joinsec(prefix, "За цим критерієм каналів немає (у TeleZip). "
+                                   "Точний збіг — у `name`; за описом — `term`/`about`.")
     return fmt.joinsec(
+        prefix,
         fmt.section("/CHANNELS", fmt.kv([
             ("критерій", term or name or title or about or id),
             ("показано", f"{len(rows)}" + (" (є наступна сторінка)"
@@ -579,6 +708,7 @@ def tz_channels(term: str = "", name: str = "", title: str = "", about: str = ""
 
 
 @tool("tz_users", group="telezip", params={
+      "confirm": "Код згоди людини на цей платний пошук. Порожньо = інструмент НІЧОГО не шукає, а повертає кошторис і код: покажи його людині, спитай згоди і повтори виклик із цим кодом. Код одноразовий, 15 хв, звʼязаний із цими самими параметрами.",
       "username": "Юзернейми через кому, без @ — точний збіг. Віддає TelegramID навіть тоді, коли профілю в базі немає.",
       "id": "Числові TelegramID через кому.",
       "term": "Вільний пошук по UserName / FirstName / LastName (дослівно, без відмінків).",
@@ -586,9 +716,13 @@ def tz_channels(term: str = "", name: str = "", title: str = "", about: str = ""
       "is_active": "Фільтр за ознакою активності профілю.",
       "page_size": "Скільки профілів на сторінку.",
       "timeout": _TIMEOUT})
-def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = None,
+def tz_users(username: str = "", confirm: str = "", id: str = "", term: str = "",
+             is_bot: bool = None,
              is_active: bool = None, page_size: int = 20, timeout: int = 120):
-    """/USERS — пошук людей за профілем: юзернейм, ім'я, прізвище, TelegramID.
+    """/USERS — пошук людей за профілем: юзернейм, імʼя, прізвище, TelegramID.
+
+    За гроші й ЗА ЗГОДОЮ ЛЮДИНИ: перший виклик віддає кошторис і код, повтори
+    з `confirm=<код>`.
 
     Два різні питання:
       * `username` / `id` — точний збіг («хто такий @X», «чий це id»);
@@ -602,6 +736,12 @@ def tz_users(username: str = "", id: str = "", term: str = "", is_bot: bool = No
     """
     if not any([username, id, term]):
         raise ToolError("дай критерій: username / id / term")
+    n_calls = (1 if username else 0) + (1 if (id or term) else 0)
+    registry.require_confirmation(
+        "tz_users", {"username": username, "id": id, "term": term, "is_bot": is_bot,
+                     "is_active": is_active, "page_size": page_size, "confirm": confirm},
+        n_requests=n_calls or 1,
+        what=f"профілі: {username or id or term}")
     names = _csv(username)
     ids = [int(x) for x in _csv(id) if x.lstrip("-").isdigit()]
     parts = []

@@ -6,7 +6,8 @@
 from django.contrib import admin, messages
 from django.utils import timezone
 
-from .models import McpAuditLog, McpAuthCode, McpClient, McpRole, McpToken
+from .models import (McpAuditLog, McpAuthCode, McpClient, McpPendingCall, McpRole,
+                     McpToken)
 from .policy import telezip_daily_limit, telezip_used
 
 
@@ -112,3 +113,25 @@ class McpAuditLogAdmin(admin.ModelAdmin):
     def payload_short(self, obj):
         text = ", ".join(f"{k}={v}" for k, v in (obj.payload or {}).items())
         return text[:90] + ("…" if len(text) > 90 else "")
+
+
+@admin.register(McpPendingCall)
+class McpPendingCallAdmin(admin.ModelAdmin):
+    """Хто що просив шукати за гроші і чи людина погодилась."""
+    list_display = ("created_at", "user", "tool", "requests", "state", "code", "used_at")
+    list_filter = ("tool", "user")
+    search_fields = ("code", "tool")
+    readonly_fields = [f.name for f in McpPendingCall._meta.fields]
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Стан")
+    def state(self, obj):
+        if obj.used_at:
+            return "підтверджено"
+        return "чекає згоди" if obj.is_valid else "протерміновано"

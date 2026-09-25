@@ -225,6 +225,44 @@ class McpToken(models.Model):
         return f"{self.kind} {self.user.username} ({state})"
 
 
+class McpPendingCall(models.Model):
+    """Платний виклик, що чекає згоди людини (`registry.require_confirmation`).
+
+    TeleZip коштує ≈$0.10 за виклик і платить власник, а не той, хто питає,
+    тож модель не має права витрачати гроші сама: перший виклик інструмента
+    нічого не шукає, а повертає кошторис і одноразовий код, який людина має
+    підтвердити. Код привʼязаний до інструмента Й НАБОРУ ПАРАМЕТРІВ: змінив
+    запит — потрібна нова згода, повторно той самий код теж не пройде.
+    """
+
+    TTL_MINUTES = 15
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True,
+                             related_name="mcp_pending", verbose_name="Користувач")
+    tool = models.CharField(max_length=64, db_index=True, verbose_name="Інструмент")
+    payload = models.JSONField(default=dict, blank=True, verbose_name="Параметри")
+    payload_hash = models.CharField(max_length=64, db_index=True, verbose_name="Хеш параметрів")
+    code = models.CharField(max_length=12, db_index=True, verbose_name="Код підтвердження")
+    requests = models.PositiveSmallIntegerField(default=1, verbose_name="Платних запитів")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    used_at = models.DateTimeField(null=True, blank=True, verbose_name="Використано")
+
+    class Meta:
+        verbose_name = "Платний виклик на підтвердженні"
+        verbose_name_plural = "Платні виклики на підтвердженні"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["code", "used_at"])]
+
+    @property
+    def is_valid(self) -> bool:
+        from datetime import timedelta
+        return self.used_at is None and \
+            self.created_at > timezone.now() - timedelta(minutes=self.TTL_MINUTES)
+
+    def __str__(self):
+        return f"{self.tool} {self.code} ({'використано' if self.used_at else 'чекає'})"
+
+
 class McpAuditLog(models.Model):
     """Слід кожного виклику: хто, що, з якими параметрами, чим скінчилось.
 

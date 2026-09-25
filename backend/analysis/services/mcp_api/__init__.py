@@ -3,10 +3,12 @@
 Точка входу — `call(tool, payload) -> str`; реєстр наповнюють модулі нижче.
 Транспорт до цього шару — `manage.py mcp_rpc`, host-сервер — `mcp/server.py`.
 """
-from .registry import (SCOPE_ADMIN, SCOPE_CREATE, SCOPE_READ, SCOPE_WRITE, TOOLS, Actor, Tool,  # noqa: F401
-                       ToolError, actor, call, manifest, readonly, tool)
+from .registry import (SCOPE_ADMIN, SCOPE_CREATE, SCOPE_READ, SCOPE_WRITE, TOOLS, Actor,  # noqa: F401
+                       NeedsConfirmation, Tool, ToolError, actor, call, manifest, readonly,
+                       require_confirmation, tool)
 
 from . import service, accounts, monitoring, publish, tags, telegram, telezip  # noqa: E402,F401  (реєструють інструменти)
 
-__all__ = ["TOOLS", "Actor", "Tool", "ToolError", "actor", "call", "manifest",
+__all__ = ["TOOLS", "Actor", "NeedsConfirmation", "Tool", "ToolError", "actor", "call",
+           "manifest", "require_confirmation",
            "readonly", "tool", "SCOPE_READ", "SCOPE_WRITE", "SCOPE_CREATE", "SCOPE_ADMIN"]
