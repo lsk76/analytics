@@ -193,10 +193,27 @@ def require_confirmation(tool_name: str, payload: dict, *, n_requests: int = 1,
         "ПОТРІБНА ЗГОДА ЛЮДИНИ — платний пошук ще НЕ виконано.\n"
         f"інструмент : {tool_name}\n"
         f"{'запит      : ' + what if what else 'параметри  : ' + ', '.join(f'{k}={v}' for k, v in body.items())}\n"
-        f"ціна       : {n_requests} × ≈$0.10 = ≈${n_requests * 0.10:.2f} (гроші власника)\n\n"
+        f"ціна       : {n_requests} × ≈$0.10 = ≈${n_requests * 0.10:.2f} (гроші власника)\n"
+        f"{_quota_line(who)}\n"
         "Покажи це людині, спитай згоди і лише після її «так» повтори виклик "
         f"з тими самими параметрами і confirm=\"{code}\" (код одноразовий, 15 хв). "
         "Сама собі згоду не вигадуй.")
+
+
+def _quota_line(who) -> str:
+    """Рядок «скільки платних запитів ще можна сьогодні» — щоб людина вирішувала
+    із цифрою перед очима, а не наосліп."""
+    if who.unrestricted or who.user is None:
+        return "квота      : локальний режим, без ліміту"
+    from mcpauth.models import McpRole
+    from mcpauth.policy import telezip_daily_limit, telezip_used
+    role = McpRole.objects.filter(user=who.user, is_active=True).first()
+    limit = telezip_daily_limit(role)
+    used = telezip_used(who.user)
+    if not limit:
+        return f"квота      : без ліміту; сьогодні вже {used} запитів"
+    return (f"квота      : сьогодні {used} з {limit}; після цього лишиться "
+            f"{max(0, limit - used - 1)}")
 
 
 def readonly() -> bool:

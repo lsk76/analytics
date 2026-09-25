@@ -168,3 +168,37 @@ def test_free_text_search_goes_straight_to_consent(who):
     with pytest.raises(NeedsConfirmation) as e:
         mcp_api.call("tz_channels", {"term": "Якутия новости"}, who=who)
     assert "Якутия новости" in str(e.value)
+
+
+# --- ліміти на видноті ----------------------------------------------------------
+
+def test_status_shows_our_quota_and_api_ceilings(who):
+    """tz_status (безкоштовний) показує і НАШУ квоту, і стелі самого API."""
+    who.user.mcp_role.telezip_daily_limit = 12
+    who.user.mcp_role.save()
+    McpPendingCall.objects.all().delete()
+    from mcpauth.models import McpAuditLog
+    McpAuditLog.objects.create(user=who.user, tool="tz_find", paid_requests=5)
+
+    out = mcp_api.call("tz_status", {"deep": False}, who=who)
+    assert "добова квота" in out and "12 запитів/добу" in out
+    assert "витрачено сьогодні" in out and "5 ≈$0.50" in out and "лишилось 7" in out
+    assert "згода людини на кожен виклик" in out and "УВІМКНЕНА" in out
+    # стелі API — поруч, щоб не плутати з квотою
+    assert "Стелі самого API" in out and "10 000" in out and "1000 максимум" in out
+    assert "62 днів" in out and "20 000 каналів" in out
+
+
+def test_consent_prompt_shows_remaining_quota(who, probe):
+    who.user.mcp_role.telezip_daily_limit = 3
+    who.user.mcp_role.save()
+    with pytest.raises(NeedsConfirmation) as e:
+        mcp_api.call("tz_probe", {"q": "х"}, who=who)
+    assert "квота      : сьогодні 0 з 3; після цього лишиться 2" in str(e.value)
+
+
+def test_quota_line_without_limit(who, probe):
+    Setting.objects.create(key="mcp_telezip_daily_limit", value="0")
+    with pytest.raises(NeedsConfirmation) as e:
+        mcp_api.call("tz_probe", {"q": "х"}, who=who)
+    assert "без ліміту" in str(e.value)

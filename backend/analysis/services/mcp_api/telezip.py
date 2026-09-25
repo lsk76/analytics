@@ -38,6 +38,20 @@ MAX_WINDOW_DAYS = 62
 # вартість у відповіді, щоб рішення ухвалювалось із нею перед очима.
 REQUEST_COST_USD = 0.10
 
+# Стелі самого API (звідки цифри — docs/telezip-api.md). Тримаємо тут, щоб
+# `tz_status` показував їх поруч із нашою квотою, а не лише описи параметрів.
+API_LIMITS = [
+    ("повідомлень за виклик", "10 000 (limit); віддано рівно стільку = ОБРІЗАЛО, "
+                              "діли вікно навпіл"),
+    ("сторінка (page_size)", "1000 максимум; більше → 400 INVALID_PAGE_SIZE. Кожна "
+                             "сторінка — окремий платний виклик"),
+    ("вікно за раз", f"{MAX_WINDOW_DAYS} днів (довше — ділити; важке вікно однаково "
+                     "краще половинами)"),
+    ("/CHANNELS", "10 000 знайдених каналів; більше = відлуп, звужуй критерій"),
+    ("channeltext (фільтр по каналу)", "20 000 каналів у відборі"),
+    ("паралельні запити", "TELEZIP_MAX_CONCURRENCY (глобальні слоти, див. нижче)"),
+]
+
 UNREACHABLE_HINT = (
     "Перевір `tz_status`. Найчастіша причина — впав VPN до api.telezip.net "
     "(77.88.192.66): з контейнера порт 443 просто не відповідає. Після рестарту "
@@ -388,7 +402,11 @@ def _local_table(rows) -> str:
 @tool("tz_status", group="telezip", params={
       "deep": "true — додатково сходити в API по статистику індексу (глибина, лаг). Один безкоштовний службовий виклик."})
 def tz_status(deep: bool = True):
-    """Чи живий TeleZip: мережа, ключ, ГЛИБИНА індексу й лаг, слоти, свіжість збору.
+    """Чи живий TeleZip: мережа, ключ, глибина індексу, ЛІМІТИ й витрата, слоти, збір.
+
+    Показує дві різні речі, які легко сплутати: НАШУ добову квоту (скільки
+    платних запитів людині ще можна сьогодні, скільки вже витрачено ≈$) і
+    СТЕЛІ API (скільки даних віддає один виклик). Безкоштовний.
 
     «Глибина» — найдавніша дата, яку взагалі можна шукати (searchDateLimit):
     глибше неї збір поверне порожньо не через помилку, а бо даних немає.
@@ -428,6 +446,8 @@ def tz_status(deep: bool = True):
         except ToolError as e:
             parts.append(fmt.section("Індекс", f"✗ {e}"))
 
+    parts.append(_limits_section())
+
     now = timezone.now()
     slots = list(TelezipSlot.objects.order_by("slot"))
     busy = [s for s in slots if s.leased_until and s.leased_until > now]
@@ -446,6 +466,41 @@ def tz_status(deep: bool = True):
         ("зі збоєм", CollectChunk.objects.filter(status="failed").count() or "—"),
     ])))
     return fmt.joinsec(*parts)
+
+
+def _limits_section() -> str:
+    """Скільки платних запитів людині ще можна і які стелі має саме API.
+
+    Дві різні речі, які легко сплутати: НАША добова квота (гроші власника,
+    правиться в адмінці) і межі ендпоінтів TeleZip (обсяг видачі за виклик).
+    """
+    from mcpauth.models import McpRole
+    from mcpauth.policy import telezip_daily_limit, telezip_used
+    who = registry.actor()
+    rows = []
+    if who.unrestricted or who.user is None:
+        rows.append(("квота", "локальний режим — без обліку й ліміту"))
+    else:
+        role = McpRole.objects.filter(user=who.user, is_active=True).first()
+        limit = telezip_daily_limit(role)
+        today, month = telezip_used(who.user), telezip_used(who.user, 30)
+        left = (limit - today) if limit else None
+        rows += [
+            ("добова квота", f"{limit} запитів/добу" if limit else "без ліміту"),
+            ("витрачено сьогодні", f"{today} ≈${today * REQUEST_COST_USD:.2f}"
+                                   + (f"; лишилось {max(0, left)}" if left is not None else "")),
+            ("за 30 днів", f"{month} запитів ≈${month * REQUEST_COST_USD:.2f}"),
+            ("ліміт правиться", "адмінка → Доступи до MCP (колонка «TeleZip: ліміт "
+                                "запитів/добу»), 0 = Setting mcp_telezip_daily_limit"),
+        ]
+    rows.append(("згода людини на кожен виклик",
+                 "УВІМКНЕНА — без confirm пошук не піде"
+                 if registry.confirmation_required()
+                 else f"вимкнена (Setting {registry.CONFIRM_SETTING}=0)"))
+    rows.append(("ціна", f"≈${REQUEST_COST_USD:.2f} за ВИКЛИК, не за обсяг"))
+    return fmt.joinsec(
+        fmt.section("Наші ліміти й витрата", fmt.kv(rows)),
+        fmt.section("Стелі самого API", fmt.kv(API_LIMITS)))
 
 
 async def _index_stats():
