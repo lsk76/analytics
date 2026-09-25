@@ -428,7 +428,7 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `tag_delete` **[пише]** | видалити тег; якщо висить на подіях/постах — лише confirm=true | ref, confirm=False |
 | `channels_find` | знайти канал/чат у довіднику | query, limit=20 |
 | `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language |
-| `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems |
+| `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус, **аудиторія** | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems, subscribers, audience_note |
 
 ## 6. Типові сценарії
 

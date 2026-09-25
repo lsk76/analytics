@@ -1408,9 +1408,12 @@ def channels_find(query: str, limit: int = 20):
       "region": "Субʼєкт РФ канонічною назвою або аліасом із довідника регіонів (заповнює лише порожній).",
       "topics": "Теми/теги через кому (новини, етнічне, політика, локал-чат…). Додаються до наявних.",
       "chat_type": "channel | chat | discussion | unknown. Порожньо = за платформою.",
-      "language": "Код мови (ru, uk…)."})
+      "language": "Код мови (ru, uk…).",
+      "subscribers": "Аудиторія: підписники каналу або місячні візити сайту. -1 = не змінювати, 0 = обнулити. Для сайтів/RSS іншого джерела цифри немає — лише руками; для Telegram збагачення може перезаписати.",
+      "audience_note": "Звідки цифра (напр. \"SimilarWeb 09.2026\", \"дані видання\") — лягає в метадані довідника поруч зі значенням.",})
 def channel_add(url: str, title: str = "", region: str = "", topics: str = "",
-                chat_type: str = "", language: str = ""):
+                chat_type: str = "", language: str = "", subscribers: int = -1,
+                audience_note: str = ""):
     """Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.
 
     Довідник спільний: рядок ідентифікує посилання, тож повторний виклик не
@@ -1432,6 +1435,8 @@ def channel_add(url: str, title: str = "", region: str = "", topics: str = "",
     added = _merge_topics(ch, topics, "")
     if added:
         changed.append("topics")
+    if subscribers >= 0 or audience_note:
+        changed += _set_audience(ch, subscribers, audience_note, [])
     if changed:
         ch.save(update_fields=changed)
     return fmt.section(
@@ -1448,17 +1453,25 @@ def channel_add(url: str, title: str = "", region: str = "", topics: str = "",
       "settlement": "Населений пункт. Порожньо = не змінювати; '-' = очистити.",
       "chat_type": "channel | chat | discussion | unknown. Порожньо = не змінювати.",
       "focus": "Фокус каналу одним реченням. Порожньо = не змінювати; '-' = очистити.",
-      "discusses_problems": "Чи обговорює суспільні проблеми РФ. Не передавати = не змінювати."})
+      "discusses_problems": "Чи обговорює суспільні проблеми РФ. Не передавати = не змінювати.",
+      "subscribers": "Аудиторія: підписники каналу або місячні візити сайту. -1 = не змінювати, 0 = обнулити. Для сайтів/RSS іншого джерела цифри немає — лише руками; для Telegram збагачення може перезаписати.",
+      "audience_note": "Звідки цифра (напр. \"SimilarWeb 09.2026\", \"дані видання\") — лягає в метадані довідника поруч зі значенням.",})
 def channel_update(ref: str, add_topics: str = "", remove_topics: str = "", title: str = "",
                    region: str = "", settlement: str = "", chat_type: str = "",
-                   focus: str = "", discusses_problems: bool = None):
-    """Змінити рядок довідника: теми (теги), назву, регіон, населений пункт, тип, фокус.
+                   focus: str = "", discusses_problems: bool = None, subscribers: int = -1,
+                   audience_note: str = ""):
+    """Змінити рядок довідника: теми (теги), назву, регіон, нас. пункт, тип, фокус, аудиторію.
 
     Теми — це поле `Channel.topics` (список), те саме, що править агент
-    класифікації директорії; підписники/активність/доступ пише лише код.
+    класифікації директорії. `subscribers` — аудиторія: для сайтів і RSS її
+    ніхто не збирає автоматично, тож вписують руками (з `audience_note`, звідки
+    цифра); для Telegram-каналів збагачення може її перезаписати свіжими даними.
+    Активність і доступ (`msgs_per_day`, `access`…) далі пише лише код.
     """
     ch = common.resolve_channel(ref)
     changed, notes = [], []
+    if subscribers >= 0 or audience_note:
+        changed += _set_audience(ch, subscribers, audience_note, notes)
     if title:
         ch.title, changed = title.strip()[:512], changed + ["title"]
         notes.append(f"назва={ch.title}")
@@ -1513,6 +1526,31 @@ def _merge_topics(ch, add: str, remove: str) -> list[str]:
     return added
 
 
+def _set_audience(ch, subscribers: int, note: str, notes: list) -> list[str]:
+    """Аудиторія руками: значення + слід «звідки і коли» в метаданих довідника.
+
+    Для сайтів і RSS автоматичного джерела немає, тож без ручного вводу цифри не
+    буде взагалі; слід потрібен, щоб через півроку було видно, що це не збагачення.
+    """
+    from django.utils import timezone as djtz
+    fields = []
+    if subscribers >= 0:
+        ch.subscribers = int(subscribers)
+        fields.append("subscribers")
+        notes.append(f"аудиторія={ch.subscribers}")
+    meta = dict(ch.directory_meta or {})
+    meta["audience_manual"] = True
+    meta["audience_set_at"] = djtz.now().isoformat(timespec="minutes")
+    who = registry.actor()
+    meta["audience_set_by"] = getattr(who.user, "username", "") or "local"
+    if note:
+        meta["audience_source"] = note.strip()[:200]
+        notes.append(f"джерело цифри: {meta['audience_source']}")
+    ch.directory_meta = meta
+    fields.append("directory_meta")
+    return fields
+
+
 def _channel_card(ch) -> str:
     return fmt.kv([
         ("посилання", ch.url or "—"),
@@ -1522,7 +1560,10 @@ def _channel_card(ch) -> str:
         ("регіон", ch.region_subject.name if ch.region_subject_id else "—"),
         ("нас. пункт", ch.settlement or "—"),
         ("теми", ", ".join(ch.topics or []) or "—"),
-        ("підписників", ch.subscribers or "—"),
+        ("аудиторія", f"{ch.subscribers or '—'}"
+                      + (f" (руками, {(ch.directory_meta or {}).get('audience_source') or 'без джерела'},"
+                         f" {(ch.directory_meta or {}).get('audience_set_at', '')[:10]})"
+                         if (ch.directory_meta or {}).get("audience_manual") else "")),
         ("джерело", f"#{ch.source.id}" if hasattr(ch, "source") else "нема (source_add)"),
     ])
 

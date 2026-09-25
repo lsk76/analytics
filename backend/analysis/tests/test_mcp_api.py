@@ -873,3 +873,29 @@ def test_posts_list_show_and_requeue():
     with pytest.raises(ToolError, match="не для конвеєра"):
         mcp_api.call("posts_requeue", {"task": "info-posts", "posts": str(mate.id),
                                       "stage": "collected", "drop_events": True})
+
+
+def test_channel_audience_can_be_set_by_hand():
+    """Аудиторія сайтів: автоматичного джерела немає, тож вписують руками —
+    зі слідом, звідки цифра (інакше через півроку не відрізнити від збагачення)."""
+    out = mcp_api.call("channel_add", {"url": "https://novayagazeta.eu/news", "title": "НГ Європа",
+                                       "subscribers": 1200000, "audience_note": "SimilarWeb 09.2026"})
+    ch = Channel.objects.get(url="https://novayagazeta.eu/news")
+    assert ch.subscribers == 1200000 and ch.platform == "web"
+    assert ch.directory_meta["audience_manual"] is True
+    assert ch.directory_meta["audience_source"] == "SimilarWeb 09.2026"
+    assert ch.directory_meta["audience_set_at"] and ch.directory_meta["audience_set_by"] == "local"
+    assert "1200000" in out and "SimilarWeb" in out
+
+    out = mcp_api.call("channel_update", {"ref": str(ch.id), "subscribers": 1350000,
+                                          "audience_note": "SimilarWeb 10.2026"})
+    ch.refresh_from_db()
+    assert ch.subscribers == 1350000 and ch.directory_meta["audience_source"] == "SimilarWeb 10.2026"
+    assert "аудиторія=1350000" in out
+    # -1 не чіпає значення; 0 обнуляє
+    mcp_api.call("channel_update", {"ref": str(ch.id), "title": "НГ"})
+    ch.refresh_from_db()
+    assert ch.subscribers == 1350000
+    mcp_api.call("channel_update", {"ref": str(ch.id), "subscribers": 0})
+    ch.refresh_from_db()
+    assert ch.subscribers == 0
