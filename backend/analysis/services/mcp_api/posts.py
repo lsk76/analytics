@@ -76,15 +76,20 @@ def _note(post) -> str:
       "has_event": "yes — лише вже на події; no — без події. Порожньо = усі.",
       "query": "Текст поста містить цей рядок.",
       "limit": f"Скільки рядків (1..{LIST_MAX}).",
+      "full": "true — картки з ПОВНИМ текстом, класифікацією й посиланням замість таблиці з уривками (не треба кликати post_show на кожен пост).",
+      "chars": "У режимі full: скільки символів тексту на пост (0 = без обрізання). Дефолт 1500.",
       })
 def posts_list(task: str = "", event: str = "", posts: str = "", stage: str = "",
                days: int = 14, date_from: str = "", date_to: str = "",
                relevant: str = "", has_event: str = "", query: str = "",
-               limit: int = 20):
+               limit: int = 20, full: bool = False, chars: int = 1500):
     """Список зібраних постів: id, стадія, релевантність, подія, уривок тексту.
 
+    `full=true` віддає повні тексти й класифікацію одразу — коли треба читати
+    зміст, а не перелік (інакше на кожен пост потрібен `post_show`).
+
     Без task, event або posts інструмент не стартує — інакше це сканування
-    всієї таблиці. Повний текст і класифікація — `post_show`.
+    всієї таблиці.
     """
     if limit < 1 or limit > LIST_MAX:
         raise ToolError(f"posts_list: limit має бути 1..{LIST_MAX}")
@@ -136,8 +141,16 @@ def posts_list(task: str = "", event: str = "", posts: str = "", stage: str = ""
         qs = qs.filter(text__icontains=query.strip())
         desc.append(f"текст ~{query.strip()}")
     total = qs.count()
+    picked = list(qs.select_related("task", "event").prefetch_related("tags")
+                  .order_by("-posted_at", "-id")[:limit])
+    if full:
+        return fmt.joinsec(
+            fmt.section(f"Пости: {total} (показано {len(picked)}, повні тексти)",
+                        "; ".join(desc)),
+            *(_post_card(p, chars) for p in picked),
+            "" if picked else "нічого не знайдено")
     rows = []
-    for p in qs.order_by("-posted_at", "-id")[:limit]:
+    for p in picked:
         when = str(p.posted_at)[:16] if p.posted_at else "—"
         rows.append([
             f"#{p.id}", p.stage, _rel(p.is_relevant),
@@ -150,7 +163,29 @@ def posts_list(task: str = "", event: str = "", posts: str = "", stage: str = ""
         fmt.section(f"Пости: {total} (показано {len(rows)})", "; ".join(desc)),
         fmt.table(["id", "стадія", "рел", "подія", "коли", "канал", "нотатка", "текст"],
                   rows) if rows else "нічого не знайдено",
-        "Повний текст: post_show. Повернути в чергу: posts_requeue.")
+        "Повні тексти одразу: full=true. Один пост: post_show. "
+        "Повернути в чергу: posts_requeue.")
+
+
+def _post_card(post, chars: int = 1500) -> str:
+    """Пост повністю — для `posts_list(full=true)`."""
+    cls = post.classification or {}
+    picked = [(k, cls.get(k)) for k in _CLS_KEYS if cls.get(k) not in (None, "", {}, [])]
+    text = post.text or ""
+    if chars and len(text) > chars:
+        text = text[:chars] + f"\n… обрізано, усього {len(text)} симв (chars=0 — без обрізання)"
+    return fmt.section(
+        f"Пост #{post.id} · {str(post.posted_at)[:16] if post.posted_at else '—'} · "
+        f"{post.channel_name or ''}",
+        fmt.kv([
+            ("стадія / релевантний", f"{post.stage} / {_rel(post.is_relevant)}"),
+            ("подія", f"#{post.event_id}" if post.event_id else "—"),
+            ("посилання", post.url),
+            ("заголовок", fmt.trunc(post.title, 200)),
+            ("теги", ", ".join(f"{t.category}:{t.name}" for t in post.tags.all()) or "—"),
+            ("класифікація", "; ".join(f"{k}={fmt.trunc(v, 180)}" for k, v in picked) or "—"),
+            ("помилка", fmt.trunc(post.stage_error, 200)),
+        ]) + "\n" + (text or "(порожньо)"))
 
 
 @tool("post_show", group="monitoring", params={

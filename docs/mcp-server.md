@@ -329,6 +329,13 @@ TeleZip (`tz_*`) акаунта не використовує.
 | `tz_users` | `/USERS` | профілі людей: юзернейм → id, вільний пошук по імені | username, id, term, is_bot, is_active |
 | `tz_status` | — | діагностика: маршрут до API, ключ, глибина індексу й лаг, слоти, свіжість збору | deep |
 
+**Списки віддають зміст, а не лише id.** `events_list(full=true)` і
+`posts_list(full=true)` замість таблиці з обрізаними полями віддають картки з
+повним описом/текстом, усіма тегами, посиланням і класифікацією — щоб не
+кликати `event_show`/`post_show` на кожен рядок. `chars` обмежує текст на запис
+(дефолт 1200/1500, `0` = без обрізання), бо 30 повних подій інакше з'їдають
+контекст.
+
 `tz_status` — єдиний, що не є обгорткою ендпоінта: він відповідає на «чому
 нічого не працює» (найчастіше — впав VPN до api.telezip.net).
 
@@ -409,7 +416,7 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |
 | `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет | ref, task, active=True, priority=0 |
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
-| `events_list` | список подій із фільтрами адмінки; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
+| `events_list` | список подій із фільтрами адмінки`full=true` — повні описи, усі теги й посилання на пост замість таблиці з обрізаними полями; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30, full, chars |
 | `event_show` | картка події: id, опис, регіон, теги, аудит, пости-джерела з id поста | ref |
 | `posts_list` | зібрані пости задачі: id, стадія, релевантність, подія, уривок. Потрібен task, event або posts | task, event, posts, stage, days=14, date_from, date_to, relevant, has_event, query, limit=20 |
 | `post_show` | картка поста: текст, класифікація, помилка стадії, теги, посилання | ref |

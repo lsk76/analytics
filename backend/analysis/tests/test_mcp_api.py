@@ -899,3 +899,33 @@ def test_channel_audience_can_be_set_by_hand():
     mcp_api.call("channel_update", {"ref": str(ch.id), "subscribers": 0})
     ch.refresh_from_db()
     assert ch.subscribers == 0
+
+
+def test_events_and_posts_list_full_mode(events):
+    """full=true віддає зміст (повний опис/текст, усі теги, посилання), а не
+    таблицю з обрізаними полями — щоб не кликати *_show на кожен рядок."""
+    from analysis.models import Post
+    task, e1, e2, e3 = events
+    long_summary = ("Дуже докладний опис події. " * 40).strip()       # ~1080 симв
+    e1.summary = long_summary
+    e1.save(update_fields=["summary"])
+    Post.objects.create(task=task, event=e1, url="https://t.me/x/7", text="повний текст поста " * 30,
+                        channel_name="Канал А", stage=Post.STAGE_DONE, is_relevant=True,
+                        posted_at=timezone.now(), title="Заголовок")
+
+    out = mcp_api.call("events_list", {"task": "ev-task", "review_status": "all", "days": 400})
+    assert "Дуже докладний опис" in out and long_summary not in out   # таблиця обрізає
+
+    out = mcp_api.call("events_list", {"task": "ev-task", "review_status": "all", "days": 400,
+                                       "full": True})
+    assert "повні описи" in out and long_summary in out               # ціле поле
+    assert "topic:мігранти" in out and "nationality:узбек" in out     # усі теги
+    assert "post_show" in out                                         # посилання на пост
+
+    out = mcp_api.call("events_list", {"task": "ev-task", "review_status": "all", "days": 400,
+                                       "full": True, "chars": 100})
+    assert "обрізано, усього" in out and long_summary not in out
+
+    out = mcp_api.call("posts_list", {"task": "ev-task", "full": True, "days": 0})
+    assert "повні тексти" in out and "повний текст поста" in out
+    assert "https://t.me/x/7" in out and "Канал А" in out

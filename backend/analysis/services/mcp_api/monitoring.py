@@ -1179,13 +1179,20 @@ def _tags_short(ev, n=6):
 
 @tool("events_list", group="monitoring", params={**EVENT_FILTER_DOCS,
       "order": "newest (дефолт) | oldest | reach | channels.",
-      "limit": "Скільки подій показати."})
+      "limit": "Скільки подій показати.",
+      "full": "true — картки з ПОВНИМ описом, усіма тегами й посиланням на пост замість таблиці з обрізаними полями (не треба потім кликати event_show на кожну).",
+      "chars": "У режимі full: скільки символів опису на подію (0 = без обрізання). Дефолт 1200 — щоб 30 подій не з'їли весь контекст."})
 def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: str = "",
                 review_status: str = "approved", region: str = "", settlement: str = "",
                 tag: str = "", query: str = "", channel: str = "", min_channels: int = 0,
-                min_reach: int = 0, order: str = "newest", limit: int = 30):
+                min_reach: int = 0, order: str = "newest", limit: int = 30,
+                full: bool = False, chars: int = 1200):
     """Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,
     регіон, теги (фасети), канал, кількість каналів, охоплення.
+
+    `full=true` віддає повні описи, усі теги й посилання на пост одразу — коли
+    потрібен зміст, а не перелік; без нього це таблиця з обрізаними полями
+    (деталі однієї події — `event_show`).
 
     Дефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;
     `review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).
@@ -1207,9 +1214,16 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
     show_task = not task
     headers = ["id", "пост", "дата"] + (["задача"] if show_task else []) + [
         "аудит", "регіон", "нас. пункт", "кан.", "охопл.", "теги", "опис"]
+    picked = list(qs.select_related("task", "region_subject").prefetch_related("tags")
+                  .order_by(*ordering)[:limit])
+    if full:
+        return fmt.joinsec(
+            fmt.section(f"Події: {total} (показано {len(picked)}, повні описи)",
+                        "; ".join(desc) or "без фільтрів"),
+            *(_event_card(e, chars) for e in picked),
+            "" if picked else "нічого не знайдено")
     rows = []
-    for e in (qs.select_related("task", "region_subject").prefetch_related("tags")
-              .order_by(*ordering)[:limit]):
+    for e in picked:
         row = [f"#{e.id}", f"#{e.head_post_id}" if e.head_post_id else "—",
                str(e.event_date or "—")]
         if show_task:
@@ -1224,7 +1238,26 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
         fmt.section(f"Події: {total} (показано {len(rows)})", "; ".join(desc) or "без фільтрів"),
         fmt.table(headers, rows) if rows else "нічого не знайдено",
         "Фільтри: days/date_from/date_to, review_status, region, settlement, tag (кат:тег, кома = І), "
-        "query, channel, min_channels, min_reach; order=newest|oldest|reach|channels.")
+        "query, channel, min_channels, min_reach; order=newest|oldest|reach|channels. "
+        "Повні описи одразу: full=true.")
+
+
+def _event_card(e, chars: int = 1200) -> str:
+    """Подія повністю, без обрізання полів — для `events_list(full=true)`."""
+    text = e.summary or ""
+    if chars and len(text) > chars:
+        text = text[:chars] + f"\n… обрізано, усього {len(text)} симв (chars=0 — без обрізання)"
+    where = " / ".join(x for x in [(e.region_subject.name if e.region_subject_id else e.region),
+                                   e.settlement] if x) or "—"
+    return fmt.section(
+        f"Подія #{e.id} · {e.event_date or '—'} · {e.task.slug}",
+        fmt.kv([
+            ("аудит", e.review_status + (f" · {fmt.trunc(e.review_notes, 90)}" if e.review_notes else "")),
+            ("де", where),
+            ("теги", ", ".join(f"{t.category}:{t.name}" for t in e.tags.all()) or "—"),
+            ("постів/каналів/охоплення", f"{e.post_count}/{e.channel_count}/{e.reach}"),
+            ("пост", f"#{e.head_post_id} (post_show)" if getattr(e, "head_post_id", None) else "—"),
+        ]) + "\n" + (text or "(без опису)"))
 
 
 @tool("event_show", group="monitoring", params={"ref": "id події (з events_list)."})
