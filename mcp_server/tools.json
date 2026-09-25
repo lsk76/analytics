@@ -421,7 +421,7 @@
   "mutates": true,
   "scope": "mcp:create",
   "perm": "analysis.add_channel",
-  "doc": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.\n\nДовідник спільний: рядок ідентифікує посилання, тож повторний виклик не\nдублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал\nще й ОПИТУВАВСЯ, потрібне джерело: `source_add` (воно саме створить рядок\nдовідника, якщо його нема). У whitelist моніторингу — через адмінку.",
+  "doc": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.\n\nДовідник спільний: рядок ідентифікує посилання, тож повторний виклик не\nдублює, а віддає той самий рядок і дописує порожні поля й теми. Щоб канал\nще й ОПИТУВАВСЯ як джерело infospace: `source_add`. У whitelist чатів\nmonitor/research/tgsearch — `chat_add`.",
   "summary": "Додати канал/чат/сайт у довідник (`Channel`) або дозаповнити наявний.",
   "params": [
    {
@@ -568,6 +568,91 @@
   ]
  },
  {
+  "name": "chat_add",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:create",
+  "perm": "analysis.add_monitorchat",
+  "doc": "Додати чат у whitelist задачі (те, що в адмінці — вкладка «Чати»).\n\nЛише конвеєри monitor, research, tgsearch. Повтор того самого чату не дублює.\nДля infospace джерело підключається через source_add, не через чат.",
+  "summary": "Додати чат у whitelist задачі (те, що в адмінці — вкладка «Чати»).",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача monitor, research або tgsearch: id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "channel",
+    "type": "str",
+    "doc": "@username, посилання t.me або id рядка довідника. Невідомий @username створюється в довіднику.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "doc": "Одразу збирати (дефолт true).",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "stream_enabled",
+    "type": "bool",
+    "doc": "true — стрім (полінг + регулярка задачі), false — пошук за словами.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "forward_media",
+    "type": "bool",
+    "doc": "Пересилати медіа цього чату в чат медіа задачі.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "account",
+    "type": "str",
+    "doc": "Telegram-акаунт збору: id/номер/назва. Порожньо = не призначати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "priority",
+    "type": "int",
+    "doc": "Менше число = вище в списку. Дефолт 100.",
+    "default": 100,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "chat_delete",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.delete_monitorchat",
+  "doc": "Прибрати чат із whitelist задачі. Пости, уже зібрані з нього, не чіпає.",
+  "summary": "Прибрати чат із whitelist задачі. Пости, уже зібрані з нього, не чіпає.",
+  "params": [
+   {
+    "name": "chat",
+    "type": "str",
+    "doc": "Рядок whitelist: числовий id із chats_list або @username чату.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "true — прибрати чат із задачі. Історія постів лишається. Без цього видалення не відбудеться.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "chat_update",
   "group": "monitoring",
   "mutates": true,
@@ -616,6 +701,20 @@
     "type": "bool",
     "doc": "Пересилати медіа цього чату в чат медіа задачі.",
     "default": null,
+    "required": false
+   },
+   {
+    "name": "is_critical_source",
+    "type": "bool",
+    "doc": "Особливо важливий чат (пріоритет у звітах). Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "notes",
+    "type": "str",
+    "doc": "Нотатка. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
     "required": false
    }
   ]
@@ -697,8 +796,8 @@
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_event",
-  "doc": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
-  "summary": "Картка події: опис, регіон, усі теги, аудит, пости-джерела з посиланнями.",
+  "doc": "Картка події: id події, опис, регіон, усі теги, аудит, пости-джерела.\n\nУ таблиці постів колонка id — id поста. Його передають у `prompt_try` і\n`posts_retag` (параметр posts).",
+  "summary": "Картка події: id події, опис, регіон, усі теги, аудит, пости-джерела.",
   "params": [
    {
     "name": "ref",
@@ -789,7 +888,7 @@
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_event",
-  "doc": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,\nрегіон, теги (фасети), канал, кількість каналів, охоплення.\n\nДефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;\n`review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).\nКатегорії тегів для фільтра `tag` — `tag_categories`; id події — для\n`event_show`/`event_update`.",
+  "doc": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,\nрегіон, теги (фасети), канал, кількість каналів, охоплення.\n\nДефолт — як у списку адмінки: лише «Схвалено» за останні 30 днів;\n`review_status=pending` — черга на аудит (далі `event_update` схвалює/відхиляє).\nКатегорії тегів для фільтра `tag` — `tag_categories`.\nКолонка id — подія (`event_show` / `event_update`). Колонка пост — id\nнайранішого поста цієї події (`prompt_try` / `posts_retag`, параметр posts).",
   "summary": "Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту, регіон, теги (фасети), канал, кількість каналів, охоплення.",
   "params": [
    {
@@ -942,6 +1041,469 @@
     "doc": "Статус аудиту подій: approved (дефолт) | pending | rejected | all.",
     "default": "approved",
     "required": false
+   }
+  ]
+ },
+ {
+  "name": "post_show",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_post",
+  "doc": "Картка поста: текст, стадія, помилка, класифікація, теги, подія, посилання.",
+  "summary": "Картка поста: текст, стадія, помилка, класифікація, теги, подія, посилання.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Id поста (з posts_list або з колонки пост у events_list).",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "posts_list",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_post",
+  "doc": "Список зібраних постів: id, стадія, релевантність, подія, уривок тексту.\n\nБез task, event або posts інструмент не стартує — інакше це сканування\nвсієї таблиці. Повний текст і класифікація — `post_show`.",
+  "summary": "Список зібраних постів: id, стадія, релевантність, подія, уривок тексту.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача: id, slug або частина назви. Порожньо лише якщо задано event або posts.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "event",
+    "type": "str",
+    "doc": "Id подій через кому — пости цих подій.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stage",
+    "type": "str",
+    "doc": "Стадія конвеєра (collected, info_collected, done, failed, …). Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "Пости не старші за стільки діб. 0 = без обмеження. Ігнорується, якщо задано id постів/подій і немає дат.",
+    "default": 14,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Дата публікації від, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Дата публікації до, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "relevant",
+    "type": "str",
+    "doc": "yes | no | unknown. Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "has_event",
+    "type": "str",
+    "doc": "yes — лише вже на події; no — без події. Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "query",
+    "type": "str",
+    "doc": "Текст поста містить цей рядок.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки рядків (1..40).",
+    "default": 20,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "posts_requeue",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_analysistask",
+  "doc": "Повернути названі пости в чергу їхнього конвеєра.\n\nПотрібен posts або events. Усю задачу одним викликом не скинути.\nПости, вже привʼязані до події, без drop_events=true лишаються на місці:\nінакше скрін створив би другу подію. Для infospace оновити лише теги,\nне чіпаючи подію, — `posts_retag`. confirm=false нічого не пише.",
+  "summary": "Повернути названі пости в чергу їхнього конвеєра.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача, чиї пости повертаємо. id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "events",
+    "type": "str",
+    "doc": "Id подій через кому — усі їхні пости. Разом із posts це обʼєднання.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stage",
+    "type": "str",
+    "doc": "Куди повернути. Порожньо = початок обробки цього конвеєра (infospace: info_collected, events: collected, monitor: mon_filtered).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "drop_events",
+    "type": "bool",
+    "doc": "Пости, що вже на події, без цього не чіпаються: скидання стадії народило б другі події. true = відчепити і видалити подію, якщо постів на ній не лишилось. Опубліковану подію не видаляє.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "false = лише показати, що буде. true = повернути в чергу.",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Стеля вибірки (1..50). Більше за стелю — відмова, не обрізання.",
+    "default": 20,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "posts_retag",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_event",
+  "doc": "Перетегувати вже зібрані події infospace поточним збереженим промптом.\n\nМіняє лише теги категорій задачі на події і в classification поста.\nПодію не видаляє, стадію не скидає, опис і релевантність не чіпає.\nТеги інших категорій (наприклад населений пункт) лишаються.\n\nСпершу перевір правило через prompt_try, запиши його task_update, потім\nцей інструмент. confirm=false нічого не викликає. Стелі: 25 подій за виклик.\nПовний перепрогін усієї задачі (скинути пости в чергу й пересобрати події)\nтут немає: на десятках тисяч постів це окремі гроші й години, а ретеншн\nуже вирізав тексти нерелевантних.",
+  "summary": "Перетегувати вже зібрані події infospace поточним збереженим промптом.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача infospace: id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки подій перетегувати (1..25). Кожна — один виклик LLM.",
+    "default": 5,
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "Події не старші за стільки діб (за датою події). 0 = без обмеження. Ігнорується, якщо задано date_from або date_to.",
+    "default": 14,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Нижня межа дати події, YYYY-MM-DD. Порожньо = за days.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Верхня межа дати події, YYYY-MM-DD. Повторний виклик із тими самими датами бере ті самі найсвіжіші події — щоб іти далі, звузь вікно.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому — прогнати саме їх і оновити їхні події. Порожньо = найраніший пост із текстом у кожної події (як при створенні).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "false = лише порахувати вибірку, LLM не кликати. true = прогнати поточний збережений промпт і замінити теги.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "prompt_try",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_analysistask",
+  "doc": "Прогнати скрін-промпт infospace на кількох уже зібраних постах.\n\nУ БД нічого не пише і чернетку не зберігає: це перевірка правила тега перед\n`task_update`. Позначений як такий, що змінює стан, бо кожен пост — виклик\nLLM (модель скріну задачі), і режим лише-читання його блокує. Стелі: 8 постів.\n\nПости без тексту прогнати не можна: ретеншн видаляє нерелевантні done старші\nза info_retention_days. Пости, що стали подіями, текст зберігають.\n\nЗберегти правило, яке сподобалось: task_update info_tagger_prompt=… Потім\nобмежено оновити теги подій: posts_retag. Повертати десятки тисяч постів\nзі стадії done у чергу скріну цей інструмент не вміє.",
+  "summary": "Прогнати скрін-промпт infospace на кількох уже зібраних постах.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача infospace: id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки постів прогнати (1..8). Кожен — один виклик LLM.",
+    "default": 3,
+    "required": false
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому. Порожньо = свіжа вибірка самотужки.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "Брати пости не старші за стільки діб. 0 = без обмеження дати. Ігнорується, якщо задано date_from або date_to.",
+    "default": 14,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Нижня межа дати поста, YYYY-MM-DD. Порожньо = за days.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Верхня межа дати поста, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "only_with_event",
+    "type": "bool",
+    "doc": "Лише пости, що вже стали подією (текст у них лишається). false = будь-які done із текстом, включно з відсіяними.",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "info_screen_prompt",
+    "type": "str",
+    "doc": "Чернетка системного промпта на цей виклик. Порожньо = те, що в задачі. '-' = дефолт із коду. Не зберігається.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_tagger_prompt",
+    "type": "str",
+    "doc": "Чернетка правил тегів на цей виклик. Порожньо = те, що в задачі. '-' = лише підказки категорій. Не зберігається.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "rubric_create",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:create",
+  "perm": "analysis.add_researchrubric",
+  "doc": "Додати рубрику research-задачі: що шукаємо в потоці чатів.\n\nЛише конвеєр research. Категорія тегів має вже існувати — інакше фасет подій не реєструється.",
+  "summary": "Додати рубрику research-задачі: що шукаємо в потоці чатів.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача research: id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "tag_category",
+    "type": "str",
+    "doc": "Ключ категорії тегів, яка вже існує (tag_category_create).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "tag_name",
+    "type": "str",
+    "doc": "Канонічний тег події цієї рубрики (до 80 символів). Якщо тега ще нема — створюється.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "keywords",
+    "type": "str",
+    "doc": "Регулярки: по одній в рядок (кандидат, якщо КОЖНА збіглась) або JSON-список рядків.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "extra_prompt",
+    "type": "str",
+    "doc": "Додаткові правила рубрики в промпт агента. Порожньо = без доповнення.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "doc": "Одразу активна (дефолт true).",
+    "default": true,
+    "required": false
+   },
+   {
+    "name": "order",
+    "type": "int",
+    "doc": "Порядок у списку. Менше — вище.",
+    "default": 0,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "rubric_delete",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.delete_researchrubric",
+  "doc": "Видалити рубрику. Тег події в довіднику лишається.",
+  "summary": "Видалити рубрику. Тег події в довіднику лишається.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Числовий id рубрики з rubrics_list.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "true — справді видалити. Без цього видалення не відбудеться.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "rubric_update",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_researchrubric",
+  "doc": "Змінити рубрику research-задачі.",
+  "summary": "Змінити рубрику research-задачі.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "Числовий id рубрики з rubrics_list.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "tag_category",
+    "type": "str",
+    "doc": "Інша категорія тегів. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tag_name",
+    "type": "str",
+    "doc": "Інший тег події. Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "keywords",
+    "type": "str",
+    "doc": "Новий список регулярок (рядки або JSON). Порожньо = не змінювати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "extra_prompt",
+    "type": "str",
+    "doc": "Доповнення промпту. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "is_active",
+    "type": "bool",
+    "doc": "Увімкнути/вимкнути. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "order",
+    "type": "int",
+    "doc": "Порядок. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "rubrics_list",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_researchrubric",
+  "doc": "Рубрики тематичного дослідження: тег події і ключові слова (усі мають збігтися).",
+  "summary": "Рубрики тематичного дослідження: тег події і ключові слова (усі мають збігтися).",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача research: id, slug або частина назви.",
+    "default": null,
+    "required": true
    }
   ]
  },
@@ -1359,8 +1921,8 @@
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_tagcategory",
-  "doc": "Картка категорії тегів: назва, закрита/відкрита, підказка промпта, порядок, задачі.",
-  "summary": "Картка категорії тегів: назва, закрита/відкрита, підказка промпта, порядок, задачі.",
+  "doc": "Картка категорії. «Підказка» — одне речення в схемі тегів, не текст, який іде в LLM.\n\nПовний промпт моделі — розділ «Промпт, який іде в LLM» у task_show задачі,\nяка цю категорію використовує.",
+  "summary": "Картка категорії. «Підказка» — одне речення в схемі тегів, не текст, який іде в LLM.",
   "params": [
    {
     "name": "key",
@@ -1555,8 +2117,8 @@
   "mutates": true,
   "scope": "mcp:create",
   "perm": "analysis.add_analysistask",
-  "doc": "Створити задачу (`AnalysisTask`). Власник = ти; видно лише тобі і суперюзерам.\n\npipeline обовʼязково розрізняй: events (події TeleZip), monitor (критика\nв чатах), research (тематичне), infospace (полінг джерел), tgsearch\n(пошук у чатах). Дефолт events — це не інформпростір. Відповідь каже,\nчим цей тип збирається і яке в нього поле промпта.",
-  "summary": "Створити задачу (`AnalysisTask`). Власник = ти; видно лише тобі і суперюзерам.",
+  "doc": "Створити задачу (`AnalysisTask`) і одразу поля її етапів. Власник = ти; видно лише тобі і суперюзерам.\n\npipeline обовʼязково розрізняй: events (події TeleZip), monitor (критика\nв чатах), research (тематичне), infospace (полінг джерел), tgsearch\n(пошук у чатах). Дефолт events — це не інформпростір. Відповідь каже,\nчим цей тип збирається і яке в нього поле промпта.",
+  "summary": "Створити задачу (`AnalysisTask`) і одразу поля її етапів. Власник = ти; видно лише тобі і суперюзерам.",
   "params": [
    {
     "name": "slug",
@@ -1620,6 +2182,244 @@
     "doc": "Створити активною (дефолт true).",
     "default": true,
     "required": false
+   },
+   {
+    "name": "info_screen_prompt",
+    "type": "str",
+    "doc": "Лише infospace: системний промпт скріну. Порожньо = дефолт моделі (копіюється в поле при збереженні форми; тут лишається порожнім, доки не задаси).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_tagger_prompt",
+    "type": "str",
+    "doc": "Лише infospace: додаткові правила тегів, доклеюються до скрін-промпта. Порожньо = лише підказки категорій.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_judge_prompt",
+    "type": "str",
+    "doc": "Лише infospace: промпт судді зіставлення. Порожньо = дефолт із коду.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "drop_linked_comments",
+    "type": "bool",
+    "doc": "Відсівати linked-коментарі. Лише конвеєри: events. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_pre_thresh",
+    "type": "int",
+    "doc": "Поріг попереднього злиття (%). Лише конвеєри: events. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_cand_thresh",
+    "type": "int",
+    "doc": "Поріг пар-кандидатів (%). Лише конвеєри: events. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_judge_prompt",
+    "type": "str",
+    "doc": "Промпт дедуп-судді. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "generic_sides",
+    "type": "str",
+    "doc": "Генеричні сторони. Лише конвеєри: events. Список через кому. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "review_model",
+    "type": "str",
+    "doc": "Авто-аудит: модель. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "review_prompt",
+    "type": "str",
+    "doc": "Авто-аудит: промпт. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "agent_review_prompt",
+    "type": "str",
+    "doc": "Агент-аудит: промпт. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "mon_min_len",
+    "type": "int",
+    "doc": "Фільтр: мін. довжина коментаря. Лише конвеєри: monitor. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "mon_max_len",
+    "type": "int",
+    "doc": "Фільтр: макс. довжина. Лише конвеєри: monitor. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "prescreen_model",
+    "type": "str",
+    "doc": "Прескрін: модель (OpenRouter). Лише конвеєри: monitor, tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "prescreen_prompt",
+    "type": "str",
+    "doc": "Прескрін: системний промпт. Лише конвеєри: monitor, tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "prescreen_enabled",
+    "type": "bool",
+    "doc": "Прескрін: увімкнено. Лише конвеєри: tgsearch. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "tagger_prompt",
+    "type": "str",
+    "doc": "Тегування: системний промпт агента. Лише конвеєри: monitor, research, tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "dedup_group_days",
+    "type": "int",
+    "doc": "Дедуп: вікно склейки (днів). Лише конвеєри: research. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_group_fuzz",
+    "type": "int",
+    "doc": "Дедуп: поріг схожості (%). Лише конвеєри: research. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_llm_cluster",
+    "type": "bool",
+    "doc": "Дедуп: LLM-злиття інцидентів. Лише конвеєри: research. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_cluster_prompt",
+    "type": "str",
+    "doc": "Дедуп: промпт LLM-злиття. Лише конвеєри: research. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "research_audit_enabled",
+    "type": "bool",
+    "doc": "Агент-аудит подій. Лише конвеєри: research. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "research_audit_prompt",
+    "type": "str",
+    "doc": "Агент-аудит: промпт. Лише конвеєри: research. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_screen_model",
+    "type": "str",
+    "doc": "Скрін: модель (OpenRouter). Лише конвеєри: infospace. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_max_age_days",
+    "type": "int",
+    "doc": "Свіжість: макс. вік новини (днів). Лише конвеєри: infospace. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "info_match_window_hours",
+    "type": "int",
+    "doc": "Зіставлення: вікно збігу (год). Лише конвеєри: infospace. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "info_update_summaries",
+    "type": "bool",
+    "doc": "Жива подія (оновлювати опис). Лише конвеєри: infospace. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "info_retention_days",
+    "type": "int",
+    "doc": "Ретеншн сирих постів (днів). Лише конвеєри: infospace. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "stream_regex",
+    "type": "str",
+    "doc": "Стрім: патерни (по одному в рядок). Лише конвеєри: tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stream_interval_min",
+    "type": "int",
+    "doc": "Стрім: інтервал полінгу, хв. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "stream_media_chat_id",
+    "type": "str",
+    "doc": "Стрім: чат для медіа. Лише конвеєри: tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "search_terms",
+    "type": "str",
+    "doc": "Слова пошуку (по одному в рядок). Лише конвеєри: tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "search_days",
+    "type": "int",
+    "doc": "Глибина пошуку, діб. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "search_limit_per_term",
+    "type": "int",
+    "doc": "Стеля влучень на слово. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
    }
   ]
  },
@@ -1629,8 +2429,8 @@
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_analysistask",
-  "doc": "Картка задачі. Перший рядок — ключ pipeline і чим цей тип відрізняється від інших.\n\nПоля підписані іменем колонки в дужках, напр. [info_screen_prompt]. Промпти\nповністю; порожнє з підстановкою з коду позначене «дефолт із коду».",
-  "summary": "Картка задачі. Перший рядок — ключ pipeline і чим цей тип відрізняється від інших.",
+  "doc": "Картка задачі. Перший блок — «Промпт, який іде в LLM»: зібраний текст моделі.\n\nclassify_prompt є лише в events (поле classify_system_prompt плюс схема тегів).\nВ infospace в модель іде зібраний info_screen_prompt; підказка категорії — одне\nречення всередині нього, її показує tag_category_show, це не весь промпт.",
+  "summary": "Картка задачі. Перший блок — «Промпт, який іде в LLM»: зібраний текст моделі.",
   "params": [
    {
     "name": "ref",
@@ -1647,8 +2447,8 @@
   "mutates": true,
   "scope": "mcp:write",
   "perm": "analysis.change_analysistask",
-  "doc": "Змінити параметри задачі. classify_prompt пише лише конвеєр events.\n\nЯкий тип у задачі — перший рядок task_show. Запит TeleZip (events/monitor):\n`tz_find(stats=true)` показав обсяг → фіксуємо тут → `run_create`. Старий\nзапит друкується у відповіді — щоб було куди відкотитись.",
-  "summary": "Змінити параметри задачі. classify_prompt пише лише конвеєр events.",
+  "doc": "Змінити задачу: кожне поле картки task_show (ім'я в дужках) — параметр тут, для свого конвеєра.\n\nclassify_prompt — лише events; info_screen_prompt, info_tagger_prompt, info_judge_prompt — лише infospace. Решта полів етапів називаються як у моделі.\n\nЯкий тип у задачі — перший рядок task_show. Запит TeleZip (events/monitor):\n`tz_find(stats=true)` показав обсяг → фіксуємо тут → `run_create`. Старий\nзапит друкується у відповіді — щоб було куди відкотитись.",
+  "summary": "Змінити задачу: кожне поле картки task_show (ім'я в дужках) — параметр тут, для свого конвеєра.",
   "params": [
    {
     "name": "ref",
@@ -1765,8 +2565,253 @@
    {
     "name": "classify_prompt",
     "type": "str",
-    "doc": "Лише конвеєр events: system-промпт класифікації (поле classify_system_prompt). Порожньо = не змінювати; '-' = очистити поле. Для infospace промпт інший — info_screen_prompt, його показує task_show. Перед зміною подивись поточний: task_show.",
+    "doc": "Лише конвеєр events: system-промпт класифікації (поле classify_system_prompt). Порожньо = не змінювати; '-' = очистити поле. Для infospace це інше поле — info_screen_prompt / info_tagger_prompt. Перед зміною подивись task_show.",
     "default": "",
+    "required": false
+   },
+   {
+    "name": "info_screen_prompt",
+    "type": "str",
+    "doc": "Лише infospace: системний промпт скріну. Порожньо = не змінювати; '-' = очистити (тоді береться дефолт із коду). Поточний зібраний текст — task_show.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_tagger_prompt",
+    "type": "str",
+    "doc": "Лише infospace: додаткові правила тегів, доклеюються до скрін-промпта. Порожньо = не змінювати; '-' = очистити (лишаться підказки категорій). Це НЕ підказка категорії (hint).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_judge_prompt",
+    "type": "str",
+    "doc": "Лише infospace: промпт судді зіставлення. Порожньо = не змінювати; '-' = очистити (дефолт із коду).",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tag_categories",
+    "type": "str",
+    "doc": "Ключі категорій тегів через кому — замінити набір задачі. Порожньо = не змінювати; '-' = відв'язати всі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "drop_linked_comments",
+    "type": "bool",
+    "doc": "Відсівати linked-коментарі. Лише конвеєри: events. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_pre_thresh",
+    "type": "int",
+    "doc": "Поріг попереднього злиття (%). Лише конвеєри: events. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_cand_thresh",
+    "type": "int",
+    "doc": "Поріг пар-кандидатів (%). Лише конвеєри: events. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_judge_prompt",
+    "type": "str",
+    "doc": "Промпт дедуп-судді. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "generic_sides",
+    "type": "str",
+    "doc": "Генеричні сторони. Лише конвеєри: events. Список через кому. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "review_model",
+    "type": "str",
+    "doc": "Авто-аудит: модель. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "review_prompt",
+    "type": "str",
+    "doc": "Авто-аудит: промпт. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "agent_review_prompt",
+    "type": "str",
+    "doc": "Агент-аудит: промпт. Лише конвеєри: events. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "mon_min_len",
+    "type": "int",
+    "doc": "Фільтр: мін. довжина коментаря. Лише конвеєри: monitor. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "mon_max_len",
+    "type": "int",
+    "doc": "Фільтр: макс. довжина. Лише конвеєри: monitor. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "prescreen_model",
+    "type": "str",
+    "doc": "Прескрін: модель (OpenRouter). Лише конвеєри: monitor, tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "prescreen_prompt",
+    "type": "str",
+    "doc": "Прескрін: системний промпт. Лише конвеєри: monitor, tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "prescreen_enabled",
+    "type": "bool",
+    "doc": "Прескрін: увімкнено. Лише конвеєри: tgsearch. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "tagger_prompt",
+    "type": "str",
+    "doc": "Тегування: системний промпт агента. Лише конвеєри: monitor, research, tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "dedup_group_days",
+    "type": "int",
+    "doc": "Дедуп: вікно склейки (днів). Лише конвеєри: research. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_group_fuzz",
+    "type": "int",
+    "doc": "Дедуп: поріг схожості (%). Лише конвеєри: research. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_llm_cluster",
+    "type": "bool",
+    "doc": "Дедуп: LLM-злиття інцидентів. Лише конвеєри: research. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "dedup_cluster_prompt",
+    "type": "str",
+    "doc": "Дедуп: промпт LLM-злиття. Лише конвеєри: research. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "research_audit_enabled",
+    "type": "bool",
+    "doc": "Агент-аудит подій. Лише конвеєри: research. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "research_audit_prompt",
+    "type": "str",
+    "doc": "Агент-аудит: промпт. Лише конвеєри: research. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_screen_model",
+    "type": "str",
+    "doc": "Скрін: модель (OpenRouter). Лише конвеєри: infospace. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "info_max_age_days",
+    "type": "int",
+    "doc": "Свіжість: макс. вік новини (днів). Лише конвеєри: infospace. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "info_match_window_hours",
+    "type": "int",
+    "doc": "Зіставлення: вікно збігу (год). Лише конвеєри: infospace. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "info_update_summaries",
+    "type": "bool",
+    "doc": "Жива подія (оновлювати опис). Лише конвеєри: infospace. Не передавати = не змінювати.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "info_retention_days",
+    "type": "int",
+    "doc": "Ретеншн сирих постів (днів). Лише конвеєри: infospace. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "stream_regex",
+    "type": "str",
+    "doc": "Стрім: патерни (по одному в рядок). Лише конвеєри: tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "stream_interval_min",
+    "type": "int",
+    "doc": "Стрім: інтервал полінгу, хв. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "stream_media_chat_id",
+    "type": "str",
+    "doc": "Стрім: чат для медіа. Лише конвеєри: tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "search_terms",
+    "type": "str",
+    "doc": "Слова пошуку (по одному в рядок). Лише конвеєри: tgsearch. Порожньо = не змінювати; '-' = очистити.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "search_days",
+    "type": "int",
+    "doc": "Глибина пошуку, діб. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
+    "required": false
+   },
+   {
+    "name": "search_limit_per_term",
+    "type": "int",
+    "doc": "Стеля влучень на слово. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
+    "default": null,
     "required": false
    }
   ]
@@ -2259,12 +3304,30 @@
   ]
  },
  {
+  "name": "setting_show",
+  "group": "service",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_setting",
+  "doc": "Повне значення одного Setting. Список із обрізаним текстом — settings_list.",
+  "summary": "Повне значення одного Setting. Список із обрізаним текстом — settings_list.",
+  "params": [
+   {
+    "name": "key",
+    "type": "str",
+    "doc": "Точний ключ (як у settings_list), напр. digest_report_prompt.",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
   "name": "settings_list",
   "group": "service",
   "mutates": false,
   "scope": "mcp:read",
   "perm": "analysis.view_setting",
-  "doc": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
+  "doc": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.\n\nДовге значення тут обрізане. Повний текст одного ключа — `setting_show`.",
   "summary": "Key-value налаштування (`Setting`): промпти, тексти, прапорці без деплою.",
   "params": [
    {

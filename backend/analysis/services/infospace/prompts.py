@@ -71,3 +71,29 @@ Respond with STRICT JSON only:
 update_summary=true ONLY when the new item adds MATERIAL facts (new numbers,
 outcomes, official reactions). Minor rewording -> update_summary=false.
 """
+
+
+def build_screen_prompt(task):
+    """Скрін-промпт = системний промпт задачі + (якщо є категорії тегів) схема
+    tags + правила тегування. Порожній промпт → дефолт із коду.
+
+    Живе тут, а не в stages: зібраний текст потрібен і MCP (task_show), без
+    імпорту адаптерів збору.
+    """
+    system = (task.info_screen_prompt or INFO_SCREEN_PROMPT).strip()
+    cats = list(task.tag_categories.all())
+    if not cats:
+        return system
+    tag_fields = ",".join(f'"{c.key}":["..."]' for c in cats)
+    lines = [system, "",
+             f'Додай у JSON поле "tags" зі списками значень: {{{tag_fields}}}.']
+    for c in cats:
+        if c.closed:
+            from analysis.models import Tag
+            seeded = list(Tag.objects.filter(category=c.key).values_list("name", flat=True))
+            lines.append(f'- "{c.key}" ({c.label}): ТОЧНО зі списку {seeded}; нема — пропусти.')
+        else:
+            lines.append(f'- "{c.key}" ({c.label}): {c.hint or "вільні значення, узагальнено"}.')
+    if task.info_tagger_prompt:
+        lines.append(task.info_tagger_prompt.strip())
+    return "\n".join(lines)

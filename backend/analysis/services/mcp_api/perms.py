@@ -13,7 +13,8 @@ V_TASK = "analysis.view_analysistask"
 PERMS = {
     # --- сервіс
     "tools_manifest": "", "service_health": V_TASK, "service_queues": V_TASK,
-    "settings_list": "analysis.view_setting", "setting_set": "analysis.change_setting",
+    "settings_list": "analysis.view_setting", "setting_show": "analysis.view_setting",
+    "setting_set": "analysis.change_setting",
     "publish_status": "analysis.view_publishconfig",
     "publish_config_show": "analysis.view_publishconfig",
     "publish_config_create": "analysis.add_publishconfig",
@@ -27,10 +28,18 @@ PERMS = {
     "proxies_list": "accounts.view_proxy", "proxy_check": "accounts.change_proxy",
     # --- задачі, збори, чати, джерела, події, довідник
     "tasks_list": V_TASK, "task_show": V_TASK, "task_update": "analysis.change_analysistask",
+    "prompt_try": "analysis.change_analysistask", "posts_retag": "analysis.change_event",
+    "posts_list": "analysis.view_post", "post_show": "analysis.view_post",
+    "posts_requeue": "analysis.change_analysistask",
     "task_create": "analysis.add_analysistask",
     "runs_list": "analysis.view_researchrun", "run_show": "analysis.view_researchrun",
     "run_create": "analysis.add_researchrun", "run_cancel": "analysis.change_researchrun",
     "chats_list": "analysis.view_monitorchat", "chat_update": "analysis.change_monitorchat",
+    "chat_add": "analysis.add_monitorchat", "chat_delete": "analysis.delete_monitorchat",
+    "rubrics_list": "analysis.view_researchrubric",
+    "rubric_create": "analysis.add_researchrubric",
+    "rubric_update": "analysis.change_researchrubric",
+    "rubric_delete": "analysis.delete_researchrubric",
     "sources_list": "analysis.view_source", "source_update": "analysis.change_source",
     "source_add": "analysis.add_source", "source_subscribe": "analysis.add_sourcesubscription",
     "events_stats": "analysis.view_event", "events_list": "analysis.view_event",

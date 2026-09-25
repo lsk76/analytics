@@ -278,7 +278,8 @@ Django. **Блок має жити в серверi :443**: у :80 він і м�
 |------------|-----------|-----------|
 | `service_health` | стан сервісу одним екраном: черги, збори, акаунти, джерела, публікація | — |
 | `service_queues` | черги детально: стадії×задачі, застряглі claim'и, свіжі помилки | task='', stage='', errors=3 |
-| `settings_list` | key-value налаштування (`Setting`) | prefix='' |
+| `settings_list` | key-value налаштування (`Setting`); довгий текст обрізаний | prefix='' |
+| `setting_show` | повне значення одного ключа (промпт, прапорець) | key |
 | `setting_set` **[пише]** | записати налаштування | key, value, description='' |
 | `publish_status` | профілі публікації + останні публікації (зведення) | limit=10 |
 | `publish_config_show` | картка профілю публікації: канал, режим, відбір, лічильники | ref |
@@ -386,21 +387,33 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | інструмент | що робить | параметри |
 |------------|-----------|-----------|
 | `tasks_list` | задачі; колонка «конвеєр» — точний ключ events/monitor/research/infospace/tgsearch | pipeline='', active_only=False |
-| `task_update` **[пише]** | параметри задачі: збір (запит TeleZip, мови, unique, чанк), назва/опис, прапорці стадій, вікно дедупу, промпт класифікації | ref, telezip_query, languages, unique, chunk_days, is_active, min_subscribers, llm_model, display_name, name, description, search_posts, search_comments, geo_enabled, review_enabled, dedup_window_days, classify_prompt |
-| `task_show` | картка моніторингу: усі поля конвеєра (промпти повністю, порожнє = дефолт із коду), черги, події, збори | ref |
+| `task_create` **[пише]** | створити задачу і одразу поля етапів (ті самі імена, що в task_update / task_show) | slug, name, pipeline + поля форми цього конвеєра |
+| `task_update` **[пише]** | будь-яке поле етапу з картки `task_show` (ім'я параметра = ім'я в дужках). Чуже для конвеєра поле відхиляється. Аліаси: `classify_prompt`, `unique`, `chunk_days`, `min_subscribers` | ref + поля форми задачі для її конвеєра |
+| `task_show` | картка задачі: зібраний промпт LLM, поля конвеєра, блок «Щоб запустити, бракує» (чати, рубрики, джерела, запит) | ref |
+| `prompt_try` **[пише]** | проба скрін-промпта infospace на кількох постах із текстом: вердикт і теги, у БД не пише і чернетку не зберігає. Кожен пост — виклик LLM, стеля 8 | task, limit=3, posts='', days=14, date_from, date_to, only_with_event=true, info_screen_prompt='', info_tagger_prompt='' |
+| `posts_retag` **[пише]** | перетегувати вже зібрані події поточним збереженим промптом (лише теги категорій задачі; події не видаляє). confirm=false лише рахує. Стелі 25; повтор із тими самими датами бере ті самі найсвіжіші | task, limit=5, days=14, date_from, date_to, posts='', confirm=false |
 | `runs_list` | збори: статус, період, прогрес чанків | task='', status='', limit=15 |
 | `run_show` | збір детально (аналог «Збори → Статус») | run_id |
 | `run_create` **[пише]** | запустити збір за період (планує чанки) | task, date_from, date_to, chunk_days=0, title='' |
 | `run_cancel` **[пише]** | скасувати збір + прибрати чанки в черзі | run_id, drop_pending_chunks=True |
 | `chats_list` | whitelist чатів: акаунт, режим, свіжість | task='', active, stream_only, problems_only, limit=60 |
-| `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет | chat, is_active, stream_enabled, account, priority, forward_media |
+| `chat_add` **[пише]** | додати чат у whitelist monitor/research/tgsearch; невідомий @username створюється в довіднику | task, channel, is_active, stream_enabled, forward_media, account, priority |
+| `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет / критичне джерело / нотатка | chat, is_active, stream_enabled, account, priority, forward_media, is_critical_source, notes |
+| `chat_delete` **[пише]** | прибрати чат із whitelist (`confirm=true`); зібрані пости лишаються | chat, confirm |
+| `rubrics_list` | рубрики research-задачі | task |
+| `rubric_create` **[пише]** | рубрика: категорія, тег, ключові слова (усі мають збігтися) | task, tag_category, tag_name, keywords, extra_prompt, is_active, order |
+| `rubric_update` **[пише]** | змінити рубрику | ref, tag_category, tag_name, keywords, extra_prompt, is_active, order |
+| `rubric_delete` **[пише]** | видалити рубрику (`confirm=true`) | ref, confirm |
 | `sources_list` | джерела інформпростору: розклад, health, якість | task='', kind='', problems_only=False, limit=60 |
 | `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account |
 | `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |
 | `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет | ref, task, active=True, priority=0 |
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
-| `events_list` | список подій із фільтрами адмінки (період/свіжість, статус аудиту, регіон, нас. пункт, теги-фасети, канал, к-сть каналів, охоплення); дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
-| `event_show` | картка події: опис, регіон, теги, аудит, пости-джерела | ref |
+| `events_list` | список подій із фільтрами адмінки; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30 |
+| `event_show` | картка події: id, опис, регіон, теги, аудит, пости-джерела з id поста | ref |
+| `posts_list` | зібрані пости задачі: id, стадія, релевантність, подія, уривок. Потрібен task, event або posts | task, event, posts, stage, days=14, date_from, date_to, relevant, has_event, query, limit=20 |
+| `post_show` | картка поста: текст, класифікація, помилка стадії, теги, посилання | ref |
+| `posts_requeue` **[пише]** | повернути названі пости (або пости названих подій) у чергу конвеєра. confirm=false лише показує. Пости на події — лише з drop_events=true; стеля 50, усю задачу не скидає | task, posts, events, stage, drop_events=false, confirm=false, limit=20 |
 | `event_update` **[пише]** | схвалити / відхилити / повернути в чергу (= дії адмінки), теги `кат:тег` (+/−), регіон, нас. пункт, дата, опис, нотатка аудиту | ref, review, notes, add_tags, remove_tags, region, settlement, event_date, summary |
 | `event_add` **[пише]** | подія за посиланням (= «Додати подію» в адмінці: fetch → скрін-промпт → Event approved; виклик LLM) | task, url |
 | `tag_categories` | категорії тегів (закриті/відкриті) з прикладами — для `tag=` і `add_tags=` | task='' |
@@ -425,7 +438,9 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 «акаунт не резолвить»       account_spam_check → (limited?) account_warm_up → account_jobs
 «джерело не оновлюється»    sources_list(problems_only) → source_update(poll_now) → worker_once(info_collect)
 «зібрати період»            run_create → run_show → (ready) events_stats
-«поміняти промпт»           settings_list → setting_set → service_restart(worker-…)
+«поміняти промпт»           task_show → prompt_try (чернетка) → task_update
+                            → posts_retag(confirm=false) → posts_retag(confirm=true, limit=…)
+                            глобальне Setting: settings_list → setting_show → setting_set
 «новий запит до TeleZip»    tz_find(stats=true) → tz_find (тексти)
                             → task_update → run_create
 «хто пише про тему»         tz_channels(term=…) → chats_list/chat_update
@@ -469,6 +484,15 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 - **`tz_find` віддає максимум 10 000 за виклик** (`page_size` — максимум 1000).
   Якщо віддано рівно стільки — вибірку ОБРІЗАЛО: ділити вікно навпіл і качати
   половини (дешевше за сторінки: 20 тис. = 4 виклики проти 20).
+- **Пости і точковий перепрогін — `posts_list` / `post_show` / `posts_requeue`.**
+  Усю задачу в чергу цей інструмент не скидає. Пост, що вже на події, без
+  `drop_events=true` не чіпається: інакше скрін створив би другу подію.
+  Опубліковану подію видалення не зачіпає.
+- **Перетегування infospace — `prompt_try`, потім `posts_retag`.** Повний скид
+  постів у `info_collected` (`rescreen_task_now`) видаляє всі події задачі й
+  кличе LLM на кожен пост; у MCP його немає. Ретеншн уже вирізав тексти
+  нерелевантних done старші за `info_retention_days` — їх перепрогнати нічим.
+  `posts_retag` міняє лише теги категорій задачі, стеля 25 подій за виклик.
 - **Нові інструменти пиши в Django-шарі**, не в `server.py`: host бере їх із
   маніфесту автоматично. Докстрінг першим абзацом — це опис, який бачить
   модель; параметри анотуй типами (`str`/`int`/`float`/`bool`) — з них

@@ -138,9 +138,16 @@ def _category_card(c: TagCategory) -> str:
 @tool("tag_category_show", group="monitoring", params={
       "key": "Ключ категорії (латиниця, як у tag_categories)."})
 def tag_category_show(key: str):
-    """Картка категорії тегів: назва, закрита/відкрита, підказка промпта, порядок, задачі."""
+    """Картка категорії. «Підказка» — одне речення в схемі тегів, не текст, який іде в LLM.
+
+    Повний промпт моделі — розділ «Промпт, який іде в LLM» у task_show задачі,
+    яка цю категорію використовує.
+    """
     c = _category(key)
-    return fmt.section(f"Категорія {c.key}", _category_card(c))
+    return fmt.section(
+        f"Категорія {c.key}",
+        _category_card(c) + "\n\nПідказка — не промпт LLM. Зібраний текст моделі: "
+        "task_show, розділ «Промпт, який іде в LLM».")
 
 
 @tool("tag_category_create", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
