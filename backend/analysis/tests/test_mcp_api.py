@@ -929,3 +929,19 @@ def test_events_and_posts_list_full_mode(events):
     out = mcp_api.call("posts_list", {"task": "ev-task", "full": True, "days": 0})
     assert "повні тексти" in out and "повний текст поста" in out
     assert "https://t.me/x/7" in out and "Канал А" in out
+
+
+def test_channels_find_batch():
+    """Кілька каналів за один виклик: саме так їх і перевіряють перед додаванням
+    (в аудиті було 257 викликів по одному username, із них 133 повтори)."""
+    Channel.objects.create(username="sotavision", title="Сота", subscribers=100)
+    Channel.objects.create(username="theins", title="The Insider", subscribers=200)
+    out = mcp_api.call("channels_find", {"query": "sotavision, @theins, ghostchannel"})
+    assert "знайдено 2 із 3 запитів" in out
+    assert "@sotavision" in out and "@theins" in out
+    assert "НЕМАЄ в довіднику (1): ghostchannel" in out
+    assert "channel_add" in out                                   # що робити далі
+    # один запит — стара поведінка без колонки «запит»
+    out = mcp_api.call("channels_find", {"query": "sotavision"})
+    assert "@sotavision" in out and "запит" not in out.split("\n")[0]
+    assert "немає" in mcp_api.call("channels_find", {"query": "ghostchannel"})

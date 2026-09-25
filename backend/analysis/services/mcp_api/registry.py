@@ -186,17 +186,29 @@ def require_confirmation(tool_name: str, payload: dict, *, n_requests: int = 1,
             f"код «{given}» не підходить: {why}. Попроси у людини згоду ще раз — "
             "виклич цей інструмент без confirm.")
 
-    code = new_secret(4)[:8]
-    McpPendingCall.objects.create(user=who.user, tool=tool_name, payload=body,
-                                 payload_hash=digest, code=code, requests=n_requests)
+    # Повторний виклик тих самих параметрів НЕ плодить новий код: модель, яка не
+    # зрозуміла, що треба спитати людину, інакше крутиться в петлі й засмічує
+    # журнал (бачили 5 однакових запитів підряд).
+    pending = McpPendingCall.objects.filter(
+        user=who.user, tool=tool_name, payload_hash=digest,
+        used_at__isnull=True).order_by("-id").first()
+    again = bool(pending and pending.is_valid)
+    if again:
+        code = pending.code
+    else:
+        code = new_secret(4)[:8]
+        McpPendingCall.objects.create(user=who.user, tool=tool_name, payload=body,
+                                     payload_hash=digest, code=code, requests=n_requests)
     raise NeedsConfirmation(
-        "ПОТРІБНА ЗГОДА ЛЮДИНИ — платний пошук ще НЕ виконано.\n"
-        f"інструмент : {tool_name}\n"
-        f"{'запит      : ' + what if what else 'параметри  : ' + ', '.join(f'{k}={v}' for k, v in body.items())}\n"
-        f"ціна       : {n_requests} × ≈$0.10 = ≈${n_requests * 0.10:.2f} (гроші власника)\n"
-        f"{_quota_line(who)}\n"
-        "Покажи це людині, спитай згоди і лише після її «так» повтори виклик "
-        f"з тими самими параметрами і confirm=\"{code}\" (код одноразовий, 15 хв). "
+        ("ЗГОДИ ВСЕ ЩЕ НЕМА — я вже питав про цей самий пошук, код той самий. "
+         "НЕ повторюй виклик: спитай людину й чекай відповіді.\n"
+         if again else "ПОТРІБНА ЗГОДА ЛЮДИНИ — платний пошук ще НЕ виконано.\n")
+        + f"інструмент : {tool_name}\n"
+        + f"{'запит      : ' + what if what else 'параметри  : ' + ', '.join(f'{k}={v}' for k, v in body.items())}\n"
+        + f"ціна       : {n_requests} × ≈$0.10 = ≈${n_requests * 0.10:.2f} (гроші власника)\n"
+        + f"{_quota_line(who)}\n"
+        + "Покажи це людині, спитай згоди і лише після її «так» повтори виклик "
+        + f"з тими самими параметрами і confirm=\"{code}\" (код одноразовий, 15 хв). "
         "Сама собі згоду не вигадуй.")
 
 

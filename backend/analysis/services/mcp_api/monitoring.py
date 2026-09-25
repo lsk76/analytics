@@ -1415,8 +1415,8 @@ def tag_categories(task: str = ""):
 
 
 @tool("channels_find", group="monitoring", params={
-      "query": "@username або частина назви каналу в НАШОМУ довіднику. Пошук у базі TeleZip — це tz_channels.",
-      "limit": "Скільки каналів показати."})
+      "query": "@username або частина назви каналу в НАШОМУ довіднику. МОЖНА КІЛЬКА ЧЕРЕЗ КОМУ — усі за один виклик: «sotavision, theins, @novnow». Пошук у базі TeleZip — це tz_channels.",
+      "limit": "Скільки каналів показати НА КОЖЕН запит."})
 def channels_find(query: str, limit: int = 20):
     """Знайти канал/чат у нашому довіднику (`Channel`) за username/назвою.
 
@@ -1425,14 +1425,43 @@ def channels_find(query: str, limit: int = 20):
     `tz_find(channel=…)` (там TelegramID або @username). Із цієї таблиці для
     інших інструментів бери @username, а рядок whitelist шукай у `chats_list`.
     """
-    qs = (Channel.objects.filter(Q(username__icontains=query.lstrip("@"))
-                                 | Q(title__icontains=query))
-          .select_related("region_subject").order_by("-subscribers")[:limit])
-    rows = [[f"#{c.id}", f"@{c.username}" if c.username else "—", fmt.trunc(c.title, 36),
-             c.subscribers or "", c.region_subject.name if c.region_subject_id else "—",
-             c.enrolled_in.count()] for c in qs]
-    return fmt.table(["id", "username", "назва", "підписників", "регіон", "у моніторингах"],
-                     rows) if rows else f"каналів за «{query}» немає"
+    terms = _split_csv(query) or [query.strip()]
+    if len(terms) == 1:
+        rows = [_channel_row(c) for c in _find_channels(terms[0], limit)]
+        return fmt.table(CHANNEL_COLS, rows) if rows \
+            else f"каналів за «{terms[0]}» немає (у нашому довіднику)"
+
+    # пачка: один виклик замість N — саме так їх і шукають (перевірити список
+    # каналів перед додаванням у моніторинг)
+    rows, missing = [], []
+    for term in terms:
+        found = _find_channels(term, limit)
+        if not found:
+            missing.append(term)
+        rows += [[term] + _channel_row(c) for c in found]
+    return fmt.joinsec(
+        fmt.section(f"Довідник: знайдено {len(rows)} із {len(terms)} запитів",
+                    fmt.table(["запит"] + CHANNEL_COLS, rows) if rows else "нічого"),
+        f"НЕМАЄ в довіднику ({len(missing)}): " + ", ".join(missing) if missing else "",
+        "Додати відсутні: channel_add (по одному) або source_add, якщо їх треба ще й опитувати."
+        if missing else "")
+
+
+CHANNEL_COLS = ["id", "username", "назва", "підписників", "регіон", "у моніторингах"]
+
+
+def _find_channels(term: str, limit: int):
+    term = term.strip().lstrip("@")
+    if not term:
+        return []
+    return list(Channel.objects.filter(Q(username__icontains=term) | Q(title__icontains=term))
+                .select_related("region_subject").order_by("-subscribers")[:limit])
+
+
+def _channel_row(c) -> list:
+    return [f"#{c.id}", f"@{c.username}" if c.username else "—", fmt.trunc(c.title, 36),
+            c.subscribers or "", c.region_subject.name if c.region_subject_id else "—",
+            c.enrolled_in.count()]
 
 
 @tool("channel_add", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={

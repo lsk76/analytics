@@ -582,14 +582,14 @@
    {
     "name": "query",
     "type": "str",
-    "doc": "@username або частина назви каналу в НАШОМУ довіднику. Пошук у базі TeleZip — це tz_channels.",
+    "doc": "@username або частина назви каналу в НАШОМУ довіднику. МОЖНА КІЛЬКА ЧЕРЕЗ КОМУ — усі за один виклик: «sotavision, theins, @novnow». Пошук у базі TeleZip — це tz_channels.",
     "default": null,
     "required": true
    },
    {
     "name": "limit",
     "type": "int",
-    "doc": "Скільки каналів показати.",
+    "doc": "Скільки каналів показати НА КОЖЕН запит.",
     "default": 20,
     "required": false
    }

@@ -202,3 +202,22 @@ def test_quota_line_without_limit(who, probe):
     with pytest.raises(NeedsConfirmation) as e:
         mcp_api.call("tz_probe", {"q": "х"}, who=who)
     assert "без ліміту" in str(e.value)
+
+
+def test_repeated_ask_reuses_the_same_code(who, probe):
+    """Повторний виклик без confirm не плодить нових кодів: модель, яка не
+    зрозуміла, що треба спитати людину, інакше крутиться в петлі (в аудиті було
+    5 однакових запитів підряд)."""
+    codes = []
+    for _ in range(3):
+        with pytest.raises(NeedsConfirmation) as e:
+            mcp_api.call("tz_probe", {"q": "той самий"}, who=who)
+        codes.append(_code(str(e.value)))
+    assert len(set(codes)) == 1, "код мусить бути той самий"
+    assert McpPendingCall.objects.count() == 1
+    assert "ЗГОДИ ВСЕ ЩЕ НЕМА" in str(e.value) and "НЕ повторюй виклик" in str(e.value)
+    # після використання наступний запит уже дає НОВИЙ код
+    mcp_api.call("tz_probe", {"q": "той самий", "confirm": codes[0]}, who=who)
+    with pytest.raises(NeedsConfirmation) as e2:
+        mcp_api.call("tz_probe", {"q": "той самий"}, who=who)
+    assert _code(str(e2.value)) != codes[0] and McpPendingCall.objects.count() == 2
