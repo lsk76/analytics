@@ -185,7 +185,17 @@ INFOSPACE_PROXY_URL = os.getenv("INFOSPACE_PROXY_URL", "")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_API_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
-LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash")
+# Дефолтна модель усіх стадій, де задача не вказала свою. Flash-Lite, а не Flash,
+# за підсумком A/B 2026-09-28 (стенд backend/_dir/ab, еталон — Haiku 4.5 двома
+# проходами, судить лише розбіжності):
+#   * прескрін monitor, n=948: recall 98.6% проти 95.9% у Flash (пропускає 4
+#     критичні коментарі замість 12) при вчетверо нижчій ціні; платить за це
+#     precision 81% проти 92% — тобто ~17% зайвих пачок агент-тегування;
+#   * скрін infospace, n=300: якісна нічия (13:12 на 25 розбіжностях) і -38% ціни.
+# НЕ переміряні на Lite: класифікація/суддя дедупу (events), research-стадії,
+# авто-аудит, рерайт публікацій. Якщо стадія має триматися Flash — прописуй
+# модель у полі задачі явно, а не покладайся на цей дефолт.
+LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-2.5-flash-lite")
 
 # --- Telegram publishing (publish-конвеєр) ---
 # Дефолтний bot token для публікації подій у канал; PublishConfig.bot_token
