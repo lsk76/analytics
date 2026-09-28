@@ -65,6 +65,31 @@ def test_assign_accounts_prefers_hash_owner_then_resolver(django_user_model):
     assert mc_n.tg_account_id in (a2.id, a3.id)                     # новий чат → лише хто резолвить
 
 
+def test_store_marks_authorless_as_channel_repost():
+    """Повідомлення без автора — це допис каналу, а не репліка людини.
+
+    У групах обговорення таких більшість (авто-форварди каналу), і без
+    прапорця вони ставали б подіями й роздували лічильник «скільки людей».
+    """
+    from datetime import datetime, timezone as tz
+
+    from analysis.models import MonitorChat, Post
+    from analysis.tests.factories import TaskFactory
+    task = TaskFactory(pipeline="tgsearch")
+    mc = MonitorChat.objects.create(
+        task=task, channel=Channel.objects.create(username="c", title="c", tg_id=-1001))
+    d = datetime(2026, 9, 20, tzinfo=tz.utc)
+    n = tgs._store(task, mc, [
+        {"mid": 1, "text": "людина пише про едро", "date": d, "author_id": 42, "term": "едро"},
+        {"mid": 2, "text": "допис каналу про едро", "date": d, "author_id": None, "term": "едро"},
+    ])
+    assert n == 2
+    human = Post.objects.get(url__endswith="/1")
+    channel_post = Post.objects.get(url__endswith="/2")
+    assert human.is_channel_repost is False
+    assert channel_post.is_channel_repost is True
+
+
 def test_search_caches_linked_resolve_under_account(monkeypatch, django_user_model):
     """Пошук у linked-групі: хеш із резолву кешується під акаунт, як у стрімі.
 

@@ -436,6 +436,12 @@ def _store(task, mc, msgs) -> int:
             posted_at=m["date"],
             region_subject_id=ch.region_subject_id,
             author_tg_id=m.get("author_id"),
+            # Немає автора = повідомлення НЕ від учасника: допис каналу або
+            # його авто-форвард у групу обговорення (там таких більшість —
+            # прод 28.09: 109 зі 129). Для «скільки ЛЮДЕЙ висловилось» це не
+            # одиниця виміру, тож позначаємо тим самим прапорцем, що його вже
+            # розуміє `metrics.PostSource` (він виключає is_channel_repost).
+            is_channel_repost=not m.get("author_id"),
             classification={"_tgs": {"term": m["term"]}},
             media=m.get("media"),
         ))
@@ -519,8 +525,12 @@ def tgs_tag_once(task) -> bool:
         cl["border"] = {**v, "_model": model}
         p.classification = cl
         p.is_classified = True
-        # релевантність = знайдено бодай одну проблему на кордоні
-        p.is_relevant = bool(attach)
+        # Релевантність = є бодай один тег І це репліка ЛЮДИНИ. Допис каналу
+        # подією не стає: одиниця цього конвеєра — думка окремої людини, і
+        # новина про партію в стрічці роздула б лічильник «скільки людей»
+        # (прод 28.09: редакційний розбір «які депутати прийшли-пішли» дав
+        # подію й п'ять прізвищ у er_person).
+        p.is_relevant = bool(attach) and not p.is_channel_repost
         n_rel += int(p.is_relevant)
         p.stage = Post.STAGE_DONE
         p.stage_locked_at = None
