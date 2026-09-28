@@ -68,7 +68,9 @@ overnight run (`_dir/OVERNIGHT.md`) was a **reliability shortcut, not the canoni
 ```bash
 python manage.py monitor_prescreen_api --task <slug> \
     --date-from 2026-03-01 --date-to 2026-05-31
-# defaults: --model google/gemini-2.5-flash  --compact  --batch-size 50  --concurrency 12
+# defaults: --model <settings.LLM_MODEL>  --compact  --batch-size 50  --concurrency 12
+# Since 2026-09-28 that default is google/gemini-2.5-flash-LITE (A/B: higher recall
+# than Flash — 98.6% vs 95.9% — at 1/4 the price; see docs/AI-GUIDE.md).
 ```
 - Scope: `Post(task)` excluding `text=""` and `classification.is_filtered=True`; skips posts
   that already have `_prescreen` (idempotent — safe to re-run / resume after a kill).
