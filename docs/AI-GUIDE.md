@@ -43,8 +43,9 @@ Django 5.2 + Postgres (`tg_events`, усе в Docker, адмінка на **:800
 | id | slug | pipeline | що це | подій |
 |----|------|----------|-------|-------|
 | 1 | `ethnic-clashes` | events | міжетнічні сутички по всій РФ, 2025-2026 | ~9.5k |
-| 3 | `republics-criticism-monitor` | monitor | критика влади в коментарях чатів 3 республік (Дагестан/Татарстан/Саха) | ~108.7k (1:1 з коментарів) |
+| 3 | `republics-criticism-monitor` | monitor | критика влади в коментарях чатів 3 республік (Дагестан/Татарстан/Саха); збір TeleZip | ~108.7k (1:1 з коментарів) |
 | 6 | `ethnic-tension-events` | events | події напруги у 8 республіках (створюються ad-hoc скриптами, не воркерами) | ~350+ |
+| 19 | `fedcrit-sib-dv` | monitor | критика фед. влади, 20 регіонів СФО/ДФО; збір — ВИБІРКА Telegram-акаунтами (`mon_collect_source=tg_sample`), не TeleZip | ~4.2k |
 
 task=6 — «контейнер» для дослідницьких конвеєрів; його події створюються скриптами
 `_dir/` і тегуються категоріями:
@@ -77,6 +78,18 @@ collect(TeleZip) → enrich(Telethon) → precluster(fuzzy) → classify(LLM) �
 `analysis/pilot/prompts.py` — тож існуючі задачі працюють як раніше.
 
 ### monitor (критика; збір воркерами, тегування оркеструється Claude-агентами)
+**ДВА СПОСОБИ ЗБОРУ — дивись поле `AnalysisTask.mon_collect_source`, не вгадуй:**
+- `telezip` — суцільний потік за `telezip_query` (воркер `mon_collect`, ~$0.10 за чанк,
+  запускається через адмінку «Збори» / `run_create`). Так збирає задача #3.
+- `tg_sample` — **випадкова вибірка id повідомлень Telegram-акаунтами**, TeleZip не
+  чіпається: `manage.py monitor_sample_collect --task SLUG --from … --to … --per-region 1500`.
+  Паспорт кожного вікна — `MonitorSample` (з нього знаменник частки), кожному чату
+  потрібен свій акаунт у `MonitorChat.tg_account`. Так збирає задача #19.
+  У цьому режимі `telezip_query`/`collect_chunk_days` НЕ читаються — картка задачі їх
+  і не показує, `enqueue_collection` для такої задачі падає, а `mon_collect` не бере
+  її чанки (щоб вибірку не змішало зі суцільним потоком за гроші).
+
+Далі обидва шляхи однакові:
 ```
 mon_collect → mon_filter(25..600 симв) → mon_prescreen(OpenRouter, дешеве так/ні)
   → [АГЕНТ: тег+валідація ОДНИМ проходом: criticism_target+topic+opinion ⇒ is_relevant]

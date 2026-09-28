@@ -383,8 +383,12 @@ class RegionAdmin(admin.ModelAdmin):
 @admin.action(description="▶ Поставити збір у чергу (за період job'а)")
 def enqueue_job_action(modeladmin, request, queryset):
     for run in queryset:
-        n = stages.enqueue_collection(run.task, run.date_from, run.date_to,
-                                      chunk_days=run.chunk_days, job=run)
+        try:
+            n = stages.enqueue_collection(run.task, run.date_from, run.date_to,
+                                          chunk_days=run.chunk_days, job=run)
+        except ValueError as e:      # вибіркова monitor-задача: TeleZip не її шлях
+            messages.error(request, f"#{run.id}: {e}")
+            continue
         run.status = "collecting"
         run.save(update_fields=["status"])
         messages.success(
@@ -406,8 +410,12 @@ def reprocess_period_action(modeladmin, request, queryset):
 @admin.action(description="⟳ Перезібрати з нуля (TeleZip)")
 def recollect_fresh_action(modeladmin, request, queryset):
     for run in queryset:
-        n_ev, n_posts, n_chunks = stages.recollect_fresh(
-            run.task, run.date_from, run.date_to, job=run)
+        try:
+            n_ev, n_posts, n_chunks = stages.recollect_fresh(
+                run.task, run.date_from, run.date_to, job=run)
+        except ValueError as e:      # вибіркова monitor-задача: TeleZip не її шлях
+            messages.error(request, f"#{run.id}: {e}")
+            continue
         run.status = "collecting"
         run.save(update_fields=["status"])
         messages.success(
@@ -504,8 +512,13 @@ class ResearchRunAdmin(ScopedAdminMixin, admin.ModelAdmin):
         if obj.chunks.exists():
             return
         from .services import stages as _stages
-        made = _stages.enqueue_collection(obj.task, obj.date_from, obj.date_to,
-                                          chunk_days=obj.chunk_days, job=obj)
+        try:
+            made = _stages.enqueue_collection(obj.task, obj.date_from, obj.date_to,
+                                              chunk_days=obj.chunk_days, job=obj)
+        except ValueError as e:      # вибіркова monitor-задача: TeleZip не її шлях
+            messages.error(request, f"Запуск #{obj.id} створено, але чанки НЕ "
+                                    f"заплановано — {e}")
+            return
         obj.status = "collecting"
         obj.started_at = djtz.now()
         obj.save(update_fields=["status", "started_at"])
@@ -1014,14 +1027,34 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
         }),
     )
     # 💬 МОНІТОРИНГ КОМЕНТАРІВ: етапи (Етап 1 — збір + канали, канали переставляє JS)
-    _FS_MONITOR = (
-        ("💬 Етап 1 — Збір (TeleZip + канали)", {
+    # Етап 1 існує у двох варіантах — який показати, вирішує mon_collect_source
+    # (get_fieldsets): у режимі вибірки поля TeleZip не читаються взагалі, і
+    # показувати їх — значить брехати про те, як дослідження збирається.
+    _FS_MON_COLLECT_TELEZIP = (
+        "💬 Етап 1 — Збір: TeleZip (суцільний потік)", {
             "classes": ("mon-collect-fs",),
-            "description": "Збір коментарів із чатів дослідження (вкладка «Чати»). "
-                           "Репости завжди згортаються (унікальні). "
-                           "Запит '*' = усі повідомлення каналу за період.",
-            "fields": ("telezip_query", "collect_chunk_days", "languages"),
-        }),
+            "description": "Збір коментарів із чатів дослідження (вкладка «Чати») "
+                           "запитом до TeleZip — запускається через «Збори» "
+                           "(~$0.10 за чанк). Репости завжди згортаються "
+                           "(унікальні). Запит '*' = усі повідомлення каналу за період.",
+            "fields": ("mon_collect_source", "telezip_query", "collect_chunk_days",
+                       "languages"),
+        })
+    _FS_MON_COLLECT_SAMPLE = (
+        "💬 Етап 1 — Збір: випадкова вибірка Telegram-акаунтами", {
+            "classes": ("mon-collect-fs",),
+            "description": "TeleZip НЕ використовується: коментарі читаються "
+                           "Telegram-акаунтами по випадкових id повідомлень — "
+                           "<code>manage.py monitor_sample_collect --task SLUG "
+                           "--from … --to … --per-region 1500</code>. Кожному чату "
+                           "(вкладка «Чати») потрібен свій акаунт, паспорт кожного "
+                           "вікна — «Вибірки (вікна)», з них рахується знаменник "
+                           "частки. Поля «Пошуковий запит TeleZip» і «Розмір чанка» "
+                           "в цьому режимі не читаються, тому тут їх немає; «Збори» "
+                           "для такої задачі створювати не потрібно.",
+            "fields": ("mon_collect_source", "languages"),
+        })
+    _FS_MONITOR = (
         ("💬 Етап 2 — Фільтрація", {
             "description": "Дешевий відсів шуму без LLM (надто короткі/довгі повідомлення).",
             "fields": ("mon_min_len", "mon_max_len"),
@@ -1209,7 +1242,12 @@ class AnalysisTaskAdmin(OwnedAdminMixin, FastDeleteAdminMixin, admin.ModelAdmin)
         # жодного дублювання поля між fieldset-ами.
         pipeline = getattr(obj, "pipeline", None) or AnalysisTask.PIPELINE_EVENTS
         if pipeline == AnalysisTask.PIPELINE_MONITOR:
-            stages = self._FS_MONITOR
+            # Етап 1 = рівно той спосіб збору, який у задачі стоїть
+            src = getattr(obj, "mon_collect_source", None) or AnalysisTask.MON_SRC_TELEZIP
+            collect = (self._FS_MON_COLLECT_SAMPLE
+                       if src == AnalysisTask.MON_SRC_TG_SAMPLE
+                       else self._FS_MON_COLLECT_TELEZIP)
+            stages = (collect,) + self._FS_MONITOR
         elif pipeline == AnalysisTask.PIPELINE_RESEARCH:
             stages = self._FS_RESEARCH
         elif pipeline == AnalysisTask.PIPELINE_INFOSPACE:
@@ -1841,6 +1879,40 @@ class ClassifiedFilter(admin.SimpleListFilter):
         return qs
 
 
+# --- CSV-експорт довідника каналів ------------------------------------------
+# Роздільник «;», а не кома: файл відкривають в Excel з українською/російською
+# локаллю, де списковий роздільник саме «;» — з комою весь рядок лягає в одну
+# колонку. Для pandas: pd.read_csv(..., sep=";").
+CSV_DELIMITER = ";"
+
+
+def csv_bool(v):
+    """None (не перевіряли) має лишитись порожнім, а не перетворитись на «ні»."""
+    return "" if v is None else ("так" if v else "ні")
+
+
+def csv_dt(v):
+    return djtz.localtime(v).strftime("%Y-%m-%d %H:%M") if v else ""
+
+
+def csv_cell(v, guard=True):
+    """Захист від формул: назви й описи каналів пишуть сторонні люди, а Excel
+    виконує клітинку, що починається з = + - @. Лишаємо текст видимим, але
+    знешкоджуємо його апострофом (Excel його не показує).
+
+    guard=False — для юзернеймів: наш «+<хеш>» (інвайт-лінк) інакше поїхав би в
+    файл з апострофом і перестав збігатися як ключ при склейці таблиць, а
+    вмістити в юзернейм формулу неможливо — його алфавіт це [A-Za-z0-9_]
+    плюс наші префікси «+» і «linked:», без дужок, «!» і «|».
+    """
+    if v is None:
+        return ""
+    s = str(v)
+    if not guard:
+        return s
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
     @admin.display(description="Посилання", ordering="url")
@@ -1865,6 +1937,14 @@ class ChannelAdmin(admin.ModelAdmin):
     list_per_page = 50
     show_full_result_count = False          # 108k rows — skip the slow full COUNT(*)
     autocomplete_fields = ("region_subject", "linked_chat", "joined_by")
+    change_list_template = "admin/analysis/channel/change_list.html"
+
+    def get_urls(self):
+        custom = [
+            path("export/", self.admin_site.admin_view(self.export_csv),
+                 name="analysis_channel_export"),
+        ]
+        return custom + super().get_urls()
 
     @admin.display(description="Назва", ordering="title")
     def title_link(self, obj):
@@ -1891,6 +1971,82 @@ class ChannelAdmin(admin.ModelAdmin):
     @admin.display(description="Теми")
     def topics_display(self, obj):
         return ", ".join(obj.topics) if obj.topics else "—"
+
+    # ---------- вивантаження довідника у CSV ---------------------------------
+    # Кнопка «⬇ CSV» вивантажує ВЕСЬ відфільтрований список, а не виділені рядки
+    # й не поточну сторінку: фільтри зліва (підписники, регіон, тип, теми…) і є
+    # параметрами експорту — «база каналів від 10k» — це фільтр «Підписники від
+    # 10000» плюс кнопка. Тому це не admin-action: дії працюють лише з галочками
+    # на сторінці, а тут типовий обсяг — тисячі рядків.
+    #
+    # Віддається потоком (StreamingHttpResponse + .iterator()): довідник цілком —
+    # це 117k рядків, ~40 МБ, і збирати їх у пам'яті web-контейнера нема потреби.
+    def export_csv(self, request):
+        import csv
+        from django.contrib.admin.options import IncorrectLookupParameters
+        from django.core.exceptions import PermissionDenied
+        from django.http import StreamingHttpResponse, HttpResponseRedirect
+
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+
+        try:
+            cl = self.get_changelist_instance(request)
+        except IncorrectLookupParameters:
+            self.message_user(request, "Незрозумілі параметри фільтра — експорт скасовано.",
+                              level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:analysis_channel_changelist"))
+
+        qs = cl.queryset.select_related("region_subject")
+
+        class _Echo:
+            """csv.writer пише сюди, а ми віддаємо рядок далі в потік."""
+            def write(self, value):
+                return value
+
+        writer = csv.writer(_Echo(), delimiter=CSV_DELIMITER, lineterminator="\r\n")
+
+        def rows():
+            # BOM: без нього Excel читає UTF-8 як cp1251 і ламає кирилицю.
+            yield "\ufeff" + writer.writerow([h for h, _ in self.EXPORT_COLUMNS])
+            for obj in qs.iterator(chunk_size=2000):
+                yield writer.writerow(
+                    [csv_cell(get(obj), guard=name not in self.EXPORT_NO_GUARD)
+                     for name, get in self.EXPORT_COLUMNS])
+
+        fname = f"channels-{djtz.localdate():%Y-%m-%d}.csv"
+        resp = StreamingHttpResponse(rows(), content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
+
+    EXPORT_NO_GUARD = frozenset({"username"})
+
+    EXPORT_COLUMNS = (
+        ("id", lambda c: c.pk),
+        ("platform", lambda c: c.platform),
+        ("username", lambda c: c.username),
+        ("title", lambda c: c.title),
+        ("subscribers", lambda c: c.subscribers),
+        ("url", lambda c: c.url),
+        ("tg_id", lambda c: c.tg_id),
+        ("chat_type", lambda c: c.get_chat_type_display() if c.chat_type else ""),
+        ("is_channel", lambda c: csv_bool(c.is_channel)),
+        ("language", lambda c: c.language),
+        ("region", lambda c: c.region_subject.name if c.region_subject else ""),
+        ("settlement", lambda c: c.settlement),
+        ("topics", lambda c: "; ".join(c.topics or [])),
+        ("directory_focus", lambda c: c.directory_focus),
+        ("discusses_problems", lambda c: csv_bool(c.discusses_problems)),
+        ("comments_open", lambda c: csv_bool(c.comments_open)),
+        ("participants_visible", lambda c: csv_bool(c.participants_visible)),
+        ("access", lambda c: c.get_access_display() if c.access else ""),
+        ("human_msgs_per_day", lambda c: c.human_msgs_per_day),
+        ("msgs_per_day", lambda c: c.msgs_per_day),
+        ("last_post_at", lambda c: csv_dt(c.last_post_at)),
+        ("enriched", lambda c: csv_bool(c.enriched)),
+        ("fetched_at", lambda c: csv_dt(c.fetched_at)),
+        ("description", lambda c: " ".join((c.description or "").split())),
+    )
 
 
 class TagAliasInline(admin.TabularInline):

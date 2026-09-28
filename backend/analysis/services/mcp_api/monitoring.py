@@ -15,7 +15,9 @@ _PIPELINE_HOW = {
     "events": "events — події з TeleZip. Збір: run_create. Поля етапів — task_update "
               "з іменами з task_show (classify_prompt = classify_system_prompt).",
     "monitor": "monitor — критика в чатах, не інформпростір. Чати: chat_add. "
-               "Промпти: task_update prescreen_prompt, tagger_prompt.",
+               "Промпти: task_update prescreen_prompt, tagger_prompt. Спосіб збору — "
+               "поле mon_collect_source у картці: telezip (run_create, платно) або "
+               "tg_sample (вибірка акаунтами, команда monitor_sample_collect).",
     "research": "research — тематичне дослідження каналів. Чати: chat_add. "
                 "Рубрики: rubric_create. Промпт агента: task_update tagger_prompt.",
     "infospace": "infospace — полінг джерел, не TeleZip. Джерела: source_add. "
@@ -41,7 +43,8 @@ _TASK_GROUPS = {
         ("Агент-аудит", ("agent_review_prompt",)),
     ),
     "monitor": (
-        ("Збір", ("telezip_query", "collect_chunk_days", "languages")),
+        ("Збір — TeleZip (суцільний потік)",
+         ("mon_collect_source", "telezip_query", "collect_chunk_days", "languages")),
         ("Фільтрація", ("mon_min_len", "mon_max_len")),
         ("Прескрін", ("prescreen_model", "prescreen_prompt")),
         ("Тегування", ("tag_categories", "tagger_prompt")),
@@ -68,6 +71,14 @@ _TASK_GROUPS = {
         ("Тегування", ("tag_categories", "tagger_prompt", "llm_model")),
     ),
 }
+# monitor збирається двома різними способами (AnalysisTask.mon_collect_source):
+# TeleZip-потоком або випадковою вибіркою через Telegram-акаунти. Поля TeleZip у
+# режимі вибірки не читаються взагалі — показувати їх у картці означало б
+# сказати агенту, що задача шукає коментарі за гроші, коли вона цього не робить.
+_MON_COLLECT_SAMPLE_GROUP = (
+    "Збір — випадкова вибірка Telegram-акаунтами (TeleZip не використовується)",
+    ("mon_collect_source", "languages"),
+)
 _LONG_FIELDS = {
     "description", "telezip_query", "classify_system_prompt", "dedup_judge_prompt",
     "review_prompt", "agent_review_prompt", "search_terms", "stream_regex",
@@ -242,6 +253,13 @@ def _short_value(task, name):
         return task.owner.username if task.owner_id else "—"
     if name == "pipeline":
         return f"{task.pipeline} — {task.get_pipeline_display()}"
+    if name == "mon_collect_source":
+        how = ("команда monitor_sample_collect --task SLUG --from … --to …; "
+               "TeleZip НЕ використовується, кожному чату потрібен акаунт, "
+               "паспорти вікон — MonitorSample"
+               if task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE
+               else "run_create → воркер mon_collect, ~$0.10 за чанк TeleZip")
+        return f"{task.mon_collect_source} — {task.get_mon_collect_source_display()} ({how})"
     if name in ("created_at", "updated_at"):
         dt = getattr(task, name)
         return f"{timezone.localtime(dt):%Y-%m-%d %H:%M} ({fmt.ago(dt)})" if dt else "—"
@@ -341,9 +359,17 @@ def _effective_llm_section(task):
     return fmt.section("Промпт, який іде в LLM", body)
 
 
+def _task_groups(task):
+    """Розділи картки для конвеєра задачі; monitor — з блоком свого способу збору."""
+    groups = _TASK_GROUPS.get(task.pipeline, _TASK_GROUPS["events"])
+    if (task.pipeline == AnalysisTask.PIPELINE_MONITOR
+            and task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE):
+        groups = (_MON_COLLECT_SAMPLE_GROUP,) + tuple(groups[1:])
+    return groups
+
+
 def _task_config(task):
-    groups = (("Задача", _HEAD_FIELDS),) + _TASK_GROUPS.get(
-        task.pipeline, _TASK_GROUPS["events"])
+    groups = (("Задача", _HEAD_FIELDS),) + tuple(_task_groups(task))
     parts = []
     for i, (title, fields) in enumerate(groups):
         shorts, longs = [], []
@@ -409,9 +435,17 @@ def _task_gaps(task):
     """Чого бракує, щоб конвеєр цієї задачі взагалі мав що обробляти."""
     gaps = []
     pipe = task.pipeline
-    if pipe in ("events", "monitor") and not (task.telezip_query or "").strip():
+    sampled = (pipe == AnalysisTask.PIPELINE_MONITOR
+               and task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE)
+    if pipe in ("events", "monitor") and not sampled \
+            and not (task.telezip_query or "").strip():
         gaps.append("немає telezip_query — task_update telezip_query=… "
                     "(діалект v3: пробіл = АБО, І — це +)")
+    if sampled and not task.monitor_chats.filter(
+            is_active=True, tg_account__isnull=False).exists():
+        gaps.append("збір — вибірка акаунтами, але жодному активному чату не "
+                    "призначено Telegram-акаунт (chat_update task=" + task.slug
+                    + " channel=@… account=…)")
     if pipe in _CHAT_PIPES and not task.monitor_chats.filter(is_active=True).exists():
         gaps.append("немає активних чатів — chat_add task=" + task.slug + " channel=@…")
     if pipe == AnalysisTask.PIPELINE_RESEARCH and not task.rubrics.filter(is_active=True).exists():
@@ -594,6 +628,15 @@ def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
         raise ToolError(
             f"{t.slug} — конвеєр {t.pipeline}, run_create збирає TeleZip і його не чіпає. "
             + _PIPELINE_HOW.get(t.pipeline, ""))
+    if (t.pipeline == AnalysisTask.PIPELINE_MONITOR
+            and t.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE):
+        raise ToolError(
+            f"{t.slug} збирається ВИБІРКОЮ через Telegram-акаунти "
+            "(mon_collect_source=tg_sample), а не TeleZip: збір запускає команда "
+            "`manage.py monitor_sample_collect --task " + t.slug + " --from … --to …`. "
+            "run_create тут лише витратив би гроші на TeleZip і змішав вибірку зі "
+            "суцільним потоком. Якщо цій задачі СПРАВДІ треба TeleZip — спершу "
+            "task_update mon_collect_source=telezip.")
     d_from = common.parse_date(date_from, "date_from")
     d_to = common.parse_date(date_to, "date_to")
     if d_to < d_from:
@@ -1906,6 +1949,7 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
       "info_tagger_prompt": "Лише infospace: додаткові правила тегів, доклеюються до скрін-промпта. Порожньо = не змінювати; '-' = очистити (лишаться підказки категорій). Це НЕ підказка категорії (hint).",
       "info_judge_prompt": "Лише infospace: промпт судді зіставлення. Порожньо = не змінювати; '-' = очистити (дефолт із коду).",
       "tag_categories": "Ключі категорій тегів через кому — замінити набір задачі. Порожньо = не змінювати; '-' = відв'язати всі.",
+      "mon_collect_source": "Лише monitor: ЗВІДКИ беруться коментарі. telezip — суцільний потік за telezip_query (run_create, ~$0.10/чанк); tg_sample — випадкова вибірка id повідомлень Telegram-акаунтами (команда monitor_sample_collect, TeleZip не чіпається, кожному чату потрібен акаунт). Порожньо = не змінювати.",
       **_EXTRA_PARAM_DOCS})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
@@ -1933,7 +1977,7 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 stream_regex: str = "", stream_interval_min: int = None,
                 stream_media_chat_id: str = "",
                 search_terms: str = "", search_days: int = None,
-                search_limit_per_term: int = None):
+                search_limit_per_term: int = None, mon_collect_source: str = ""):
     """Змінити задачу: кожне поле картки task_show (ім'я в дужках) — параметр тут, для свого конвеєра.
 
     classify_prompt — лише events; info_screen_prompt, info_tagger_prompt, info_judge_prompt — лише infospace. Решта полів етапів називаються як у моделі.
@@ -1995,6 +2039,18 @@ def task_update(ref: str, telezip_query: str = "", languages: str = "",
     if chunk_days:
         t.collect_chunk_days = max(1, int(chunk_days))
         changed.append(f"чанк={t.collect_chunk_days} дн")
+    if mon_collect_source:
+        src = mon_collect_source.strip()
+        valid = [k for k, _ in AnalysisTask.MON_COLLECT_SOURCE_CHOICES]
+        if t.pipeline != AnalysisTask.PIPELINE_MONITOR:
+            raise ToolError(
+                f"{t.slug} — конвеєр {t.pipeline}, mon_collect_source є лише в monitor. "
+                + _PIPELINE_HOW.get(t.pipeline, ""))
+        if src not in valid:
+            raise ToolError("mon_collect_source приймає " + " | ".join(valid)
+                            + f", а не «{src}»")
+        t.mon_collect_source = src
+        changed.append("спосіб збору=" + _short_value(t, "mon_collect_source"))
     if is_active is not None:
         t.is_active = bool(is_active)
         changed.append(f"активна={fmt.flag(t.is_active)}")

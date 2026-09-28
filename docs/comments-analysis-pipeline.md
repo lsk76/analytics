@@ -21,6 +21,22 @@ collapsing exact same-author copies (`content_hash` / `also_in_chats`).
 mon_collect → mon_filter → mon_prescreen (OpenRouter, cheap) → [AGENT: tag+validate, ONE pass] → Event 1:1 → done
 ```
 
+### Where the comments come from: two collectors, one field
+
+`AnalysisTask.mon_collect_source` says which one a study uses — it is shown in the task
+card (admin, `task_show`) and nothing else infers it:
+
+| value | collector | cost | reads |
+|-------|-----------|------|-------|
+| `telezip` | worker `mon_collect` (chunks from a run) | ~$0.10 per chunk | `telezip_query`, `collect_chunk_days` |
+| `tg_sample` | `manage.py monitor_sample_collect` (Telethon, random message ids) | Telegram accounts, no TeleZip | `MonitorChat.tg_account`, writes `MonitorSample` |
+
+Guardrails, so the field cannot drift from reality: `enqueue_collection` refuses a
+`tg_sample` task (admin shows the message instead of planning chunks), `mon_collect_once`
+ignores its leftover chunks, MCP `run_create` refuses it, and `monitor_sample_collect`
+refuses a task still marked `telezip`. Everything after collection (filter → prescreen →
+tag → Event 1:1) is identical for both.
+
 ### Єдина структура моделей (рішення 2026-07-05)
 
 **Кожен відфільтрований (is_relevant) коментар матеріалізується як Event** — 1 коментар =

@@ -948,7 +948,21 @@ def dedup_once(task):
 
 def enqueue_collection(task, date_from, date_to, chunk_days=None, job=None):
     """Create pending CollectChunks covering [date_from, date_to], skipping ranges
-    already fully collected. Returns the number of new chunks."""
+    already fully collected. Returns the number of new chunks.
+
+    Чанк = платний запит до TeleZip, тож monitor-задача, яка збирається ВИБІРКОЮ
+    через Telegram-акаунти (mon_collect_source=tg_sample), сюди не потрапляє:
+    інакше вибірку (з якої рахується знаменник частки) змішало б зі суцільним
+    потоком, ще й за гроші. Її збір — manage.py monitor_sample_collect.
+    """
+    if (task.pipeline == task.PIPELINE_MONITOR
+            and task.mon_collect_source == task.MON_SRC_TG_SAMPLE):
+        raise ValueError(
+            f"{task.slug}: спосіб збору — вибірка через Telegram-акаунти "
+            "(mon_collect_source=tg_sample), TeleZip-чанки для неї не плануються. "
+            "Збір: manage.py monitor_sample_collect --task "
+            f"{task.slug} --from … --to …. Якщо задачі справді потрібен TeleZip — "
+            "спершу перемкни «Спосіб збору коментарів» у картці задачі.")
     chunk_days = max(1, int(chunk_days or task.collect_chunk_days or 3))
     made = 0
     d = date_from
