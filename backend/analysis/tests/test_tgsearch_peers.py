@@ -65,6 +65,39 @@ def test_assign_accounts_prefers_hash_owner_then_resolver(django_user_model):
     assert mc_n.tg_account_id in (a2.id, a3.id)                     # новий чат → лише хто резолвить
 
 
+def test_search_caches_linked_resolve_under_account(monkeypatch, django_user_model):
+    """Пошук у linked-групі: хеш із резолву кешується під акаунт, як у стрімі.
+
+    Раніше `_run_search_account` викидав `resolved` — і кожен прохід платив
+    резолв батьківського каналу заново (а він має добовий ліміт ~200).
+    """
+    from accounts.models import Proxy, TelegramAccount
+    from analysis.models import MonitorChat
+    from analysis.tests.factories import TaskFactory
+    u = django_user_model.objects.create(username="op3")
+    acc = TelegramAccount.objects.create(
+        user=u, phone_number="+77", is_authenticated=True,
+        proxy=Proxy.objects.create(proxy_string="h:7:u:p"))
+    task = TaskFactory(pipeline="tgsearch", search_terms="едро")
+    ch = Channel.objects.create(username="linked:parent", title="l")
+    mc = MonitorChat.objects.create(task=task, channel=ch, tg_account=acc)
+    assert tgs._entity_spec(ch, acc.id) == {"linked_parent": "parent"}
+
+    class FakeAcc:
+        def search(self, req, terms, **kw):
+            assert req[0]["entity"] == {"linked_parent": "parent"}
+            return [{"key": mc.id, "hits": [], "error": None,
+                     "resolved": {"id": 555, "access_hash": 888}}]
+    monkeypatch.setattr("accounts.services.registry.get", lambda _id: FakeAcc())
+
+    out = []
+    tgs._run_search_account(acc.id, [mc], ["едро"], None, 50, out)
+    ch.refresh_from_db()
+    assert ch.raw_meta["access_hash_by_acc"] == {str(acc.id): 888}
+    # наступного проходу резолв уже не потрібен — ідемо прямо за хешем
+    assert tgs._entity_spec(ch, acc.id) == {"channel_id": 555, "access_hash": 888}
+
+
 def test_search_error_retries_soon_not_in_12h(monkeypatch, django_user_model):
     """Збій пошуку не має виводити чат із роботи на всі RESEARCH_EVERY.
 

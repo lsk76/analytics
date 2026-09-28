@@ -206,6 +206,10 @@ def _run_search_account(acc_id, chats, terms, since, limit, out):
         mc = by_id.get(row.get("key"))
         if mc is None:
             continue
+        # Хеш, здобутий резолвом linked-групи, кешуємо ПІД ЦЕЙ акаунт — інакше
+        # кожен прохід платив би резолв заново (а він має добовий ліміт).
+        # Стрім так робив від початку, пошук — ні.
+        _apply_resolved(mc.channel, row.get("resolved"), acc_id)
         out.append((mc, None if row.get("error") else _hits_to_msgs(row["hits"], mc.channel),
                     row.get("error")))
 

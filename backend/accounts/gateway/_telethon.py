@@ -226,14 +226,27 @@ async def search(ctx, chats: list[dict], terms: list[str], since: str | None = N
     since_dt = datetime.fromisoformat(since) if since else None
     out = []
     for ch in chats:
-        row = {"key": ch.get("key"), "hits": [], "error": None}
+        row = {"key": ch.get("key"), "hits": [], "error": None, "resolved": None}
         out.append(row)
-        entity = _entity_from_spec(ch.get("entity") or {})
-        if entity is None:
-            row["error"] = "немає юзернейма й access_hash"
-            continue
+        spec = ch.get("entity") or {}
         found = {}
         try:
+            # Гілка linked_parent — та сама, що в scan(). Без неї пошук у
+            # групах обговорення не працював УЗАГАЛІ: `_entity_from_spec`
+            # віддавав None, і чат мовчки лягав на «немає юзернейма й
+            # access_hash» (прод 28.09: усі 25 обговорень задачі er-reaction,
+            # а це найщільніша на політику частина списку). Резолв віддає
+            # `resolved` — споживач кешує хеш під свій акаунт.
+            if spec.get("linked_parent"):
+                entity, row["resolved"] = await _resolve_linked(client, spec["linked_parent"])
+                if entity is None:
+                    row["error"] = "linked: у каналу немає групи обговорення"
+                    continue
+            else:
+                entity = _entity_from_spec(spec)
+            if entity is None:
+                row["error"] = "немає юзернейма й access_hash"
+                continue
             for term in terms:
                 msgs = await client.get_messages(entity, search=term, limit=limit)
                 for m in msgs:
