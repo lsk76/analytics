@@ -323,6 +323,11 @@ def _chunk_failure(chunk, e):
 
 def mon_collect_once(task):
     """Обробити ОДИН pending CollectChunk задачі-монітора. True якщо була робота."""
+    # Задача, перемкнена на вибірковий збір акаунтами, могла лишити в черзі старі
+    # чанки: кожен із них — платний запит до TeleZip у дослідження, яке його вже
+    # не використовує. Не забираємо їх узагалі (див. AnalysisTask.mon_collect_source).
+    if task.mon_collect_source == task.MON_SRC_TG_SAMPLE:
+        return False
     chunk = _claim_chunk(task)
     if not chunk:
         return False

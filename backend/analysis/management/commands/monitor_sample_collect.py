@@ -89,6 +89,14 @@ class Command(BaseCommand):
             task = AnalysisTask.objects.get(slug=o["task"])
         except AnalysisTask.DoesNotExist:
             raise CommandError(f"Задачі {o['task']!r} немає.")
+        # Спосіб збору в картці задачі має відповідати реальності: інакше в
+        # адмінці й у task_show написано «TeleZip», а коментарі приходять звідси.
+        if task.mon_collect_source != AnalysisTask.MON_SRC_TG_SAMPLE:
+            raise CommandError(
+                f"{task.slug}: «Спосіб збору коментарів» = {task.mon_collect_source}, "
+                "тобто задача заявлена як TeleZip-збір. Перемкни поле на tg_sample "
+                "(адмінка задачі або mcp task_update mon_collect_source=tg_sample) — "
+                "тоді картка не брехатиме про те, звідки взялися дані.")
         d_from, d_to = date.fromisoformat(o["date_from"]), date.fromisoformat(o["date_to"])
         if d_to < d_from:
             raise CommandError("--to раніше за --from")

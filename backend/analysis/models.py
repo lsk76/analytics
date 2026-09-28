@@ -226,6 +226,23 @@ class AnalysisTask(models.Model):
 
     # --- конфіг monitor-стадій (реюзабельність: усе редагується з адмінки, ---
     # --- згруповано по етапах у формі; порожнє поле = дефолт із коду) ---
+    MON_SRC_TELEZIP = "telezip"
+    MON_SRC_TG_SAMPLE = "tg_sample"
+    MON_COLLECT_SOURCE_CHOICES = [
+        (MON_SRC_TELEZIP, "TeleZip — суцільний потік за запитом (воркер mon_collect)"),
+        (MON_SRC_TG_SAMPLE, "Telegram-акаунти — випадкова вибірка (monitor_sample_collect)"),
+    ]
+    mon_collect_source = models.CharField(
+        max_length=12, choices=MON_COLLECT_SOURCE_CHOICES, default=MON_SRC_TELEZIP,
+        db_default=MON_SRC_TELEZIP, verbose_name="Спосіб збору коментарів",
+        help_text="ЗВІДКИ беруться коментарі — далі обидва шляхи йдуть тими самими "
+                  "стадіями filter→prescreen→tag. telezip: суцільний потік, платний "
+                  "(~$0.10/чанк), читає «Пошуковий запит TeleZip» і «Розмір чанка», "
+                  "запускається через «Збори». tg_sample: випадкова вибірка id "
+                  "повідомлень Telegram-акаунтами (команда monitor_sample_collect, "
+                  "паспорт вибірки — «Вибірки (вікна)»); запит TeleZip і чанк у цьому "
+                  "режимі НЕ читаються, натомість кожному чату потрібен акаунт.",
+    )
     mon_min_len = models.PositiveSmallIntegerField(
         default=25, verbose_name="Фільтр: мін. довжина коментаря",
         help_text="Коротші повідомлення відсіюються як шум (емодзі, «+1»).",
