@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 # Як часто має сенс перешукувати той самий чат. Пошук віддає ті самі повідомлення,
 # що й учора, тож частіше — марні запити до Telegram і зайвий ризик FloodWait.
 RESEARCH_EVERY = timedelta(hours=12)
+# Після збою чат пробуємо знову через це, а не через RESEARCH_EVERY.
+RETRY_AFTER = timedelta(minutes=20)
 PAUSE = 1.2                 # між запитами в межах одного акаунта
 CHATS_PER_TICK = 40         # скільки чатів беремо за один прохід стадії
 ACCOUNT_CONCURRENCY = 8
@@ -123,12 +125,21 @@ def _entity_spec(channel, account_id: int | None = None) -> dict | None:
     u = (channel.username or "").strip()
     if u and not u.startswith(("linked:", "+")):
         return {"username": u}
+    # Група обговорення: спершу резолв батьківського каналу, і лише потім
+    # глобальний хеш із raw_meta. Порядок саме такий, бо access hash
+    # ПРИВʼЯЗАНИЙ ДО АКАУНТА, а глобальний хеш здобув колись ЧУЖИЙ акаунт:
+    # передати його = ChannelInvalidError і нуль влучень (прод 28.09: так
+    # мовчки лягли 6 із 6 обшуканих linked-чатів, а це найцінніша частина
+    # списку — політика живе в обговореннях новинників). Резолв батька
+    # віддає хеш ПІД ЦЕЙ акаунт, і `_apply_resolved` кладе його в
+    # access_hash_by_acc, тож платиться він один раз. Той самий принцип,
+    # що вже діє вище для публічного юзернейма: чужий хеш не береться.
+    if u.startswith("linked:") and u.split(":", 1)[1].strip():
+        return {"linked_parent": u.split(":", 1)[1].strip()}
     ah = (channel.raw_meta or {}).get("tg_flags", {}).get("access_hash") \
         or (channel.raw_meta or {}).get("access_hash")
     if channel.tg_id and ah:
         return {"channel_id": int(channel.tg_id), "access_hash": int(ah)}
-    if u.startswith("linked:") and u.split(":", 1)[1].strip():
-        return {"linked_parent": u.split(":", 1)[1].strip()}
     return None
 
 
@@ -390,10 +401,17 @@ def tgs_search_once(task) -> bool:
     n_new = 0
     for mc, msgs, err in out:
         if err:
+            # Впалий чат НЕ має вибувати на всі 12 годин: помилка тут майже
+            # завжди транзієнтна (gateway у таймауті, акаунт у паузі, резолв
+            # не дався). Ставимо watermark у минуле так, щоб наступна спроба
+            # була через RETRY_AFTER, а не через RESEARCH_EVERY — і водночас
+            # не щотакту, інакше назавжди зламаний чат молотив би запитами.
             mc.notes = (f"[tgs_search] {err}"[:500])
-        elif msgs:
-            n_new += _store(task, mc, msgs)
-        mc.last_searched_at = dj_tz.now()
+            mc.last_searched_at = dj_tz.now() - RESEARCH_EVERY + RETRY_AFTER
+        else:
+            if msgs:
+                n_new += _store(task, mc, msgs)
+            mc.last_searched_at = dj_tz.now()
         mc.save(update_fields=["last_searched_at", "notes"] if err
                 else ["last_searched_at"])
     logger.info("tgs_search: чатів %d, нових повідомлень %d", len(out), n_new)
