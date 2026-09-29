@@ -13,8 +13,8 @@ from datetime import timedelta
 from django.db.models import Count, Max, Min, Q
 from django.utils import timezone
 
-from analysis.models import (AnalysisTask, CollectChunk, Event, MonitorChat, Post,
-                             ResearchRun, Source)
+from analysis.models import (AnalysisTask, CollectChunk, Event, MonitorChat,
+                             MonitorSampleJob, Post, ResearchRun, Source)
 
 
 def approved_events(task):
@@ -122,6 +122,26 @@ def _tgsearch(task, now, st: Status):
     st.note = f"оновлено {ago(st.last_update, now)}"
 
 
+def _sampled(task, now, st: Status):
+    """monitor із mon_collect_source=tg_sample: збір веде черга MonitorSampleJob.
+
+    Зборів (ResearchRun) і чанків у такої задачі немає ЗА ДИЗАЙНОМ, тож без цієї
+    гілки стан показував «збору не було» навіть під час роботи вибірки.
+    """
+    job = MonitorSampleJob.objects.filter(task=task).order_by("-created_at").first()
+    st.last_update = (job and job.finished_at) or (
+        approved_events(task).aggregate(m=Max("created_at"))["m"])
+    if job and job.status == "failed":
+        st.state = PROBLEM
+        st.note = f"збір вибірки не вдався ({ago(job.finished_at, now)})"
+        return
+    if job and job.status == "running":
+        st.activity = "збираємо вибірку зараз"
+    elif job and job.status == "pending":
+        st.activity = "вибірка чекає воркера"
+    st.note = f"останній збір {ago(st.last_update, now)}"
+
+
 def _run_based(task, now, st: Status):
     """events / monitor / research: збір за період на запит (ResearchRun)."""
     run = ResearchRun.objects.filter(task=task).order_by("-created_at").first()
@@ -157,6 +177,9 @@ def task_status(task, now=None) -> Status:
         _infospace(task, now, st)
     elif task.pipeline == AnalysisTask.PIPELINE_TGSEARCH:
         _tgsearch(task, now, st)
+    elif (task.pipeline == AnalysisTask.PIPELINE_MONITOR
+          and task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE):
+        _sampled(task, now, st)
     else:
         _run_based(task, now, st)
 

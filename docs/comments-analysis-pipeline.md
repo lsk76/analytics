@@ -29,7 +29,19 @@ card (admin, `task_show`) and nothing else infers it:
 | value | collector | cost | reads |
 |-------|-----------|------|-------|
 | `telezip` | worker `mon_collect` (chunks from a run) | ~$0.10 per chunk | `telezip_query`, `collect_chunk_days` |
-| `tg_sample` | `manage.py monitor_sample_collect` (Telethon, random message ids) | Telegram accounts, no TeleZip | `MonitorChat.tg_account`, writes `MonitorSample` |
+| `tg_sample` | `manage.py monitor_sample_collect` (Telethon, random message ids), queued as a `MonitorSampleJob` and executed by stage `mon_sample` (`worker-mon-sample`) | Telegram accounts, no TeleZip | `MonitorChat.tg_account`, writes `MonitorSample` |
+
+**How a sampled window is ordered.** A sample run reads Telegram for tens of minutes
+(hundreds of requests with pauses), so neither an admin HTTP request nor an MCP call
+runs it inline. MCP `sample_collect` (or the admin section «Вибірки — завдання на
+збір») only queues a `MonitorSampleJob`; the `mon_sample` stage worker claims it and
+calls the command. Order of work: `mode=dry_run` (quotas only, reads nothing) →
+`mode=probe` (share of live people per chat, writes no posts) → `mode=collect`
+(`confirm=true` required — it spends account activity and risks FloodWait). Progress
+and the command output: `samples_list log=true` (live log —
+`_dir/samples/job_<id>.log`, because the command prints from an async branch where the
+ORM is unavailable). Windows must not overlap: each writes a `MonitorSample` passport,
+and `probe` overwrites the passport of the window it probes.
 
 Guardrails, so the field cannot drift from reality: `enqueue_collection` refuses a
 `tg_sample` task (admin shows the message instead of planning chunks), `mon_collect_once`

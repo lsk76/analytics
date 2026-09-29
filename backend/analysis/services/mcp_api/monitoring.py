@@ -1,11 +1,12 @@
 """Моніторинги: задачі, збори (runs), whitelist чатів, джерела інформпростору, зрізи подій."""
 from datetime import timedelta
 
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 
-from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, Post,
-                             ResearchRubric, ResearchRun, Source, SourceSubscription)
+from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, MonitorSample,
+                             MonitorSampleJob, Post, ResearchRubric, ResearchRun, Source,
+                             SourceSubscription)
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
@@ -680,6 +681,213 @@ def run_cancel(run_id: int, drop_pending_chunks: bool = True):
     r.save(update_fields=["status", "finished_at"])
     return (f"Збір #{r.id} ({r.task.slug}) скасовано; прибрано {dropped} чанків у черзі. "
             "Уже зібрані пости лишились у конвеєрі.")
+
+
+# Вибірковий збір (mon_collect_source=tg_sample): замовлення в чергу, а не
+# виконання на місці. Сам збір — години читання Telegram, тож його веде воркер
+# worker-mon-sample (analysis/services/sample_stage.py); тут лише рядок черги.
+_SAMPLE_MODES = {
+    "dry_run": MonitorSampleJob.MODE_DRY_RUN,
+    "dry-run": MonitorSampleJob.MODE_DRY_RUN,
+    "probe": MonitorSampleJob.MODE_PROBE,
+    "collect": MonitorSampleJob.MODE_COLLECT,
+}
+
+
+def _sample_task(ref):
+    """Задача, яку СПРАВДІ збирають вибіркою. Інакше — куда йти замість цього."""
+    t = common.resolve_task(ref)
+    if t.pipeline != AnalysisTask.PIPELINE_MONITOR:
+        raise ToolError(f"{t.slug} — конвеєр {t.pipeline}, вибірка коментарів буває лише "
+                        "в monitor. " + _PIPELINE_HOW.get(t.pipeline, ""))
+    if t.mon_collect_source != AnalysisTask.MON_SRC_TG_SAMPLE:
+        raise ToolError(
+            f"{t.slug} збирається TeleZip-потоком (mon_collect_source=telezip), а не "
+            "вибіркою: збір такої задачі — run_create (~$0.10 за чанк). Якщо їй "
+            "справді потрібна вибірка Telegram-акаунтами — спершу "
+            "task_update mon_collect_source=tg_sample.")
+    return t
+
+
+def _sample_job_row(j):
+    from analysis.services import sample_stage
+    last = ""
+    for line in reversed((sample_stage.log_tail(j, 2000) or "").splitlines()):
+        if line.strip():
+            last = fmt.trunc(line.strip(), 60)
+            break
+    return [j.id, f"{j.date_from}…{j.date_to}", j.mode, j.status,
+            fmt.ago(j.finished_at or j.started_at or j.created_at), last]
+
+
+@tool("sample_collect", group="monitoring", mutates=True, params={
+      "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
+      "date_from": "Перший день вікна, YYYY-MM-DD (UTC).",
+      "date_to": "Останній день вікна, YYYY-MM-DD (UTC), ВКЛЮЧНО. Вікна НЕ перекривати: на кожне пишеться паспорт вибірки (знаменник частки).",
+      "mode": "dry_run — кошторис (Telegram не читається, нічого не пише); probe — розвідка (N випадкових id У КОЖНОМУ чаті, рахує частку живих людей, постів НЕ пише); collect — справжній збір. Починай із dry_run.",
+      "per_region": "Режим collect: цільова вибірка на регіон. 1500 дають ±1 в.п. при частці ~4%.",
+      "probe_ids": "Режим probe: скільки випадкових id узяти в КОЖНОМУ чаті (дефолт 200).",
+      "regions": "Лише ці регіони, через кому (назви як у довіднику). Порожньо = усі.",
+      "seed": "Зерно ГВЧ — ненульове робить вибірку відтворюваною. 0 = випадкове.",
+      "resume": "true — пропустити чати, для яких пости за це вікно вже є (відновлення після обриву).",
+      "confirm": "Режим collect без confirm=true лише показує кошторис і НЕ ставить завдання: збір — це години активності Telegram-акаунтів (ризик FloodWait). dry_run і probe згоди не потребують."})
+def sample_collect(task: str, date_from: str, date_to: str, mode: str = "dry_run",
+                   per_region: int = 1500, probe_ids: int = 200, regions: str = "",
+                   seed: int = 0, resume: bool = False, confirm: bool = False):
+    """Замовити ВИБІРКОВИЙ збір коментарів Telegram-акаунтами (mon_collect_source=tg_sample).
+
+    TeleZip не використовується — грошей не витрачає, але тратить активність
+    акаунтів. Виконання йде не тут: створюється завдання в черзі, його забирає
+    воркер `worker-mon-sample` (десятки хвилин на місяць × 20 регіонів).
+    Прогрес і вивід — `samples_list`; зняти те, що ще не почалось — `sample_cancel`.
+    """
+    t = _sample_task(task)
+    key = str(mode or "").strip().lower().replace("-", "_")
+    if key not in _SAMPLE_MODES:
+        raise ToolError("mode має бути dry_run, probe або collect")
+    job_mode = _SAMPLE_MODES[key]
+    d_from = common.parse_date(date_from, "date_from")
+    d_to = common.parse_date(date_to, "date_to")
+    if d_to < d_from:
+        raise ToolError("date_to раніше за date_from")
+    if (d_to - d_from).days > 366:
+        raise ToolError("вікно >366 днів: вибірку замовляють по місяцях — так вікна "
+                        "не перекриваються і частку можна рахувати по місяцях")
+
+    active = MonitorSampleJob.objects.filter(task=t, status__in=["pending", "running"]).first()
+    if active:
+        raise ToolError(f"у задачі вже є завдання #{active.id} ({active.status}, "
+                        f"{active.date_from}…{active.date_to}): два збори одночасно "
+                        "поділили б ті самі акаунти і зіпсували б паспорти вікон. "
+                        "Стан — samples_list; зняти — sample_cancel.")
+
+    chats = list(MonitorChat.objects.filter(task=t, is_active=True)
+                 .select_related("channel", "channel__region_subject", "tg_account"))
+    picked = [r.strip() for r in (regions or "").split(",") if r.strip()]
+    if picked:
+        chats = [c for c in chats
+                 if c.channel.region_subject and c.channel.region_subject.name in picked]
+    ready = [c for c in chats if c.tg_account and c.tg_account.is_authenticated]
+    if not ready:
+        raise ToolError(f"{t.slug}: немає активних чатів з прив'язаним авторизованим "
+                        "акаунтом" + (f" у регіонах {', '.join(picked)}" if picked else "")
+                        + ". Дивись chats_list (акаунт збору) — без акаунта чат не читається.")
+    regions_n = len({c.channel.region_subject_id for c in ready if c.channel.region_subject})
+    no_acc = len(chats) - len(ready)
+
+    posts_in = Post.objects.filter(task=t, posted_at__date__gte=d_from,
+                                   posted_at__date__lte=d_to).count()
+    warn = []
+    if no_acc:
+        warn.append(f"⚠ {no_acc} чатів без авторизованого акаунта — їх пропустять "
+                    "(chats_list problems_only=true)")
+    if posts_in and job_mode == MonitorSampleJob.MODE_COLLECT and not resume:
+        warn.append(f"⚠ у вікні вже є {posts_in} постів: повторний збір допише нову "
+                    "вибірку до старої, а паспорти вікон перепишуться — або бери "
+                    "resume=true, або спершу розберись, звідки ці пости")
+    if posts_in and job_mode == MonitorSampleJob.MODE_PROBE:
+        warn.append(f"⚠ у вікні вже є {posts_in} постів, а probe ПЕРЕПИШЕ паспорти "
+                    "вибірки цього вікна (знаменник частки) своїми цифрами — "
+                    "розвідку роби до збору або на іншому вікні")
+
+    plan = (f"задача {t.slug}: {len(ready)} чатів у {regions_n} регіонах, "
+            f"вікно {d_from}…{d_to}"
+            + (f", регіони: {', '.join(picked)}" if picked else "")
+            + (f", квота {per_region}/регіон" if job_mode == MonitorSampleJob.MODE_COLLECT
+               else f", {probe_ids} id на чат" if job_mode == MonitorSampleJob.MODE_PROBE
+               else ", Telegram не читається")
+            + (f", seed={seed}" if seed else "") + (", resume" if resume else ""))
+    if job_mode == MonitorSampleJob.MODE_COLLECT and not confirm:
+        return fmt.joinsec(
+            fmt.section("Завдання НЕ поставлено — потрібна згода", plan),
+            "Справжній збір читає Telegram сотнями запитів з паузами (десятки хвилин "
+            "на місяць × 20 регіонів) і витрачає активність акаунтів — є ризик "
+            "FloodWait. Грошей не витрачає (TeleZip не чіпається).\n"
+            "Спершу: mode=dry_run (квоти й межі), далі mode=probe (частка живих людей "
+            "у чатах). Погоджено людиною — повтори з confirm=true.",
+            *warn)
+
+    job = MonitorSampleJob.objects.create(
+        task=t, date_from=d_from, date_to=d_to, mode=job_mode,
+        per_region=max(1, common.as_int(per_region, "per_region")),
+        probe_ids=max(0, common.as_int(probe_ids, "probe_ids")),
+        regions=", ".join(picked), seed=max(0, common.as_int(seed, "seed")),
+        resume=bool(resume), created_by=getattr(registry.actor(), "user", None))
+    return fmt.joinsec(
+        fmt.section(f"Завдання #{job.id} у черзі [{job_mode}]", plan),
+        "Забере воркер worker-mon-sample (перший прохід — до хвилини). Прогрес і "
+        f"вивід команди: samples_list task={t.slug}; зняти, поки не почалось: "
+        f"sample_cancel job_id={job.id}.",
+        *warn)
+
+
+@tool("samples_list", group="monitoring", params={
+      "task": 'Задача: числовий id, slug або частина назви. Порожньо = усі видимі вибіркові задачі.',
+      "limit": "Скільки завдань показати.",
+      "log": "true — показати вивід команди активного (або останнього) завдання."})
+def samples_list(task: str = "", limit: int = 10, log: bool = False):
+    """Черга вибіркових зборів (tg_sample): завдання, їх стан і зібрані вікна.
+
+    Тут видно і те, чого немає в «Зборах» (ResearchRun): вибіркова задача не має
+    чанків TeleZip, її збір ведуть завдання цієї черги.
+    """
+    from analysis.services import sample_stage
+    qs = common.scope_by_task(MonitorSampleJob.objects.select_related("task", "created_by"))
+    t = None
+    if task:
+        t = _sample_task(task)
+        qs = qs.filter(task=t)
+    jobs = list(qs.order_by("-created_at")[:max(1, common.as_int(limit, "limit"))])
+    parts = []
+    if not jobs:
+        parts.append("завдань на вибірку немає — замовити збір: sample_collect "
+                     "(починай з mode=dry_run)")
+    else:
+        parts.append(fmt.section(
+            "Завдання на вибірку",
+            fmt.table(["#", "вікно", "режим", "статус", "оновлено", "останній рядок"],
+                      [_sample_job_row(j) for j in jobs])))
+    if t:
+        win = (MonitorSample.objects.filter(task=t).order_by()
+               .values("period_start", "period_end")
+               .annotate(chats=Count("id"), asked=Sum("n_requested"),
+                         text=Sum("n_text"), people=Sum("n_user"))
+               .order_by("-period_start")[:12])
+        rows = [[f"{w['period_start']}…{w['period_end']}", w["chats"], w["asked"],
+                 w["text"], w["people"],
+                 fmt.pct(w["people"] or 0, w["text"] or 0)] for w in win]
+        parts.append(fmt.section(
+            "Зібрані вікна (паспорти вибірки — знаменник частки)",
+            fmt.table(["вікно", "чатів", "запитано id", "з текстом", "від людей",
+                       "людей від тексту"], rows) if rows else "вікон немає"))
+    if log and jobs:
+        j = next((x for x in jobs if x.is_active), jobs[0])
+        parts.append(fmt.section(f"Вивід завдання #{j.id} ({j.status})",
+                                 sample_stage.log_tail(j, 4000) or "виводу ще немає"))
+    elif jobs:
+        parts.append("Повний вивід команди: samples_list log=true.")
+    return fmt.joinsec(*parts)
+
+
+@tool("sample_cancel", group="monitoring", mutates=True, params={
+      "job_id": "Числовий id завдання зі samples_list."})
+def sample_cancel(job_id: int):
+    """Зняти завдання на вибірку, яке ЩЕ НЕ почалось (статус pending).
+
+    Те, що вже біжить, звідси не зупинити: команда читає Telegram у своєму
+    процесі. Її обриває лише рестарт воркера (service_restart worker-mon-sample),
+    а продовжити потім — sample_collect resume=true.
+    """
+    j = common.scope_by_task(MonitorSampleJob.objects).filter(
+        pk=common.as_int(job_id, "job_id")).first()
+    if not j:
+        raise ToolError(f"завдання #{job_id} немає")
+    if j.status != "pending":
+        raise ToolError(f"завдання #{j.id} у статусі {j.status} — знімати можна лише "
+                        "pending (те, що ще не почалось)")
+    j.status, j.finished_at = "cancelled", timezone.now()
+    j.save(update_fields=["status", "finished_at"])
+    return (f"Завдання #{j.id} ({j.task.slug} {j.date_from}…{j.date_to}) знято з черги.")
 
 
 @tool("chats_list", group="monitoring", params={

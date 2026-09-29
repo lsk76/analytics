@@ -83,6 +83,10 @@ collect(TeleZip) → enrich(Telethon) → precluster(fuzzy) → classify(LLM) �
   запускається через адмінку «Збори» / `run_create`). Так збирає задача #3.
 - `tg_sample` — **випадкова вибірка id повідомлень Telegram-акаунтами**, TeleZip не
   чіпається: `manage.py monitor_sample_collect --task SLUG --from … --to … --per-region 1500`.
+  З MCP/адмінки те саме замовляють у чергу: `sample_collect` (`mode=dry_run` → `probe` →
+  `collect` з `confirm=true`) створює `MonitorSampleJob`, а виконує його стадія
+  `mon_sample` (`worker-mon-sample`) — збір триває десятки хвилин, тож ні HTTP-запит
+  адмінки, ні виклик MCP його в собі не тримають. Стан — `samples_list`.
   Паспорт кожного вікна — `MonitorSample` (з нього знаменник частки), кожному чату
   потрібен свій акаунт у `MonitorChat.tg_account`. Так збирає задача #19.
   У цьому режимі `telezip_query`/`collect_chunk_days` НЕ читаються — картка задачі їх

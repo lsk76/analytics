@@ -4,8 +4,8 @@ from datetime import timedelta
 from django.db.models import Count, Max, Min
 from django.utils import timezone
 
-from analysis.models import (AnalysisTask, CollectChunk, Event, Post, PublishConfig,
-                             PublishedEvent, ResearchRun, Setting, Source)
+from analysis.models import (AnalysisTask, CollectChunk, Event, MonitorSampleJob, Post,
+                             PublishConfig, PublishedEvent, ResearchRun, Setting, Source)
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_ADMIN, ToolError, tool
 
@@ -118,6 +118,19 @@ def service_health():
                  + ", ".join(f"#{r.id}" for r in waiting)
                  + " — батчі в backend/_dir/runs/run_<id>/")
     parts.append(fmt.section("Збори (незавершені)", body))
+
+    # --- вибіркові збори (tg_sample: ні чанків, ні ResearchRun — своя черга) --
+    sjobs = (common.scope_by_task(MonitorSampleJob.objects)
+             .exclude(status__in=["done", "cancelled"])
+             .select_related("task").order_by("-created_at")[:12])
+    if sjobs:
+        parts.append(fmt.section(
+            "Вибірки Telegram-акаунтами (незавершені)",
+            fmt.table(["#", "задача", "режим", "статус", "вікно", "створено"],
+                      [[f"#{j.id}", j.task.slug, j.mode, j.status,
+                        f"{j.date_from}…{j.date_to}", fmt.ago(j.created_at)]
+                       for j in sjobs])
+            + "\n\nРозгрібає worker-mon-sample; вивід — samples_list log=true."))
 
     # --- свіжість даних по активних задачах ---------------------------------
     # ОДНИМ згрупованим запитом на всю таблицю, а не «останній рядок задачі» в

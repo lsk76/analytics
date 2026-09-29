@@ -601,8 +601,8 @@
   "mutates": true,
   "scope": "mcp:create",
   "perm": "analysis.add_monitorchat",
-  "doc": "Додати чат у whitelist задачі (те, що в адмінці — вкладка «Чати»).\n\nЛише конвеєри monitor, research, tgsearch. Повтор того самого чату не дублює.\nДля infospace джерело підключається через source_add, не через чат.",
-  "summary": "Додати чат у whitelist задачі (те, що в адмінці — вкладка «Чати»).",
+  "doc": "Додати чат (або одразу багато) у whitelist задачі — вкладка «Чати» в адмінці.\n\nЛише конвеєри monitor, research, tgsearch. Повтор того самого чату не дублює.\nДля infospace джерело підключається через source_add, не через чат.\n\nСписок через кому додається ОДНИМ викликом: вотчліст на сотню чатів інакше\nозначав би сотню викликів. Кожен рядок звітується окремо, і помилка на\nодному чаті не скасовує решту — так само, як у channels_find.",
+  "summary": "Додати чат (або одразу багато) у whitelist задачі — вкладка «Чати» в адмінці.",
   "params": [
    {
     "name": "task",
@@ -614,7 +614,7 @@
    {
     "name": "channel",
     "type": "str",
-    "doc": "@username, посилання t.me або id рядка довідника. Невідомий @username створюється в довіднику.",
+    "doc": "@username, посилання t.me або id рядка довідника. Невідомий @username створюється в довіднику. МОЖНА КІЛЬКА ЧЕРЕЗ КОМУ або по одному в рядок — усі за один виклик: «@a, @b, linked:c». Стеля 300 за виклик.",
     "default": null,
     "required": true
    },
@@ -1680,6 +1680,137 @@
     "type": "int",
     "doc": "Скільки зборів показати.",
     "default": 15,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "sample_cancel",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_monitorsamplejob",
+  "doc": "Зняти завдання на вибірку, яке ЩЕ НЕ почалось (статус pending).\n\nТе, що вже біжить, звідси не зупинити: команда читає Telegram у своєму\nпроцесі. Її обриває лише рестарт воркера (service_restart worker-mon-sample),\nа продовжити потім — sample_collect resume=true.",
+  "summary": "Зняти завдання на вибірку, яке ЩЕ НЕ почалось (статус pending).",
+  "params": [
+   {
+    "name": "job_id",
+    "type": "int",
+    "doc": "Числовий id завдання зі samples_list.",
+    "default": null,
+    "required": true
+   }
+  ]
+ },
+ {
+  "name": "sample_collect",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.add_monitorsamplejob",
+  "doc": "Замовити ВИБІРКОВИЙ збір коментарів Telegram-акаунтами (mon_collect_source=tg_sample).\n\nTeleZip не використовується — грошей не витрачає, але тратить активність\nакаунтів. Виконання йде не тут: створюється завдання в черзі, його забирає\nворкер `worker-mon-sample` (десятки хвилин на місяць × 20 регіонів).\nПрогрес і вивід — `samples_list`; зняти те, що ще не почалось — `sample_cancel`.",
+  "summary": "Замовити ВИБІРКОВИЙ збір коментарів Telegram-акаунтами (mon_collect_source=tg_sample).",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Перший день вікна, YYYY-MM-DD (UTC).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Останній день вікна, YYYY-MM-DD (UTC), ВКЛЮЧНО. Вікна НЕ перекривати: на кожне пишеться паспорт вибірки (знаменник частки).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "mode",
+    "type": "str",
+    "doc": "dry_run — кошторис (Telegram не читається, нічого не пише); probe — розвідка (N випадкових id У КОЖНОМУ чаті, рахує частку живих людей, постів НЕ пише); collect — справжній збір. Починай із dry_run.",
+    "default": "dry_run",
+    "required": false
+   },
+   {
+    "name": "per_region",
+    "type": "int",
+    "doc": "Режим collect: цільова вибірка на регіон. 1500 дають ±1 в.п. при частці ~4%.",
+    "default": 1500,
+    "required": false
+   },
+   {
+    "name": "probe_ids",
+    "type": "int",
+    "doc": "Режим probe: скільки випадкових id узяти в КОЖНОМУ чаті (дефолт 200).",
+    "default": 200,
+    "required": false
+   },
+   {
+    "name": "regions",
+    "type": "str",
+    "doc": "Лише ці регіони, через кому (назви як у довіднику). Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "seed",
+    "type": "int",
+    "doc": "Зерно ГВЧ — ненульове робить вибірку відтворюваною. 0 = випадкове.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "resume",
+    "type": "bool",
+    "doc": "true — пропустити чати, для яких пости за це вікно вже є (відновлення після обриву).",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "Режим collect без confirm=true лише показує кошторис і НЕ ставить завдання: збір — це години активності Telegram-акаунтів (ризик FloodWait). dry_run і probe згоди не потребують.",
+    "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "samples_list",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_monitorsamplejob",
+  "doc": "Черга вибіркових зборів (tg_sample): завдання, їх стан і зібрані вікна.\n\nТут видно і те, чого немає в «Зборах» (ResearchRun): вибіркова задача не має\nчанків TeleZip, її збір ведуть завдання цієї черги.",
+  "summary": "Черга вибіркових зборів (tg_sample): завдання, їх стан і зібрані вікна.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача: числовий id, slug або частина назви. Порожньо = усі видимі вибіркові задачі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки завдань показати.",
+    "default": 10,
+    "required": false
+   },
+   {
+    "name": "log",
+    "type": "bool",
+    "doc": "true — показати вивід команди активного (або останнього) завдання.",
+    "default": false,
     "required": false
    }
   ]
@@ -2868,6 +2999,13 @@
     "type": "int",
     "doc": "Стеля влучень на слово. Лише конвеєри: tgsearch. Не передавати = не змінювати. 0 — валідне значення.",
     "default": null,
+    "required": false
+   },
+   {
+    "name": "mon_collect_source",
+    "type": "str",
+    "doc": "Лише monitor: ЗВІДКИ беруться коментарі. telezip — суцільний потік за telezip_query (run_create, ~$0.10/чанк); tg_sample — випадкова вибірка id повідомлень Telegram-акаунтами (команда monitor_sample_collect, TeleZip не чіпається, кожному чату потрібен акаунт). Порожньо = не змінювати.",
+    "default": "",
     "required": false
    }
   ]

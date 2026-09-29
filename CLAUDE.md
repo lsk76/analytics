@@ -26,6 +26,10 @@
   `chats_list`, `sources_list`, `run_create`, `service_restart`… Нові інструменти
   додавай У DJANGO-ШАР `backend/analysis/services/mcp_api/` — host-сервер бере їх
   із маніфесту сам, дублювати в `mcp_server/server.py` не треба.
+  Довга операція НЕ виконується всередині виклику, а йде в чергу воркера:
+  вибірковий збір (monitor із `mon_collect_source=tg_sample`) замовляє
+  `sample_collect` → `MonitorSampleJob` → стадія `mon_sample`
+  (`worker-mon-sample`); стан і вивід — `samples_list`.
   Telegram «руками» акаунтів — `tg_*` (`mcp_api/telegram.py` → `ManagedAccount.tg()` →
   gateway `accounts/gateway/_tg_tools.py`): нову операцію додавай у `_tg_tools.OPS`
   і рестартуй `tg-gateway`; надсилання — `mcp:admin`.

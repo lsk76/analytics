@@ -905,6 +905,85 @@ class MonitorSample(models.Model):
         return f"{self.channel} {self.period_start:%Y-%m}: {self.n_text}/{self.n_requested}"
 
 
+class MonitorSampleJob(models.Model):
+    """Черга «зібрати вибірку» — одне вікно (задача × період) на рядок.
+
+    Збір вибірки читає Telegram сотнями запитів з паузами: для monitor-задачі на
+    20 регіонів це десятки хвилин. Тому інструмент MCP (`sample_collect`) і
+    адмінка НЕ роблять його самі, а ставлять сюди завдання — його забирає стадія
+    `mon_sample` (`manage.py run_worker --stage mon_sample`, той самий
+    claim-патерн, що й WarmUpJob). Без цього рядка збір вибірки можна було
+    запустити лише командою з консолі сервера, тож у мережевому MCP (де docker
+    недоступний за побудовою) вибіркові задачі неможливо було зібрати взагалі.
+
+    Паспорти вікон (знаменник метрики) пише сама команда — `MonitorSample`.
+    """
+    STATUS_CHOICES = [
+        ("pending", "Очікує"),
+        ("running", "Виконується"),
+        ("done", "Завершено"),
+        ("failed", "Помилка"),
+        ("cancelled", "Скасовано"),
+    ]
+    MODE_COLLECT = "collect"
+    MODE_PROBE = "probe"
+    MODE_DRY_RUN = "dry_run"
+    MODE_CHOICES = [
+        (MODE_COLLECT, "Збір (пише пости)"),
+        (MODE_PROBE, "Розвідка чатів (--probe, постів не пише)"),
+        (MODE_DRY_RUN, "Кошторис (--dry-run, Telegram не читається)"),
+    ]
+
+    task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,
+                             related_name="sample_jobs", verbose_name="Задача")
+    date_from = models.DateField(verbose_name="Період з")
+    date_to = models.DateField(verbose_name="Період по (включно)")
+    mode = models.CharField(max_length=8, choices=MODE_CHOICES, default=MODE_COLLECT,
+                            verbose_name="Режим")
+    per_region = models.PositiveIntegerField(
+        default=1500, verbose_name="Квота на регіон",
+        help_text="Цільова вибірка на регіон. 1500 дають ±1 в.п. при частці ~4%.")
+    probe_ids = models.PositiveIntegerField(
+        default=0, verbose_name="Розвідка: id на чат",
+        help_text="Лише для режиму probe: скільки випадкових id узяти в КОЖНОМУ чаті.")
+    regions = models.CharField(
+        max_length=500, blank=True, verbose_name="Лише ці регіони (кома)",
+        help_text="Порожньо = усі регіони задачі.")
+    seed = models.PositiveIntegerField(
+        default=0, verbose_name="Зерно ГВЧ",
+        help_text="0 = випадкове. Ненульове робить вибірку відтворюваною.")
+    resume = models.BooleanField(
+        default=False, verbose_name="Продовжити (--resume)",
+        help_text="Пропустити чати, для яких пости за цей період уже є.")
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending",
+                              db_index=True, verbose_name="Статус")
+    locked_at = models.DateTimeField(null=True, blank=True, verbose_name="Захоплено")
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="Спроб")
+    log = models.TextField(blank=True, verbose_name="Вивід команди")
+    error = models.TextField(blank=True, verbose_name="Помилка")
+    created_by = models.ForeignKey("auth.User", on_delete=models.SET_NULL, null=True,
+                                   blank=True, related_name="sample_jobs",
+                                   verbose_name="Замовив")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name="Початок")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Завершено")
+
+    class Meta:
+        verbose_name = "Вибірка — завдання на збір"
+        verbose_name_plural = "Вибірки — завдання на збір"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+    def __str__(self):
+        return (f"{self.task.slug} {self.date_from}…{self.date_to} "
+                f"[{self.mode}/{self.status}]")
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in ("pending", "running")
+
+
 class Post(models.Model):
     # конвеєр стадій (claim-based черга, кожен воркер дивиться «свій» статус)
     STAGE_COLLECTED = "collected"

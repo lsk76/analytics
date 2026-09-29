@@ -34,6 +34,10 @@ PERMS = {
     "task_create": "analysis.add_analysistask",
     "runs_list": "analysis.view_researchrun", "run_show": "analysis.view_researchrun",
     "run_create": "analysis.add_researchrun", "run_cancel": "analysis.change_researchrun",
+    # вибіркові збори (tg_sample): своя черга завдань, не ResearchRun
+    "sample_collect": "analysis.add_monitorsamplejob",
+    "samples_list": "analysis.view_monitorsamplejob",
+    "sample_cancel": "analysis.change_monitorsamplejob",
     "chats_list": "analysis.view_monitorchat", "chat_update": "analysis.change_monitorchat",
     "chat_add": "analysis.add_monitorchat", "chat_delete": "analysis.delete_monitorchat",
     "rubrics_list": "analysis.view_researchrubric",

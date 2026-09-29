@@ -11,8 +11,9 @@ from django.contrib.auth.models import Permission, User
 from django.test import RequestFactory
 
 from accounts.models import Proxy, TelegramAccount, WarmUpJob
-from analysis.models import (AnalysisTask, Channel, CollectChunk, Event, MonitorChat, Post,
-                             PublishConfig, PublishedEvent, ResearchRun, SourceSubscription)
+from analysis.models import (AnalysisTask, Channel, CollectChunk, Event, MonitorChat,
+                             MonitorSampleJob, Post, PublishConfig, PublishedEvent,
+                             ResearchRun, SourceSubscription)
 from analysis.services import access
 from analysis.services import mcp_api
 from analysis.services.mcp_api import Actor, common
@@ -45,6 +46,8 @@ def two_worlds(django_user_model):
             ResearchRun: ResearchRun.objects.create(task=t, date_from="2026-09-01", date_to="2026-09-02"),
             CollectChunk: CollectChunk.objects.create(task=t, date_from="2026-09-01", date_to="2026-09-02"),
             MonitorChat: MonitorChat.objects.create(task=t, channel=ch),
+            MonitorSampleJob: MonitorSampleJob.objects.create(
+                task=t, date_from="2026-08-01", date_to="2026-08-31"),
             SourceSubscription: sub,
             type(src): src,
             TelegramAccount: acc,
@@ -84,7 +87,8 @@ def test_no_model_admin_writes_its_own_visibility_filter():
 
 
 @pytest.mark.parametrize("model", [AnalysisTask, Event, Post, ResearchRun, CollectChunk,
-                                   MonitorChat, SourceSubscription, TelegramAccount, WarmUpJob,
+                                   MonitorChat, MonitorSampleJob, SourceSubscription,
+                                   TelegramAccount, WarmUpJob,
                                    PublishConfig, PublishedEvent])
 def test_admin_and_mcp_agree_on_every_model(two_worlds, model):
     ann, bob = two_worlds["ann"], two_worlds["bob"]

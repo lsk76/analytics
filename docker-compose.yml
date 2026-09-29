@@ -79,6 +79,10 @@ services:
   worker-mon-filter:    { <<: *worker, command: python manage.py run_worker --stage mon_filter }
   worker-mon-prescreen: { <<: *worker, command: python manage.py run_worker --stage mon_prescreen }
   worker-mon-runs:      { <<: *worker, command: python manage.py run_worker --stage mon_runs }
+  # вибірковий збір коментарів Telethon-акаунтами (черга MonitorSampleJob).
+  # ОДНА репліка: два збори в тому самому вікні зіпсували б знаменник частки,
+  # а акаунти впали б у FloodWait. Інтервал великий — черга рідка, разова.
+  worker-mon-sample:    { <<: *worker, command: python manage.py run_worker --stage mon_sample --interval 60 }
   worker-ev-runs:       { <<: *worker, command: python manage.py run_worker --stage ev_runs }
   worker-res-collect:   { <<: *worker, command: python manage.py run_worker --stage res_collect }
   worker-res-filter:    { <<: *worker, command: python manage.py run_worker --stage res_filter }

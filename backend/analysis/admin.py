@@ -57,7 +57,7 @@ from .services import stages
 from .models import (
     AnalysisTask, Channel, Tag, TagAlias, TagCategory,
     Post, Event, ResearchRun, CollectChunk,
-    Region, RegionAlias, MonitorChat, ChannelDailyStat,
+    Region, RegionAlias, MonitorChat, MonitorSampleJob, ChannelDailyStat,
     ResearchRubric, Source, SourceSubscription, Setting,
     PublishConfig, PublishedEvent, UserProfile,
 )
@@ -467,6 +467,56 @@ class FastDeleteAdminMixin:
     def delete_queryset(self, request, queryset):
         self._bulk_wipe(list(queryset))
         super().delete_queryset(request, queryset)
+
+
+@admin.register(MonitorSampleJob)
+class MonitorSampleJobAdmin(ScopedAdminMixin, admin.ModelAdmin):
+    """Черга вибіркових зборів (monitor-задачі з mon_collect_source=tg_sample).
+
+    Сам збір тут НЕ виконується: читати Telegram сотнями запитів довше, ніж
+    живе HTTP-запит адмінки. Рядок — замовлення, його забирає воркер
+    `worker-mon-sample` (стадія mon_sample) і дописує «Вивід команди».
+    """
+    list_display = ("task", "date_from", "date_to", "mode", "status", "per_region",
+                    "created_by", "created_at", "finished_at")
+    list_filter = (StudyTaskFilter, "status", "mode")
+    date_hierarchy = "created_at"
+    fieldsets = (
+        (None, {"description": "Спершу режим «Кошторис» (нічого не читає), потім "
+                               "«Розвідка чатів», і лише тоді «Збір». Вікна НЕ "
+                               "перекривати: на кожне пишеться паспорт вибірки, "
+                               "з якого рахується знаменник частки.",
+                "fields": ("task", "date_from", "date_to", "mode", "per_region",
+                           "probe_ids", "regions", "seed", "resume")}),
+        ("Виконання", {"fields": ("status", "attempts", "started_at", "finished_at",
+                                  "error", "log", "created_by", "created_at")}),
+    )
+    readonly_fields = ("status", "attempts", "started_at", "finished_at", "error", "log",
+                       "created_by", "created_at")
+    search_fields = ("task__name", "task__slug")
+
+    def get_changeform_initial_data(self, request):
+        data = super().get_changeform_initial_data(request)
+        tid = study_from_changelist_filters(request)
+        if tid and "task" not in data:
+            data["task"] = tid
+        return data
+
+    def save_model(self, request, obj, form, change):
+        if not obj.pk:
+            obj.created_by = request.user
+        task = obj.task
+        if (task.pipeline != AnalysisTask.PIPELINE_MONITOR
+                or task.mon_collect_source != AnalysisTask.MON_SRC_TG_SAMPLE):
+            messages.error(request, f"{task.slug}: «Спосіб збору коментарів» — не "
+                                    "вибірка Telegram-акаунтами (tg_sample), тому "
+                                    "воркер це завдання не візьме. Перемкни поле в "
+                                    "картці задачі або збирай через «Збори» (TeleZip).")
+        super().save_model(request, obj, form, change)
+        if not change:
+            messages.success(request, f"Завдання #{obj.id} у черзі — його забере "
+                                      "worker-mon-sample (перший прохід за хвилину). "
+                                      "Прогрес: поле «Вивід команди» цього рядка.")
 
 
 @admin.register(ResearchRun)
