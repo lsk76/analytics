@@ -27,6 +27,9 @@ _PIPELINE_HOW = {
                 "Поля: task_update search_terms, stream_regex, prescreen_prompt, tagger_prompt.",
 }
 _CHAT_PIPES = {"monitor", "research", "tgsearch"}
+# Стеля пакетного chat_add: вотчліст на 150 чатів має додаватись одним викликом,
+# але список на тисячі — це вже помилка в аргументі, а не намір.
+_CHAT_ADD_MAX = 300
 _TELEZIP_RUNS = {"events", "monitor", "research"}
 
 # Картка task_show = усі поля форми задачі для її конвеєра (ті самі fieldsets,
@@ -808,7 +811,7 @@ def _whitelist_channel(ref: str):
 
 @tool("chat_add", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={
       "task": "Задача monitor, research або tgsearch: id, slug або частина назви.",
-      "channel": "@username, посилання t.me або id рядка довідника. Невідомий @username створюється в довіднику.",
+      "channel": "@username, посилання t.me або id рядка довідника. Невідомий @username створюється в довіднику. МОЖНА КІЛЬКА ЧЕРЕЗ КОМУ або по одному в рядок — усі за один виклик: «@a, @b, linked:c». Стеля 300 за виклик.",
       "is_active": "Одразу збирати (дефолт true).",
       "stream_enabled": "true — стрім (полінг + регулярка задачі), false — пошук за словами.",
       "forward_media": "Пересилати медіа цього чату в чат медіа задачі.",
@@ -816,34 +819,65 @@ def _whitelist_channel(ref: str):
       "priority": "Менше число = вище в списку. Дефолт 100."})
 def chat_add(task: str, channel: str, is_active: bool = True, stream_enabled: bool = False,
              forward_media: bool = False, account: str = "", priority: int = 100):
-    """Додати чат у whitelist задачі (те, що в адмінці — вкладка «Чати»).
+    """Додати чат (або одразу багато) у whitelist задачі — вкладка «Чати» в адмінці.
 
     Лише конвеєри monitor, research, tgsearch. Повтор того самого чату не дублює.
     Для infospace джерело підключається через source_add, не через чат.
+
+    Список через кому додається ОДНИМ викликом: вотчліст на сотню чатів інакше
+    означав би сотню викликів. Кожен рядок звітується окремо, і помилка на
+    одному чаті не скасовує решту — так само, як у channels_find.
     """
     t = common.resolve_task(task)
     if t.pipeline not in _CHAT_PIPES:
         raise ToolError(
             f"{t.slug} — конвеєр {t.pipeline}, whitelist чатів лише для "
             + ", ".join(sorted(_CHAT_PIPES)) + ". " + _PIPELINE_HOW.get(t.pipeline, ""))
-    ch = _whitelist_channel(channel)
+    refs = [x.strip() for x in (channel or "").replace("\n", ",").split(",") if x.strip()]
+    if not refs:
+        raise ToolError("дай channel: @username, посилання або id довідника")
+    if len(refs) > _CHAT_ADD_MAX:
+        raise ToolError(f"за раз не більше {_CHAT_ADD_MAX} чатів, прийшло {len(refs)}: "
+                        "розбий список")
     acc = common.resolve_account(account) if account else None
-    row, created = MonitorChat.objects.get_or_create(
-        task=t, channel=ch,
-        defaults={"is_active": bool(is_active), "stream_enabled": bool(stream_enabled),
-                  "forward_media": bool(forward_media), "priority": int(priority)})
-    if acc is not None and created:
-        row.tg_account = acc
-        row.save(update_fields=["tg_account"])
-    user = f"@{ch.username}" if ch.username else ch.title or f"#{ch.id}"
-    if not created:
-        return (f"#{row.id} {t.slug}/{user}: уже в whitelist "
-                "(правки: chat_update)")
-    bits = [f"активний={fmt.flag(row.is_active)}",
-            "стрім" if row.stream_enabled else "пошук"]
-    if row.tg_account_id:
-        bits.append(f"акаунт=#{row.tg_account_id}")
-    return f"#{row.id} {t.slug}/{user}: додано, " + ", ".join(bits)
+
+    lines, n_new, n_old, n_err = [], 0, 0, 0
+    for ref in refs:
+        try:
+            ch = _whitelist_channel(ref)
+        except ToolError as e:
+            n_err += 1
+            lines.append(f"✗ {ref}: {e}")
+            continue
+        row, created = MonitorChat.objects.get_or_create(
+            task=t, channel=ch,
+            defaults={"is_active": bool(is_active), "stream_enabled": bool(stream_enabled),
+                      "forward_media": bool(forward_media), "priority": int(priority)})
+        if acc is not None and created:
+            row.tg_account = acc
+            row.save(update_fields=["tg_account"])
+        user = f"@{ch.username}" if ch.username else ch.title or f"#{ch.id}"
+        if not created:
+            n_old += 1
+            lines.append(f"= #{row.id} {user}: уже в whitelist (правки: chat_update)")
+            continue
+        n_new += 1
+        bits = ["стрім" if row.stream_enabled else "пошук"]
+        if not row.is_active:
+            bits.append("НЕактивний")
+        if row.tg_account_id:
+            bits.append(f"акаунт=#{row.tg_account_id}")
+        lines.append(f"+ #{row.id} {user}: додано, " + ", ".join(bits))
+
+    if len(refs) == 1:
+        return lines[0]
+    head = f"{t.slug}: додано {n_new}, уже були {n_old}"
+    if n_err:
+        head += f", НЕ ВДАЛОСЬ {n_err}"
+    if acc is None and t.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE:
+        head += ("\n⚠ задача збирає ВИБІРКОЮ — чат без акаунта не читається; "
+                 "призначити: chat_update(account=...)")
+    return fmt.section(head, "\n".join(lines))
 
 
 def _rubric_keywords(spec: str) -> list:

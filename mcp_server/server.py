@@ -210,6 +210,61 @@ def worker_once(stage: str, task: str = "", timeout: int = 600) -> str:
     return f"{status} стадія {stage}{' задача ' + task if task else ''}:\n\n{out[-3000:]}"
 
 
+@mcp.tool(description="ЗМІНЮЄ СТАН. Зібрати коментарі monitor-задачі ВИПАДКОВОЮ ВИБІРКОЮ "
+                      "Telegram-акаунтами (`monitor_sample_collect`). TeleZip НЕ "
+                      "використовується — грошей не витрачає, але тратить активність "
+                      "акаунтів і може впертись у FloodWait. Працює лише для задачі з "
+                      "mon_collect_source=tg_sample (інакше команда сама відмовиться). "
+                      "Спершу dry_run=true (нічого не читає), потім probe (частка живих "
+                      "людей у чатах), і лише тоді confirm=true — реальний прогін. "
+                      "На кожне вікно пишеться паспорт MonitorSample — з нього знаменник "
+                      "часток, тому вікна не перекривати.")
+def sample_collect(task: str, date_from: str, date_to: str, per_region: int = 1500,
+                   seed: int = 0, regions: str = "", probe: int = 0,
+                   dry_run: bool = False, resume: bool = False,
+                   confirm: bool = False, timeout: int = 900) -> str:
+    if rpc.TARGET.readonly:
+        return "⚠ сервер у режимі лише-читання (TGA_READONLY=1)"
+    for name, val in (("date_from", date_from), ("date_to", date_to)):
+        if not (val or "").strip():
+            return f"⚠ {name} обов'язковий: YYYY-MM-DD (UTC)"
+    # Реальний прогін читає Telegram сотнями запитів на акаунт, тож він за явною
+    # згодою. dry_run і probe нічого не пишуть, їх пускаємо без confirm — саме з
+    # них і починають.
+    real = not dry_run and not probe
+    if real and not confirm:
+        return ("⚠ реальний прогін вибірки НЕ виконано: це активність Telegram-акаунтів "
+                "(ризик FloodWait) і запис постів.\n"
+                f"задача={task}, вікно {date_from}…{date_to}, per_region={per_region}"
+                f"{', seed=' + str(seed) if seed else ''}\n"
+                "Спершу: dry_run=true (квоти й межі), далі probe=200 (частка живих людей).\n"
+                "Погоджено — повтори з confirm=true.")
+    argv = rpc.TARGET.compose("exec", "-T", rpc.TARGET.web, "python", "manage.py",
+                              "monitor_sample_collect", "--task", task,
+                              "--from", date_from.strip(), "--to", date_to.strip())
+    if probe:
+        argv += ["--probe", str(int(probe))]
+    else:
+        argv += ["--per-region", str(max(1, int(per_region)))]
+    if seed:
+        argv += ["--seed", str(int(seed))]
+    if regions.strip():
+        argv += ["--regions", regions.strip()]
+    if resume:
+        argv += ["--resume"]
+    if dry_run:
+        argv += ["--dry-run"]
+    proc = rpc.TARGET.run(argv, timeout=max(60, min(int(timeout), 3600)))
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    mode = "dry-run" if dry_run else (f"probe {probe}" if probe else "збір")
+    status = "✓" if proc.returncode == 0 else f"✗ код {proc.returncode}"
+    tail = ("\n\n⚠ вийшов час — команда могла лишитись працювати в контейнері; "
+            "перевір chats_list (ост. вибірка) перед повторним запуском"
+            if proc.returncode is None else "")
+    return (f"{status} вибірка [{mode}] {task} {date_from}…{date_to}:\n\n"
+            f"{out[-4000:]}{tail}")
+
+
 def main() -> None:
     n = register_domain_tools()
     print(f"[tg-analytics-mcp] ціль: {rpc.TARGET.label}; предметних інструментів: {n}",

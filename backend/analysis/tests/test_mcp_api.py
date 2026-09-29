@@ -945,3 +945,41 @@ def test_channels_find_batch():
     out = mcp_api.call("channels_find", {"query": "sotavision"})
     assert "@sotavision" in out and "запит" not in out.split("\n")[0]
     assert "немає" in mcp_api.call("channels_find", {"query": "ghostchannel"})
+
+
+def test_chat_add_batch():
+    """Вотчліст додається ОДНИМ викликом: 150 чатів = 150 викликів — не варіант.
+
+    Помилка на одному чаті не скасовує решту (як у channels_find), а для задачі,
+    що збирає вибіркою, у відповіді має бути попередження про акаунт — без нього
+    чат просто не читається.
+    """
+    from analysis.models import AnalysisTask as T
+    task = TaskFactory(slug="mon-batch", pipeline=T.PIPELINE_MONITOR)
+    out = mcp_api.call("chat_add", {"task": "mon-batch",
+                                    "channel": "@alpha, @beta\n@gamma"})
+    assert "додано 3" in out
+    assert MonitorChat.objects.filter(task=task).count() == 3
+    for u in ("alpha", "beta", "gamma"):
+        assert f"@{u}" in out
+
+    # повтор не дублює і рахується окремо
+    again = mcp_api.call("chat_add", {"task": "mon-batch", "channel": "@alpha, @delta"})
+    assert "додано 1" in again and "уже були 1" in again
+    assert MonitorChat.objects.filter(task=task).count() == 4
+
+    # один чат — відповідь лишається короткою, як була
+    single = mcp_api.call("chat_add", {"task": "mon-batch", "channel": "@epsilon"})
+    assert single.startswith("#") or "додано" in single
+    assert "додано 1," not in single
+
+    # задача на вибірці без акаунта — попередження
+    task.mon_collect_source = T.MON_SRC_TG_SAMPLE
+    task.save(update_fields=["mon_collect_source"])
+    warn = mcp_api.call("chat_add", {"task": "mon-batch", "channel": "@zeta, @eta"})
+    assert "чат без акаунта не читається" in warn
+
+    # стеля списку
+    with pytest.raises(ToolError, match="не більше"):
+        mcp_api.call("chat_add", {"task": "mon-batch",
+                                  "channel": ",".join(f"@c{i}" for i in range(301))})
