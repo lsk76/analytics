@@ -74,6 +74,9 @@
 - **TGStat — лише через сервіс `tgstat`** (`tgstat_service/`, HTTP `http://tgstat:8020`,
   док `docs/tgstat-service.md`): один headed Chrome, сесія прив'язана до профілю+IP+збірки
   браузера; вхід — руками через noVNC по SSH-тунелю. Headless не вмикати.
+  **MCP для tgstat — ОКРЕМИЙ сервер `tgstat`** (`tgstat_service/app/mcp_server.py`, stdio у
+  контейнері, `.mcp.json`), а не `mcp_api` Django: нові tgstat-інструменти — туди. tgstat
+  на частоту відповідає капчею («Подозрение на робота») — `max_pages` малим, капчу проходить людина.
 - Зміни коду воркерів/адмінки → `docker compose restart worker-…` / `web`.
 - Перед схемними змінами БД — бекап `pg_dump` у `backups/`.
 - Адмінка: http://localhost:8001/admin/ (стартова = список досліджень; події: `#charts`

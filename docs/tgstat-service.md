@@ -80,6 +80,38 @@ tgstat має власний антибот: 2026-09-29 уже за ~10 запи
 - **капчу проходить людина**: `POST /auth/manual` → VNC → на tgstat пройти
   reCAPTCHA → закрити вкладку. Автоматично її не обходимо.
 
+## MCP-сервер `tgstat` (окремий)
+
+Власний MCP-сервер, НЕ частина `tg-analytics`: `tgstat_service/app/mcp_server.py`,
+stdio, живе в контейнері `tgstat` і ходить у HTTP-API вище на `127.0.0.1:8020`
+(браузер і темп запитів — один на всіх). Зареєстрований у `.mcp.json` як
+`tgstat`; обгортка `tgstat_service/mcp-stdio.sh` робить
+
+```bash
+ssh tg-analytics 'cd /opt/tg-event-analytics && docker compose -f docker-compose.yml \
+  -f docker-compose.monitor.yml exec -T tgstat python -m app.mcp_server'
+```
+
+(`TGSTAT_SSH=local` — без ssh, для Claude Code на самому сервері; `.mcp.json`
+бере його з `TGA_PROD_SSH`).
+
+| Інструмент | Що |
+|---|---|
+| `tgstat_status` | стан сесії, тариф, капча/Cloudflare, що робити |
+| `tgstat_channels_search` | пошук каналів за словами + фільтри |
+| `tgstat_catalog_tags` | список підбірок (geo / theme) |
+| `tgstat_catalog` | канали або чати підбірки |
+| `tgstat_channel` | картка каналу/чату зі статистикою |
+| `tgstat_posts_search` | пошук публікацій (Premium) |
+| `tgstat_links` | посилання tgstat/t.me без запиту до tgstat |
+| `tgstat_manual_login` / `tgstat_manual_finish` | ЗМІНЮЄ СТАН: ручний вхід/капча у VNC |
+
+Капча/розлогін повертаються як «⚠ …» з інструкцією для людини, а не як
+порожній результат. Тести: `tgstat_service/tests/test_mcp.py`.
+
+Доступу через мережевий MCP (OAuth, `mcpauth`) у цього сервера **немає** —
+лише stdio по ssh, тобто тим, хто має ssh на прод.
+
 ## HTTP API сесії
 
 | Метод | Шлях | Що робить |

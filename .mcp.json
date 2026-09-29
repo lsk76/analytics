@@ -18,6 +18,12 @@
         "TGA_READONLY": "1",
         "TGA_TIMEOUT": "300"
       }
+    },
+    "tgstat": {
+      "command": "${TGA_HOME:-/Users/r2d2/Documents/dev/tg-event-analytics}/tgstat_service/mcp-stdio.sh",
+      "env": {
+        "TGSTAT_SSH": "${TGA_PROD_SSH:-tg-analytics}"
+      }
     }
   }
 }
