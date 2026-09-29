@@ -724,7 +724,7 @@ def _sample_job_row(j):
       "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
       "date_from": "Перший день вікна, YYYY-MM-DD (UTC).",
       "date_to": "Останній день вікна, YYYY-MM-DD (UTC), ВКЛЮЧНО. Вікна НЕ перекривати: на кожне пишеться паспорт вибірки (знаменник частки).",
-      "mode": "dry_run — кошторис (Telegram не читається, нічого не пише); probe — розвідка (N випадкових id У КОЖНОМУ чаті, рахує частку живих людей, постів НЕ пише); collect — справжній збір. Починай із dry_run.",
+      "mode": "dry_run — кошторис: резолвить кожен чат і читає лише межі періоду (2 запити на чат, ~3 хв на сотню чатів), постів НЕ пише; probe — розвідка (N випадкових id У КОЖНОМУ чаті, рахує частку живих людей, постів НЕ пише); collect — справжній збір. Починай із dry_run.",
       "per_region": "Режим collect: цільова вибірка на регіон. 1500 дають ±1 в.п. при частці ~4%.",
       "probe_ids": "Режим probe: скільки випадкових id узяти в КОЖНОМУ чаті (дефолт 200).",
       "regions": "Лише ці регіони, через кому (назви як у довіднику). Порожньо = усі.",
@@ -795,7 +795,7 @@ def sample_collect(task: str, date_from: str, date_to: str, mode: str = "dry_run
             + (f", регіони: {', '.join(picked)}" if picked else "")
             + (f", квота {per_region}/регіон" if job_mode == MonitorSampleJob.MODE_COLLECT
                else f", {probe_ids} id на чат" if job_mode == MonitorSampleJob.MODE_PROBE
-               else ", Telegram не читається")
+               else ", лише межі періоду")
             + (f", seed={seed}" if seed else "") + (", resume" if resume else ""))
     if job_mode == MonitorSampleJob.MODE_COLLECT and not confirm:
         return fmt.joinsec(

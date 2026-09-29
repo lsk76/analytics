@@ -931,7 +931,7 @@ class MonitorSampleJob(models.Model):
     MODE_CHOICES = [
         (MODE_COLLECT, "Збір (пише пости)"),
         (MODE_PROBE, "Розвідка чатів (--probe, постів не пише)"),
-        (MODE_DRY_RUN, "Кошторис (--dry-run, Telegram не читається)"),
+        (MODE_DRY_RUN, "Кошторис (--dry-run, читає лише межі періоду, постів не пише)"),
     ]
 
     task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,

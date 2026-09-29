@@ -35,7 +35,7 @@ card (admin, `task_show`) and nothing else infers it:
 (hundreds of requests with pauses), so neither an admin HTTP request nor an MCP call
 runs it inline. MCP `sample_collect` (or the admin section «Вибірки — завдання на
 збір») only queues a `MonitorSampleJob`; the `mon_sample` stage worker claims it and
-calls the command. Order of work: `mode=dry_run` (quotas only, reads nothing) →
+calls the command. Order of work: `mode=dry_run` (quotas and period bounds only, writes no posts) →
 `mode=probe` (share of live people per chat, writes no posts) → `mode=collect`
 (`confirm=true` required — it spends account activity and risks FloodWait). Progress
 and the command output: `samples_list log=true` (live log —

@@ -482,7 +482,7 @@ class MonitorSampleJobAdmin(ScopedAdminMixin, admin.ModelAdmin):
     list_filter = (StudyTaskFilter, "status", "mode")
     date_hierarchy = "created_at"
     fieldsets = (
-        (None, {"description": "Спершу режим «Кошторис» (нічого не читає), потім "
+        (None, {"description": "Спершу режим «Кошторис» (лише межі періоду), потім "
                                "«Розвідка чатів», і лише тоді «Збір». Вікна НЕ "
                                "перекривати: на кожне пишеться паспорт вибірки, "
                                "з якого рахується знаменник частки.",
