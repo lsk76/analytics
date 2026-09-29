@@ -59,6 +59,9 @@ docker compose -f docker-compose.prod.yml exec web python manage.py createsuperu
 За потреби — сідинг довідників: `make seed` (варіант через prod-compose:
 `docker compose -f docker-compose.prod.yml exec web python manage.py seed_regions …`).
 
+Сервіс TGStat (`tgstat`) піднімається лише з `COMPOSE_PROFILES=tgstat` у `.env`
+і потребує ручного входу через noVNC — див. `docs/tgstat-service.md`.
+
 ## 4. nginx + TLS
 Використовуємо **офіційний nginx.org stable** (свіжа гілка ≥1.30; конфіг має
 `http2 on;`, який дистрибутивний nginx 1.18 з Ubuntu не розуміє). Розкладка

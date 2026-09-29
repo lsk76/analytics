@@ -67,6 +67,9 @@
   ділиться навпіл і кожна половина оплачується окремо.
 - **TeleZip:** без негації в запитах; збір по днях/по одному каналу; після падіння VPN —
   `echo "77.88.192.66 api.telezip.net" >> /etc/hosts` у контейнері.
+- **TGStat — лише через сервіс `tgstat`** (`tgstat_service/`, HTTP `http://tgstat:8020`,
+  док `docs/tgstat-service.md`): один headed Chrome, сесія прив'язана до профілю+IP+збірки
+  браузера; вхід — руками через noVNC по SSH-тунелю. Headless не вмикати.
 - Зміни коду воркерів/адмінки → `docker compose restart worker-…` / `web`.
 - Перед схемними змінами БД — бекап `pg_dump` у `backups/`.
 - Адмінка: http://localhost:8001/admin/ (стартова = список досліджень; події: `#charts`

@@ -131,5 +131,35 @@ services:
   # --- spam-status worker (accounts.TelegramAccount: обмеження через @SpamBot) --
   worker-spam-status:    { <<: *worker, command: python manage.py run_worker --stage spam_status_check --interval 900 }
 
+  # --- tgstat: окремий stateless-сервіс TGStat (docs/tgstat-service.md) -----
+  # Власний образ (Playwright + Chrome на Xvfb), без Django і БД. Єдиний стан —
+  # профіль браузера в томі tgstat_profile (сесія tgstat). Профіль "tgstat":
+  # сам не піднімається; на проді в .env стоїть COMPOSE_PROFILES=tgstat.
+  tgstat:
+    build: ./tgstat_service
+    image: tg-event-analytics-tgstat:latest
+    profiles: ["tgstat"]
+    environment:
+      TGSTAT_BASE_URL: ${TGSTAT_BASE_URL:-https://tgstat.ru}
+      TGSTAT_CHANNEL: ${TGSTAT_CHANNEL-chrome}
+      TGSTAT_PROXY: ${TGSTAT_PROXY:-}
+      TGSTAT_VNC_PASSWORD: ${TGSTAT_VNC_PASSWORD:-}
+      TGSTAT_KEEPALIVE: ${TGSTAT_KEEPALIVE:-1800}
+    volumes:
+      - tgstat_profile:/data
+    expose: ["8020"]
+    ports:
+      # noVNC для ручного входу — ЛИШЕ loopback, доступ SSH-тунелем.
+      - "127.0.0.1:${TGSTAT_VNC_PORT:-6080}:6080"
+    shm_size: "1gb"
+    mem_limit: 2g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8020/health', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   pgdata:
+  tgstat_profile:

@@ -291,6 +291,9 @@ docker compose exec -T web python manage.py shell -c \
   дослідження (`StudyOwnedAdminMixin`). Окремого UI `/app/` НЕМАЄ — знято 2026-09-22.
 - `docs/mcp-server.md` — **MCP-сервер керування сервісом** (акаунти ТГ, моніторинги,
   збори, черги, контейнери) — чим користуватись замість разових `manage.py shell`.
+- `docs/tgstat-service.md` — **окремий stateless-сервіс TGStat** (`tgstat_service/`,
+  compose `tgstat`, профіль `tgstat`): Chrome на Xvfb, вхід руками через noVNC,
+  як авторизуватись на проді; етап 1 = авторизація, пошук/збір — далі.
 - `docs/telemetrio-vs-telezip.md` — Telemetr.io API: клієнт, квоти, чим він НЕ є
   заміною TeleZip, і план порівняльного тесту.
 - Пам'ять Claude (`~/.claude/projects/...-sm-analytics/memory/`) — операційні уроки.
