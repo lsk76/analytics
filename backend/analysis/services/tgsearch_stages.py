@@ -174,6 +174,34 @@ def _url(channel, mid):
     return f"https://t.me/c/{internal}/{mid}"
 
 
+def _in_thread(fn, *args):
+    """Обгортка тіла потоку: після роботи закриває зʼєднання до БД.
+
+    Django тримає зʼєднання THREAD-LOCAL, а `run_worker` — це вічний цикл без
+    HTTP-запитів, тож жоден автоматичний тригер закриття не спрацьовує ніколи.
+    Потік, що завершився, лишав своє зʼєднання відкритим — і воркер із 8
+    потоками на такт з'їдав пул Postgres за кілька годин (прод 28.09:
+    `FATAL: sorry, too many clients already`, слідом лягли адмінка, MCP і
+    інфопростір). Той самий запобіжник уже стоїть у accounts/gateway/pool.py.
+
+    Обгортаємо саме виклик, а не тіло функції: у ранерів кілька ранніх
+    `return` (пауза акаунта, недоступність, TelegramOpError), і finally тут
+    ловить усі шляхи виходу разом із винятками.
+    """
+    try:
+        return fn(*args)
+    finally:
+        _tidy_db()
+
+
+def _tidy_db() -> None:
+    """Закрити протухле зʼєднання поточного потоку. Під atomic (тести в
+    транзакції) не чіпаємо — інакше зірвемо транзакцію тесту."""
+    from django.db import close_old_connections, connection
+    if not connection.in_atomic_block:
+        close_old_connections()
+
+
 def _run_search_account(acc_id, chats, terms, since, limit, out):
     """Один акаунт → один виклик gateway на всі його чати. Помилка АКАУНТА
     (пауза/проксі/сесія) — чати відвʼязуємо, наступний прохід дасть інший."""
@@ -216,7 +244,8 @@ def _run_search_account(acc_id, chats, terms, since, limit, out):
 
 def _search_all_sync(by_acc, terms, since, limit, out):
     with ThreadPoolExecutor(max_workers=ACCOUNT_CONCURRENCY) as ex:
-        list(ex.map(lambda item: _run_search_account(item[0], item[1], terms, since, limit, out),
+        list(ex.map(lambda item: _in_thread(_run_search_account, item[0], item[1],
+                                            terms, since, limit, out),
                     by_acc.items()))
 
 
@@ -320,7 +349,8 @@ def _stream_account(acc_id, chats, patterns, media_chat_id, out):
 
 def _stream_all_sync(by_acc, patterns, media_chat_id, out):
     with ThreadPoolExecutor(max_workers=STREAM_CONCURRENCY) as ex:
-        list(ex.map(lambda item: _stream_account(item[0], item[1], patterns, media_chat_id, out),
+        list(ex.map(lambda item: _in_thread(_stream_account, item[0], item[1],
+                                            patterns, media_chat_id, out),
                     by_acc.items()))
 
 

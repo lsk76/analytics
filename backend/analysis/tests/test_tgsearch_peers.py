@@ -65,6 +65,49 @@ def test_assign_accounts_prefers_hash_owner_then_resolver(django_user_model):
     assert mc_n.tg_account_id in (a2.id, a3.id)                     # новий чат → лише хто резолвить
 
 
+def test_thread_body_closes_db_connection(monkeypatch):
+    """Потік мусить закривати зʼєднання до БД — на всіх шляхах виходу.
+
+    Django тримає зʼєднання thread-local, а run_worker це вічний цикл без
+    запитів, тож автоматичного закриття немає. Без цього воркер із 8 потоками
+    з'їдав пул Postgres за кілька годин (прод 28.09: too many clients, слідом
+    лягли адмінка, MCP та інфопростір).
+    """
+    calls = []
+    monkeypatch.setattr(tgs, "_tidy_db", lambda: calls.append(1))
+
+    # звичайне повернення
+    assert tgs._in_thread(lambda a, b: a + b, 2, 3) == 5
+    # ранній return усередині (ранери так виходять при паузі акаунта)
+    def early(_):
+        return None
+    assert tgs._in_thread(early, "x") is None
+    # виняток не має з'їсти закриття
+    with pytest.raises(RuntimeError):
+        tgs._in_thread(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert len(calls) == 3, "зʼєднання закривається на КОЖНОМУ шляху виходу"
+
+
+def test_tidy_db_spares_transaction(monkeypatch):
+    """А сам `_tidy_db` під транзакцією нічого не закриває.
+
+    Інакше він рвав би atomic-блок: у тестах і в `_store` (там transaction.atomic)
+    закрите зʼєднання означає втрачені дані.
+    """
+    calls = []
+    monkeypatch.setattr("django.db.close_old_connections", lambda: calls.append(1))
+    tgs._tidy_db()                      # цей тест іде в транзакції (django_db)
+    assert calls == [], "під atomic зʼєднання чіпати не можна"
+
+
+def test_thread_wrapper_is_actually_used():
+    """Обгортка мусить стояти в обох ThreadPool-стадіях, а не лежати мертвою."""
+    import inspect
+    for fn in (tgs._search_all_sync, tgs._stream_all_sync):
+        src = inspect.getsource(fn)
+        assert "_in_thread" in src, f"{fn.__name__} запускає потік без закриття зʼєднання"
+
+
 def test_store_marks_authorless_as_channel_repost():
     """Повідомлення без автора — це допис каналу, а не репліка людини.
 
