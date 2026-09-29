@@ -1,0 +1,963 @@
+<html lang="ru" class="  site-ru"><head>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-param" content="_tgstat_csrk">
+<meta name="csrf-token" content="CSRF">
+<title>Поиск в Telegram. Поиск по публикациям</title>
+<meta property="og:title" content="Поиск в Telegram. Поиск по публикациям">
+<meta property="og:description" content="Поиск публикаций по всем Telegram-каналам и чатам. TGStat.">
+<meta property="og:image" content="https://uk.tgstat.com/preview/18ee22fc49638bcf08235ea0a1044d32-widget.png">
+<meta property="og:site_name" content="TGStat.com">
+<meta property="twitter:title" content="Поиск в Telegram. Поиск по публикациям">
+<meta property="twitter:site" content="TGStat.com">
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:image" content="https://uk.tgstat.com/preview/18ee22fc49638bcf08235ea0a1044d32-widget.png">
+<meta name="twitter:description" content="Поиск публикаций по всем Telegram-каналам и чатам. TGStat.">
+<meta name="description" content="Поиск публикаций по всем Telegram-каналам и чатам. TGStat.">
+<meta name="keywords" content="каналы, telegram, поиск в telegram, поиск постов, поиск публикаций">
+<meta name="format-detection" content="telephone=no">
+<link href="/static/css/app.css?v=1778530248" rel="stylesheet">
+<script async="" src="https://mc.webvisor.org/metrika/tag_ww.js"></script><script></script>
+<link rel="alternate" hreflang="ru" href="https://uk.tgstat.com/search/result?lang=ru">
+<link rel="alternate" hreflang="en" href="https://uk.tgstat.com/search/result?lang=en">
+<link rel="alternate" hreflang="uz" href="https://uk.tgstat.com/search/result?lang=uz">
+
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=3">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3">
+<link rel="manifest" href="/site.webmanifest?v=3">
+<link rel="mask-icon" href="/safari-pinned-tab.svg?v=3" color="#303744">
+<link rel="shortcut icon" href="/favicon.ico?v=3">
+<meta name="msapplication-TileColor" content="#2b5797">
+<meta name="theme-color" content="#303744">
+
+<meta name="apple-mobile-web-app-title" content="TGStat">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-startup-image" href="/favicon/apple-launch.png">
+    </head>
+
+    <body class="" data-layout="topnav" data-layout-config="{&quot;layoutBoxed&quot;:false,&quot;darkMode&quot;:false,&quot;showRightSidebarOnStart&quot;: true}">
+    
+    <div class="wrapper">
+
+        <div class="content-page d-flex flex-column p-0">
+            <div class="content p-0 col">
+                <div class="fixed-top">
+                    
+
+<div class="navbar-custom topnav-navbar topnav-navbar-dark">
+    <div class="container-fluid px-0 px-lg-3">
+        <div class="row no-gutters justify-content-between">
+            <div class="col">
+                <div class="row no-gutters align-items-center">
+                    <a class="d-flex d-lg-none nav-user justify-content-center align-items-center arrow-none px-1 px-sm-2" data-toggle="collapse" data-target="#topnav-menu-content">
+                        <i class="uil uil-bars font-24"></i>
+                    </a>
+
+                                            <a href="/" class="topnav-logo float-none px-0 px-2 d-flex align-items-center">
+                            <div class="topnav-logo-lg">
+                                <div class="float-left">
+                                    <img src="/img/logo.png" alt="" height="30" style="margin-top:-4px; margin-right: 9px;">
+                                </div>
+                                <div class="float-left">
+                                    <span class="text-info font-22 d-flex" style="color: #bbe4f0 !important;">TGStat</span>
+                                </div>
+                            </div>
+                            <div class="topnav-logo-sm">
+                                <div class="float-left">
+                                    <img src="/img/logo.png" alt="" height="30" style="margin-top:-4px; margin-right: 9px; margin-left: 5px;">
+                                </div>
+                                <div class="float-left">
+                                    <span class="text-info font-22 d-flex" style="color: #bbe4f0 !important;">TGStat</span>
+                                </div>
+                            </div>
+                            <div class="topnav-logo-xs">
+                                <div class="float-left">
+                                    <img src="/img/logo.png" alt="" height="30" style="margin-top:-4px; margin-right: 9px; margin-left: 5px;">
+                                </div>
+                            </div>
+                        </a>
+                    
+    
+                    <div class="app-search col dropdown d-flex align-items-center max-width-320px">
+                        <div class="position-relative w-100">
+                            <input name="query" type="text" class="app-search-input form-control font-16 font-sm-15" placeholder="Быстрый поиск..." autocomplete="off">
+                            <span class="uil uil-search search-icon"></span>
+                            <span class="spinner-border position-absolute d-none" style="top:10px; left:16px; width:0.95rem; height:0.95rem; border-width:0.13em;"></span>
+                            <i class="uil uil-times app-search-show-toggle app-search-icon-cross cursor-pointer d-block d-sm-none"></i>
+                        </div>
+
+                        <div class="app-search-dropdown-menu dropdown-menu dropdown-menu-animated width-320px overflow-auto">
+                            <div data-simplebar="init" class="max-height-320px"><div class="simplebar-wrapper" style="margin: 0px;"><div class="simplebar-height-auto-observer-wrapper"><div class="simplebar-height-auto-observer"></div></div><div class="simplebar-mask"><div class="simplebar-offset" style="right: 0px; bottom: 0px;"><div class="simplebar-content-wrapper" style="height: auto; overflow: hidden;"><div class="simplebar-content" style="padding: 0px;">
+                                <div class="app-search-result-container" data-container="app-search-result">
+                                    
+<small class="px-2 text-muted">
+    <b>Введите текст для поиска</b>
+</small>
+<hr class="my-1">
+
+
+<a href="/channels/search" class="dropdown-item notify-item text-dark px-2">
+    <div class="text-truncate">
+        <i class="uil-search font-14 mr-05"></i>
+        <span>Расширенный поиск каналов</span>
+    </div>
+</a>
+
+                                </div>
+                            </div></div></div></div><div class="simplebar-placeholder" style="width: 0px; height: 0px;"></div></div><div class="simplebar-track simplebar-horizontal" style="visibility: hidden;"><div class="simplebar-scrollbar" style="width: 0px; display: none;"></div></div><div class="simplebar-track simplebar-vertical" style="visibility: hidden;"><div class="simplebar-scrollbar" style="height: 0px; display: none;"></div></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-end">
+                <ul class="row no-gutters list-unstyled topbar-right-menu mb-0">
+                    <li class="notification-list d-block d-sm-none">
+                        <a class="nav-link mx-1 app-search-show-toggle" href="javascript: void(0);">
+                            <i class="uil uil-search noti-icon"></i>
+                        </a>
+                    </li>
+
+                    <li class="notification-list">
+                        <a class="nav-link theme-switcher mx-1 mx-sm-2" href="javascript: void(0);">
+                            <i class="uil uil-moon noti-icon theme-switcher-icon"></i>
+                        </a>
+                    </li>
+
+                    <!-- <li class="notification-list">
+                        <a class="nav-link right-bar-toggle" href="javascript: void(0);">
+                            <i class="uil uil-cog noti-icon"></i>
+                        </a>
+                    </li> -->
+
+
+                    
+                    
+                        <li class="dropdown notification-list">
+
+                                                            <a class="nav-link nav-user d-flex justify-content-center align-items-center arrow-none px-1 px-sm-3 mr-0 ml-0 ml-sm-2 dropdown-toggle" data-toggle="dropdown" id="topbar-userdrop" href="#" role="button" aria-haspopup="true" aria-expanded="false">
+                                    <span class="account-user-avatar rounded-circle border border-info border-2px" style="padding:1px">
+                                        
+                    <div class="avatar-sm rounded-circle " style="width:38px; height:38px;">
+                        <span class="avatar-title bg-info rounded-circle text-uppercase"> U </span>
+                    </div>
+                                                        </span>
+                                    <span>
+                                        <span class="account-user-name ml-15 text-truncate text-white" style="max-width:150px;">User</span>
+                                        <span class="account-position ml-15 text-info" style="max-width:150px;">
+                                            Premium
+                                        </span>
+                                    </span>
+                                </a>
+                            
+
+                            <div class="dropdown-menu dropdown-menu-right dropdown-menu-animated topbar-dropdown-menu profile-dropdown" aria-labelledby="topbar-userdrop">
+                                
+                                <a href="/my/profile" class="dropdown-item notify-item">
+                                    <i class="uil uil-user-circle mr-1"></i><span>Мой профиль</span>
+                                </a>
+
+                                <a href="/my/channels" class="dropdown-item notify-item">
+                                    <i class="uil uil-megaphone mr-1"></i><span>Мои каналы</span>
+                                </a>
+
+                                <a href="/my/alerts/subs" class="dropdown-item notify-item">
+                                    <i class="uil uil-focus-target mr-1"></i><span>Мои отслеживания</span>
+                                </a>
+
+                                
+                                <a href="/my/favorites" class="dropdown-item notify-item">
+                                    <i class="uil uil-favorite mr-1"></i><span>Избранное</span>
+                                </a>
+
+                                
+                                <div class="dropdown-divider"></div>
+
+                                <a href="/my/ads" class="dropdown-item notify-item">
+                                    <i class="uil uil-postcard mr-1"></i><span>Реклама на TGStat</span>
+                                </a>
+
+                                <div class="dropdown-divider"></div>
+
+                                <a href="/my/partnership" class="dropdown-item notify-item">
+                                    <i class="uil uil-suitcase mr-1"></i><span>Партнерская программа</span>
+                                </a>
+
+                                
+                                <div class="dropdown-divider"></div>
+
+                                <a href="#" data-src="/logout" data-logout-button="true" class="dropdown-item notify-item">
+                                    <i class="uil uil-sign-out-alt mr-1"></i><span>Выход</span>
+                                </a>
+
+                            </div>
+                        </li>
+                                    </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+                    
+
+
+<div class="topnav shadow-sm">
+    <div class="container-fluid">
+        <nav class="navbar navbar-light navbar-expand-lg topnav-menu ml-n3 ml-sm-0">
+
+            <div class="collapse navbar-collapse" id="topnav-menu-content">
+                <ul class="navbar-nav">
+
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle arrow-none" href="/" id="topnav-catalog" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                            <i class="uil-apps mr-1"></i>Каталог <div class="arrow-down"></div>
+                        </a>
+
+                        <div class="dropdown-menu" aria-labelledby="topnav-catalog">
+                            <a class="dropdown-item pr-4" href="/">
+                                <i class="uil-megaphone mr-1"></i>Каталог каналов и чатов                            </a>
+                            
+                            
+                            <a class="dropdown-item pr-4" href="/channels/search">
+                                <i class="uil-search mr-1"></i>Поиск каналов                            </a>
+
+                            <div class="dropdown-divider"></div>
+
+                            <a class="dropdown-item pr-4" href="/add/channel">
+                                <i class="uil-plus-circle mr-1"></i>Добавить канал/чат                            </a>
+                        </div>
+
+                    </li>
+
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle arrow-none" href="#" id="topnav-ratings" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                            <i class="uil-chart mr-1"></i>Рейтинги <div class="arrow-down"></div>
+                        </a>
+
+                        <div class="dropdown-menu" aria-labelledby="topnav-ratings">
+                            <a class="dropdown-item pr-4" href="/ratings/channels">
+                                <i class="uil-megaphone mr-1"></i>Рейтинг каналов                            </a>
+
+                            <a class="dropdown-item pr-4" href="/ratings/chats">
+                                <i class="uil-comments mr-1"></i>Рейтинг чатов                            </a>
+
+                            <a class="dropdown-item pr-4" href="/ratings/posts">
+                                <i class="uil-comment-alt-chart-lines  mr-1"></i>Рейтинг публикаций                            </a>
+
+                            <div class="dropdown-divider"></div>
+
+                            <a class="dropdown-item pr-4" href="/ratings">
+                                <i class="uil-trademark mr-1"></i>Рейтинги брендов и персон                            </a>
+                        </div>
+                    </li>
+
+                                            <li class="nav-item">
+                            <a class="nav-link" href="/analytics">
+                                <i class="uil-chart-line mr-1"></i>Аналитика                            </a>
+                        </li>
+                    
+                    
+
+                                            <li class="nav-item">
+                            <a class="nav-link" href="/search">
+                                <i class="uil-search-alt mr-1"></i>Поиск по публикациям                            </a>
+                        </li>
+
+                        <li class="nav-item">
+                                                            <a class="nav-link" href="/alerts">
+                                    <i class="uil-focus-target mr-1"></i>Мониторинг Telegram                                </a>
+                                                    </li>
+                    
+                    
+                </ul>
+            </div>
+        </nav>
+    </div>
+</div>                </div>
+
+                <div class="container-fluid px-2 px-md-3"> <!-- id="vue-app"-->
+
+<!--                    -->
+<!--                    -->
+                    <div class="posts-lists-container">
+
+    <h1 class="mt-4 mb-3 text-dark text-center">
+        Поиск публикаций в Telegram    </h1>
+
+    <form id="search-form" class="lm-form" action="/search" method="POST" autocomplete="off">
+<input type="hidden" name="_tgstat_csrk" value="CSRF">
+    <div class="row">
+        <div class="col col-12 px-0 px-sm-2">
+
+            <div class="card card-body border">
+                
+
+    <div class="row search-filters">
+        <div class="col col-12 col-lg-3 col-md-12 col-sm-12">
+
+            <input type="hidden" class="lm-page" name="page" value="1">            <input type="hidden" class="lm-offset" name="offset" value="20"><!--            --><!--            -->
+            <div class="form-group field-q">
+<label class="control-label" for="q">Текст для поиска</label>
+<input type="text" id="q" class="form-control" name="q" value="овадлм доівао івадіфводла оівдаодфівоад івоадофіадфвіполві лоаіа фівдаліа" autofocus="" placeholder="Введите текст для поиска">
+
+<p class="help-block help-block-error"></p>
+</div>
+            <button class="btn btn-block btn-light d-md-none collapse-arrow collapsed mt-n2 py-0 mb-2" type="button" data-toggle="collapse" data-target=".multi-collapse" aria-expanded="false">
+                Расширенный поиск <i class="uil-angle-down"></i>
+            </button>
+        </div>
+
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12 collapse-sm multi-collapse">
+            <div class="form-group field-peertype">
+<label class="control-label" for="peertype">Источник</label>
+<select id="peertype" class="form-control custom-select height39 js-trial-blocked-select" name="peerType" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="all">
+<option value="all">Каналы и чаты</option>
+<option value="channel" selected="">Каналы</option>
+<option value="chat">Чаты</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+        <div class="col col-6 col-lg-3 col-md-3 col-sm-6 collapse-sm multi-collapse" data-toggle="tooltip" data-placement="top" title="">
+            <div class="form-group field-startdate">
+<label class="control-label" for="startdate">Период с</label>
+<input type="text" id="startdate" class="form-control" name="startDate" value="09.09.2026" placeholder="с" data-provide="datetime-picker" data-hide-empty-time="true">
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+        <div class="col col-6 col-lg-3 col-md-3 col-sm-6 collapse-sm multi-collapse" data-toggle="tooltip" data-placement="top" title="">
+            <div class="form-group field-enddate">
+<label class="control-label" for="enddate">Период по</label>
+<input type="text" id="enddate" class="form-control" name="endDate" value="16.09.2026" placeholder="по" data-provide="datetime-picker" data-hide-empty-time="true">
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+    </div>
+
+
+    <div class="row search-filters collapse-sm multi-collapse">
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12">
+
+            <div class="form-group field-strongsearch">
+<div class="custom-control custom-checkbox"><input type="hidden" name="strongSearch" value="0"><input type="checkbox" id="strongsearch" class="custom-control-input" name="strongSearch" value="1"><label class="custom-control-label" for="strongsearch">Точное совпадение<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Точное совпадение слова - отключает поиск по морфологическим формам слова или фразы"> </i></label><p class="help-block help-block-error"></p></div>
+</div>
+            <div class="form-group field-hideforwards">
+<div class="custom-control custom-checkbox"><input type="hidden" name="hideForwards" value="0"><input type="checkbox" id="hideforwards" class="custom-control-input" name="hideForwards" value="1"><label class="custom-control-label" for="hideforwards">Скрывать репосты<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Из результатов поиска будут скрыты публикации, которые являются репостами"> </i></label><p class="help-block help-block-error"></p></div>
+</div>
+            <div class="form-group field-extendedsyntax">
+<div class="custom-control custom-checkbox"><input type="hidden" name="extendedSyntax" value="0"><input type="checkbox" id="extendedsyntax" class="custom-control-input" name="extendedSyntax" value="1"><label class="custom-control-label" for="extendedsyntax">Расширенный язык<a class="uil uil-question-circle text-dark ml-1 popup_ajax cursor-pointer" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Включает расширенный язык запросов. Нажмите для подробной справки." data-src="/search/extended-syntax-help"> </a></label><p class="help-block help-block-error"></p></div>
+</div>        </div>
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12">
+
+            <div class="form-group field-hidedeleted">
+<div class="custom-control custom-checkbox"><input type="hidden" name="hideDeleted" value="0"><input type="checkbox" id="hidedeleted" class="custom-control-input" name="hideDeleted" value="1"><label class="custom-control-label" for="hidedeleted">Скрывать удаленные<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Из результатов поиска будут скрыты публикации, которые были удалены из Telegram"> </i></label><p class="help-block help-block-error"></p></div>
+</div>
+            <div class="form-group field-onlymentioned">
+<div class="custom-control custom-checkbox"><input type="hidden" name="onlyMentioned" value="0"><input type="checkbox" id="onlymentioned" class="custom-control-input" name="onlyMentioned" value="1"><label class="custom-control-label" for="onlymentioned">С упоминаниями каналов<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Будут найдены только те публикации, в которых упоминаются ссылки на Telegram-каналы"> </i></label><p class="help-block help-block-error"></p></div>
+</div>        </div>
+
+        <div class="col col-12 col-lg-2 col-md-4 col-sm-12">
+
+            <div class="form-group field-country">
+<label class="control-label" for="country">Гео канала</label>
+<select id="country" class="form-control custom-select js-trial-blocked-select" name="country" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="">
+<option value="" selected="">не важно ...</option>
+<option value="global">Без территориальной принадлежности</option>
+<option value="ru">Россия</option>
+<option value="ua">Украина</option>
+<option value="uz">Узбекистан</option>
+<option value="by">Беларусь</option>
+<option value="kz">Казахстан</option>
+<option value="kg">Киргизия</option>
+<option value="ir">Иран</option>
+<option value="in">Индия</option>
+<option value="cn">Китай</option>
+<option value="et">Эфиопия</option>
+<option value="ab">Абхазия</option>
+<option value="au">Австралия</option>
+<option value="at">Австрия</option>
+<option value="az">Азербайджан</option>
+<option value="al">Албания</option>
+<option value="dz">Алжир</option>
+<option value="ar">Аргентина</option>
+<option value="am">Армения</option>
+<option value="bd">Бангладеш</option>
+<option value="be">Бельгия</option>
+<option value="bg">Болгария</option>
+<option value="ba">Босния и Герцеговина</option>
+<option value="br">Бразилия</option>
+<option value="gb">Великобритания</option>
+<option value="hu">Венгрия</option>
+<option value="ve">Венесуэла</option>
+<option value="vn">Вьетнам</option>
+<option value="de">Германия</option>
+<option value="gr">Греция</option>
+<option value="ge">Грузия</option>
+<option value="dk">Дания</option>
+<option value="eg">Египет</option>
+<option value="il">Израиль</option>
+<option value="id">Индонезия</option>
+<option value="iq">Ирак</option>
+<option value="ie">Ирландия</option>
+<option value="es">Испания</option>
+<option value="it">Италия</option>
+<option value="ye">Йемен</option>
+<option value="kh">Камбоджа</option>
+<option value="ca">Канада</option>
+<option value="cy">Кипр</option>
+<option value="kr">Корея</option>
+<option value="cu">Куба</option>
+<option value="lv">Латвия</option>
+<option value="lt">Литва</option>
+<option value="mk">Македония</option>
+<option value="my">Малайзия</option>
+<option value="mx">Мексика</option>
+<option value="md">Молдавия</option>
+<option value="mn">Монголия</option>
+<option value="mm">Мьянма</option>
+<option value="ng">Нигерия</option>
+<option value="nl">Нидерланды</option>
+<option value="no">Норвегия</option>
+<option value="ae">ОАЭ</option>
+<option value="pk">Пакистан</option>
+<option value="pa">Панама</option>
+<option value="pl">Польша</option>
+<option value="pt">Португалия</option>
+<option value="ro">Румыния</option>
+<option value="sa">Саудовская Аравия</option>
+<option value="rs">Сербия</option>
+<option value="sg">Сингапур</option>
+<option value="sy">Сирия</option>
+<option value="sk">Словакия</option>
+<option value="si">Словения</option>
+<option value="so">Сомали</option>
+<option value="sd">Судан</option>
+<option value="us">США</option>
+<option value="tj">Таджикистан</option>
+<option value="th">Тайланд</option>
+<option value="tz">Танзания</option>
+<option value="tm">Туркменистан</option>
+<option value="tr">Турция</option>
+<option value="uy">Уругвай</option>
+<option value="ph">Филиппины</option>
+<option value="fi">Финляндия</option>
+<option value="fr">Франция</option>
+<option value="hr">Хорватия</option>
+<option value="me">Черногория</option>
+<option value="cz">Чехия</option>
+<option value="ch">Швейцария</option>
+<option value="se">Швеция</option>
+<option value="lk">Шри-Ланка</option>
+<option value="ec">Эквадор</option>
+<option value="ee">Эстония</option>
+<option value="za">ЮАР</option>
+<option value="jp">Япония</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+
+        <div class="col col-12 col-lg-2 col-md-4 col-sm-12">
+            <div class="form-group field-language">
+<label class="control-label" for="language">Язык контента</label>
+<select id="language" class="form-control custom-select js-trial-blocked-select" name="language" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="">
+<option value="" selected="">не важно ...</option>
+<option value="russian">Русский</option>
+<option value="english">Английский</option>
+<option value="uzbek">Узбекский</option>
+<option value="ukrainian">Украинский</option>
+<option value="kazakh">Казахский</option>
+<option value="belarus">Белорусский</option>
+<option value="farsi">Фарси</option>
+<option value="hindi">Хинди</option>
+<option value="chinese">Китайский</option>
+<option value="tamil">Тамильский</option>
+<option value="amhar">Амхарский</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+
+        <div class="col col-12 col-lg-2 col-md-4 col-sm-12">
+            <div class="form-group field-category">
+<label class="control-label" for="category">Тематика канала</label>
+<select id="category" class="form-control custom-select js-trial-blocked-select" name="category" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="">
+<option value="" selected="">не важно ...</option>
+<option value="telegram">Telegram</option>
+<option value="business">Бизнес и стартапы</option>
+<option value="blogs">Блоги</option>
+<option value="gambling">Букмекерство</option>
+<option value="video">Видео и фильмы</option>
+<option value="darknet">Даркнет</option>
+<option value="design">Дизайн</option>
+<option value="adult">Для взрослых</option>
+<option value="other">Другое</option>
+<option value="food">Еда и кулинария</option>
+<option value="health">Здоровье и Фитнес</option>
+<option value="games">Игры</option>
+<option value="instagram">Инстаграм</option>
+<option value="construction">Интерьер и строительство</option>
+<option value="art">Искусство</option>
+<option value="pics">Картинки и фото</option>
+<option value="career">Карьера</option>
+<option value="books">Книги</option>
+<option value="crypto">Криптовалюты</option>
+<option value="courses">Курсы и гайды</option>
+<option value="language">Лингвистика</option>
+<option value="marketing">Маркетинг, PR, реклама</option>
+<option value="medicine">Медицина</option>
+<option value="beauty">Мода и красота</option>
+<option value="music">Музыка</option>
+<option value="news">Новости и СМИ</option>
+<option value="education">Образование</option>
+<option value="edutainment">Познавательное</option>
+<option value="politics">Политика</option>
+<option value="law">Право</option>
+<option value="nature">Природа</option>
+<option value="sales">Продажи</option>
+<option value="psychology">Психология</option>
+<option value="travels">Путешествия</option>
+<option value="religion">Религия</option>
+<option value="handmade">Рукоделие</option>
+<option value="babies">Семья и дети</option>
+<option value="apps">Софт и приложения</option>
+<option value="sport">Спорт</option>
+<option value="tech">Технологии</option>
+<option value="transport">Транспорт</option>
+<option value="quotes">Цитаты</option>
+<option value="shock">Шок-контент</option>
+<option value="esoterics">Эзотерика</option>
+<option value="economics">Экономика</option>
+<option value="erotica">Эротика</option>
+<option value="entertainment">Юмор и развлечения</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+    </div>
+
+    <div class="row align-items-end">
+
+        <div class="col col-12 col-lg-6 col-md-12 col-sm-12 collapse-sm multi-collapse" data-toggle="tooltip" data-placement="top" title="">
+            <div class="form-group field-minuswords">
+<label class="control-label" for="minuswords">Минус-слова (через пробел)&nbsp; <i class="uil-question-circle" aria-hidden="true" data-toggle="tooltip" data-placement="top" title="Перечислите через пробел слова, которые не должны встречаться в тексте публикации"></i></label>
+<input type="text" id="minuswords" class="form-control" name="minusWords" value="" placeholder="Какие слова нужно исключить из поиска?">
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12">
+            <div class="form-group">
+                <div class="btn-group btn-block" role="group">
+                    <button type="submit" class="btn btn-dark btn-block search-button">Искать</button>                                    </div>
+            </div>
+        </div>
+
+        <div class="col col-lg-3 col-sm-12 col-md-6 text-center">
+            <div class="mb-3">
+                                    Найдено: <b>0</b> публикаций                            </div>
+        </div>
+    </div>
+
+
+            </div>
+        </div>
+    </div>
+
+    
+    
+        
+<div class="alert alert-danger bg-danger-lighten border border-danger fade show" role="alert">
+    <div class="media d-flex align-items-center">
+        <div>
+            <i class="uil uil-info-circle text-danger mr-2" style="font-size:50px;"></i>
+        </div>
+        <div class="media-body text-dark">
+
+                            <div>
+                    <b>Ничего не найдено.</b>
+                    <p class="m-0">
+                        По вашему запросу не удалось найти ни одной публикации.<br>
+                        Попробуйте изменить текст для поиска и проверьте установленные фильтры.
+                    </p>
+                </div>
+                    </div>
+    </div>
+</div>
+    
+
+
+    </form>
+</div>
+
+                </div>
+            </div>
+
+            <div class="dark">
+    <footer class="footer position-relative shadow">
+        <div class="container-fluid">
+            <div class="row navbar-light">
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Каталог</div>
+                    <div class="navbar-nav">
+                        <a href="/" class="nav-link pt-0 pb-1">
+                            Каталог каналов и чатов                        </a>
+                        <a href="/tags" class="nav-link pt-0 pb-1">
+                            Подборки каналов                        </a>
+                        <a href="/channels/search" class="nav-link pt-0 pb-1">
+                            Поиск каналов                        </a>
+                        <a href="/add/channel" class="nav-link pt-0 pb-1">
+                           Добавить канал/чат                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Рейтинги</div>
+                    <div class="navbar-nav">
+                        <a href="/ratings/channels" class="nav-link pt-0 pb-1">
+                            Рейтинг каналов Telegram                        </a>
+                        <a href="/ratings/chats" class="nav-link pt-0 pb-1">
+                            Рейтинг чатов Telegram                        </a>
+                        <a href="/ratings/posts" class="nav-link pt-0 pb-1">
+                            Рейтинг публикаций                        </a>
+                        <a href="/ratings" class="nav-link pt-0 pb-1">
+                            Рейтинги брендов и персон                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">API</div>
+                    <div class="navbar-nav">
+                        <a href="https://tgstat.ru/api/stat" target="_blank" class="nav-link pt-0 pb-1">
+                            API статистики                        </a>
+                        <a href="https://tgstat.ru/api/search" target="_blank" class="nav-link pt-0 pb-1">
+                            API поиска публикаций                        </a>
+                        <a href="https://tgstat.ru/api/callback" target="_blank" class="nav-link pt-0 pb-1">
+                            API Callback
+                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Наши каналы</div>
+                    <div class="navbar-nav">
+                        <a href="https://t.me/TGStat" target="_blank" class="nav-link pt-0 pb-1">@TGStat</a>
+                        <a href="https://t.me/TGStat_Chat" target="_blank" class="nav-link pt-0 pb-1">@TGStat_Chat</a>
+                        <a href="https://t.me/telepulse" target="_blank" class="nav-link pt-0 pb-1">@telepulse</a>
+                        <a href="https://t.me/TGStatAPI" target="_blank" class="nav-link pt-0 pb-1">@TGStatAPI</a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Почитать</div>
+                    <div class="navbar-nav">
+                        <a href="/academy" class="nav-link d-inline pt-0 pb-1">
+                            Академия TGStat                        </a>
+                        <a href="https://tgstat.ru/research-2019" target="_blank" class="nav-link pt-0 pb-1">Исследование Telegram 2019</a>
+                        <a href="https://tgstat.ru/research-2021" target="_blank" class="nav-link pt-0 pb-1">Исследование Telegram 2021</a>
+                        <a href="https://tgstat.ru/research-2023" target="_blank" class="nav-link pt-0 pb-1">Исследование Telegram 2023</a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Контакты</div>
+                    <div class="navbar-nav">
+                        <a href="/help" class="nav-link pt-0 pb-1">Справочный центр</a>
+                        <a href="https://t.me/TGStatSupportBot" target="_blank" class="nav-link pt-0 pb-1">Поддержка</a>
+                        <a href="mailto:support@tgstat.ru" target="_blank" class="nav-link pt-0 pb-1">Почта</a>
+                        <a href="/p/tgstat-job" class="nav-link pt-0 pb-1">
+                            Вакансии                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Всякая всячина</div>
+                    <div class="navbar-nav">
+                        <a href="/p/agreement" class="nav-link pt-0 pb-1">
+                            Пользовательское соглашение                        </a>
+                        <a href="/p/privacy-policy" class="nav-link pt-0 pb-1">
+                            Политика конфиденциальности                        </a>
+                        <a href="/p/oferta" class="nav-link pt-0 pb-1">
+                            Публичная оферта                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Наши боты</div>
+                    <div class="navbar-nav">
+                        <a href="https://t.me/TGStat_Bot" target="_blank" class="nav-link pt-0 pb-1">@TGStat_Bot</a>
+                        <a href="https://t.me/SearcheeBot" target="_blank" class="nav-link pt-0 pb-1">@SearcheeBot</a>
+                        <a href="https://t.me/TGAlertsBot" target="_blank" class="nav-link pt-0 pb-1">@TGAlertsBot</a>
+                        <a href="https://t.me/tg_analytics_bot" target="_blank" class="nav-link pt-0 pb-1">@tg_analytics_bot</a>
+                        <a href="https://t.me/TGStatChatBot" target="_blank" class="nav-link pt-0 pb-1">@TGStatChatBot</a>
+                    </div>
+                </div>
+            </div>
+
+                    </div>
+    </footer>
+</div>
+        </div>
+
+    </div>
+
+    
+    <script src="/static/js/app.js?v=1785995633"></script><div class="daterangepicker ltr single opensright"><div class="ranges"></div><div class="drp-calendar left single" style="display: block;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-calendar right" style="display: none;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-buttons"><span class="drp-selected">09.09.2026 00:00 - 09.09.2026 00:00</span><button class="cancelBtn btn btn-sm btn-default" type="button">Отмена</button><button class="applyBtn btn btn-sm btn-primary" disabled="disabled" type="button">Выбрать</button> </div></div><div class="daterangepicker ltr single opensright"><div class="ranges"></div><div class="drp-calendar left single" style="display: block;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-calendar right" style="display: none;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-buttons"><span class="drp-selected">16.09.2026 00:00 - 16.09.2026 00:00</span><button class="cancelBtn btn btn-sm btn-default" type="button">Отмена</button><button class="applyBtn btn btn-sm btn-primary" disabled="disabled" type="button">Выбрать</button> </div></div>
+<script></script>
+<script>jQuery(function ($) {
+        function setControls()
+        {
+            if ($('#extendedsyntax').is(':checked')) {
+                $('#strongsearch').attr('disabled', 'disabled');
+                $('#minuswords').attr('disabled', 'disabled');
+            } else {
+                $('#strongsearch').removeAttr('disabled');
+                $('#minuswords').removeAttr('disabled');
+            }
+        }
+
+        setControls();
+        $('#extendedsyntax').change(function() {
+            setControls();
+        });
+    $(document).ready(function() {
+       
+        if ($('#sticky-right-column').length > 0 && $('#sticky-left-column').length > 0) {
+            var rightSidebar = new StickySidebar('#sticky-right-column', {
+                containerSelector: '#sticky-center-column',
+                innerWrapperSelector: '#sticky-right-column__inner',
+                topSpacing: $('.fixed-top').height() + 30,
+                bottomSpacing: 40,
+                minWidth: 768 // < sm
+            });
+           
+            var leftSidebar = new StickySidebar('#sticky-left-column', {
+                containerSelector: '#sticky-center-column',
+                innerWrapperSelector: '#sticky-left-column__inner',
+                topSpacing: $('.fixed-top').height() + 30,
+                bottomSpacing: 40,
+                minWidth: 991 // < md
+            });            
+        }
+        
+        var bLazy = new Blazy({
+            breakpoints: [{
+                width: 100,
+                src: 'data-src'
+            }],
+            container: '#searchSourceScrollableContainer',
+            success: function(element) {
+                setTimeout(function() {
+                    var parent = element.parentNode;
+                    parent.className = parent.className.replace(/\bloading\b/,'');
+                }, 200);
+            }
+        });
+        
+        $(document).on('shown.bs.collapse', function () {
+            bLazy.revalidate();  
+        })
+        
+        var loadMore = $('.posts-lists-container').loadMore({
+            url: '/search/list',
+            errorCallback: function(errCode) {
+                
+            },
+            successCallback: function(r) {
+                leftSidebar.updateSticky();
+                rightSidebar.updateSticky();
+            }
+        });
+        
+        var isTrial = 0;
+        
+        // open categories full list
+        $('.collapsable-items-expander').click(function() {
+            setTimeout(function(){
+                leftSidebar.updateSticky();
+                rightSidebar.updateSticky();
+            }, 100);
+        });
+        
+        // handler click by source
+        $('#searchSourceScrollableContainer').on('click', 'div.channel-source-item', function(e) {
+            
+            e.preventDefault();
+            e.stopPropagation();
+          
+            var row = $(this);
+            var fieldForm = $('#search-form').find('input#facetChannelId');
+            var oldValue = fieldForm.val();
+            var newValue = row.data('id');
+            
+            if (row.hasClass('active')) {
+                fieldForm.val('');
+                row.removeClass('active');
+            } else {
+                fieldForm.val(newValue);
+                $('#searchSourceScrollableContainer div.channel-source-item').removeClass('active');
+                row.addClass('active');
+            }
+            
+            loadMore.sendRequest(true,
+                function() { // success
+                    leftSidebar.updateSticky();
+                    rightSidebar.updateSticky();
+                    Utils.scrollToAnchor('#sticky-center-column');
+                },
+                function() { // failure
+                    fieldForm.val(oldValue);
+                }
+            );
+        });
+    
+        // handler click by sort sources
+        $('#sortSourceByPopular').click(function() {
+            $('#searchSourceScrollableContainer div.channel-source-item').sort(function (a, b) {
+                return ($(b).data('members')) > ($(a).data('members')) ? 1 : -1;    
+            }).prependTo('#searchSourceScrollableContainer');
+            
+            bLazy.revalidate();
+            rightSidebar.updateSticky();
+        });
+        
+        // handler click by sort sources
+        $('#sortSourceByFreq').click(function() {
+            $('#searchSourceScrollableContainer div.channel-source-item').sort(function (a, b) {
+                return ($(b).data('freq')) > ($(a).data('freq')) ? 1 : -1;    
+            }).prependTo('#searchSourceScrollableContainer');
+            
+            bLazy.revalidate();
+            rightSidebar.updateSticky();
+        });
+     
+        // handler sort posts
+        $('.sort-button-js').click(function(e) {
+//            e.preventDefault();
+//            e.stopPropagation();
+            
+            var button = $(this);
+            var fieldForm = $('#search-form').find('input[name=sort]');
+            var oldValue = fieldForm.val();
+            
+            fieldForm.val($(this).data('metric'));
+            
+            loadMore.sendRequest(true, 
+                function() { // success
+//                    button.parents('.button-group').find('.sort-button-js').removeClass('active');
+//                    button.addClass('active');
+                },
+                function() { // failure
+                    fieldForm.val(oldValue);
+                }
+            );
+        });
+        
+        // handler facet filter
+        $('.facet-filter-js').click(function(e) {
+         
+            if (isTrial) {
+                
+                e.preventDefault();
+                e.stopPropagation();
+                
+                (new ModalWindow()).initFromUrl({
+                    url: '/payments/premium-search',
+                });
+                
+                $(this).val($(this).data('default-val'));
+                
+                return false;
+            }
+            
+            // reset chosen channel
+            $('#search-form').find('input#facetChannelId').val('');
+            
+            $('#searchSourceScrollableContainer').css({ opacity: 0.3 });
+            
+            loadMore.sendRequest(true,
+                function() { // success
+                    leftSidebar.updateSticky();
+                    rightSidebar.updateSticky();
+                },
+                function() { // failure
+                
+                }
+            );
+            
+            $.ajax({
+                type: 'POST',
+                url: '/search/facets',
+                data: $('#search-form').serialize(),
+                success: function(r) {
+                    let facets = r.facets;
+                    
+                    var facetsStrings = {};
+                    for(var facetType in facets) {
+                        for(var facetIndexValue in facets[facetType]) {
+                            facetsStrings['facets['+facetType+']['+facetIndexValue+']'] = facets[facetType][facetIndexValue];
+                        }
+                    }
+                    
+                    $('#searchIsDeletedCollapse input, #searchIsForwardedCollapse input, #searchPeerTypeCollapse input, #searchSourceGeoCollapse input, #searchSourceLanguageCollapse input, #searchSourceCategoryCollapse input')
+                    .each(function( index ) {
+                        if (facetsStrings[$(this).attr('name')]) {
+                            $(this).parents('.facet-row').find('.facet-param label').removeClass('text-strike');
+                            $(this).parents('.facet-row').find('.facet-value').removeClass('text-strike').text(facetsStrings[$(this).attr('name')]);
+                        } else {
+                            $(this).parents('.facet-row').find('.facet-param label').addClass('text-strike');
+                            $(this).parents('.facet-row').find('.facet-value').addClass('text-strike').text('');
+                        }
+                    });
+                    
+                    $('#searchViewsRangeCollapse input').each(function( index ) {
+                    
+                        if ($(this).val() !== 'all') {
+                            if (facetsStrings[$(this).attr('name') + '[' + $(this).val() + ']']) {
+                                $(this).parents('.facet-row').find('.facet-param label').removeClass('text-strike');
+                                $(this).parents('.facet-row').find('.facet-value').removeClass('text-strike').text(facetsStrings[$(this).attr('name') + '[' + $(this).val() + ']']);
+                            } else {
+                                $(this).parents('.facet-row').find('.facet-param label').addClass('text-strike');
+                                $(this).parents('.facet-row').find('.facet-value').addClass('text-strike').text('');
+                            }
+                        }
+                    });
+                    
+                    $('#searchSourceScrollableContainer').html(r.sources);
+                    $('#searchSourceScrollableContainer').css({ opacity: 1 });
+                    leftSidebar.updateSticky();
+                    bLazy.revalidate();
+                }
+            });
+        });
+        
+    });
+  
+    new TopSearch({
+        requestUrl: '/channels/global-search'
+    });
+});</script>
+    
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.webvisor.org/metrika/tag_ww.js', 'ym');
+
+    ym(44953966, 'init', {clickmap:true, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/44953966" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
+
+
+    
+
+
+<svg id="SvgjsSvg1001" width="2" height="0" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev" style="overflow: hidden; top: -100%; left: -100%; position: absolute; opacity: 0;"><defs id="SvgjsDefs1002"></defs><polyline id="SvgjsPolyline1003" points="0,0"></polyline><path id="SvgjsPath1004" d="M0 0 "></path></svg></body></html>

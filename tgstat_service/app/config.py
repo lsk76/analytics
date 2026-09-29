@@ -24,5 +24,9 @@ class Config:
     # протух у простої. 0 — вимкнено.
     keepalive: int = field(default_factory=lambda: int(_env(
         "TGSTAT_KEEPALIVE", "1800")))
+    # Мінімальна пауза між запитами до tgstat, с (+ до 50% випадково). При 1.5 с
+    # tgstat уже за ~10 запитів відповів 429 «Подозрение на робота».
+    request_delay: float = field(default_factory=lambda: float(_env(
+        "TGSTAT_REQUEST_DELAY", "4")))
     screen_w: int = field(default_factory=lambda: int(_env("SCREEN_W", "1366")))
     screen_h: int = field(default_factory=lambda: int(_env("SCREEN_H", "900")))

@@ -4,6 +4,7 @@
   * `a[data-logout-button]` / `#topbar-userdrop` — лише у залогіненого;
   * `.account-user-name` — ім'я, `.account-position` — тариф («Premium»);
   * `meta[name=csrf-token]` — без нього жоден AJAX-пошук не пройде;
+  * «Подозрение на робота» + reCAPTCHA — власний антибот tgstat (429) на частоту;
   * заголовок «Just a moment…» / «Attention Required! | Cloudflare» — челендж
     або блок Cloudflare (кліренс прив'язаний до IP, профілю і збірки браузера).
 """
@@ -22,6 +23,8 @@ SNAPSHOT_JS = """
         logged_in: !!(q('[data-logout-button]') || q('#topbar-userdrop')),
         user: text('.account-user-name'),
         plan: text('.account-position'),
+        captcha: !!q('#recaptcha-widget')
+            || (document.body ? document.body.innerText : '').includes('Подозрение на робота'),
     };
 }
 """
@@ -31,6 +34,7 @@ NO_PREMIUM = "no_premium"          # залогінений, але тариф �
 LOGIN_REQUIRED = "login_required"  # сторінка відкрилась, користувача немає
 CLOUDFLARE = "cloudflare"          # челендж/блок Cloudflare не пройдено
 ERROR = "error"                    # браузер не піднявся, таймаут тощо
+CAPTCHA = "captcha"                # tgstat запідозрив робота: 429 + reCAPTCHA
 MANUAL = "manual"                  # іде ручний вхід у звичайному Chrome без Playwright
 
 _CF_TITLES = ("just a moment", "attention required", "cloudflare")
@@ -61,6 +65,9 @@ def classify(snap: dict) -> SessionState:
     if any(t in title.lower() for t in _CF_TITLES):
         return SessionState(CLOUDFLARE, detail="Cloudflare не пропускає: "
                             "потрібен вхід через VNC з цього ж браузера", **base)
+    if snap.get("captcha"):
+        return SessionState(CAPTCHA, detail="tgstat просить капчу («Подозрение на "
+                            "робота»): пройди її у VNC", **base)
     if not snap.get("logged_in"):
         return SessionState(LOGIN_REQUIRED, detail="на tgstat немає входу", **base)
     if not snap.get("csrf"):

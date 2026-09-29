@@ -1,6 +1,15 @@
 """HTTP-API сервісу tgstat (внутрішня мережа compose, порт 8020).
 
-Етап 1 — лише авторизація:
+Дані (кожна сторінка результатів = запит до tgstat, темп обмежено):
+  GET  /channels/search    пошук каналів за словами (?q, in_about, min_subs, …)
+  GET  /catalog/tags       список підбірок (?kind=geo|theme)
+  GET  /catalog/{tag}      канали/чати підбірки (?kind=channel|chat) — єдиний шлях до чатів
+  GET  /channel/{ref}      картка каналу/чату (ref: @h, t.me/h, url tgstat)
+  GET  /posts/search       пошук публікацій, Premium (?q, from, to, peer_type, …)
+  GET  /links/{ref}        посилання tgstat/t.me без запиту (?post_id, kind)
+  GET|POST /raw            сире тіло відповіді tgstat — діагностика парсерів
+
+Сесія:
   GET  /health             процес живий, чи піднятий Chrome
   GET  /auth/status        стан сесії (?reload=1 — перезайти на сайт)
   POST /auth/login         вивести tgstat у вікно VNC для ручного входу
@@ -9,8 +18,7 @@
   POST /auth/manual/finish закрити його і повернути Chrome під Playwright
 
 Сервіс не має БД і не тримає стану між запитами: усе, що переживає рестарт, —
-профіль Chrome у томі. Пошук/збір додаються наступними етапами поверх того ж
-Browser (docs/tgstat-service.md).
+профіль Chrome у томі (docs/tgstat-service.md).
 """
 import asyncio
 import functools
@@ -19,9 +27,11 @@ import logging
 
 from aiohttp import web
 
-from .browser import Browser
+from . import ops
+from .browser import Browser, TgstatAuthError
 from .config import Config
-from .session import OK
+from .parse import Restricted
+from .session import CAPTCHA, LOGIN_REQUIRED, MANUAL, OK
 
 log = logging.getLogger("tgstat")
 
@@ -34,6 +44,90 @@ LOGIN_HOW = (
     "далі http://localhost:6080/vnc.html (пароль — TGSTAT_VNC_PASSWORD з .env). "
     "Увійди на tgstat у цьому вікні; готовність — GET /auth/status (state=ok)."
 )
+
+
+@web.middleware
+async def errors(request: web.Request, handler):
+    """Помилки tgstat -> зрозумілі відповіді: 503 зі state, коли потрібна людина."""
+    try:
+        return await handler(request)
+    except Restricted as e:
+        return _json({"error": str(e), "state": CAPTCHA, "how_to_login": LOGIN_HOW},
+                     status=503)
+    except TgstatAuthError as e:
+        return _json({"error": str(e), "state": LOGIN_REQUIRED,
+                      "how_to_login": LOGIN_HOW}, status=503)
+    except ValueError as e:
+        return _json({"error": str(e)}, status=400)
+    except LookupError as e:
+        return _json({"error": str(e)}, status=404)
+    except RuntimeError as e:
+        if request.app["browser"].manual:
+            return _json({"error": str(e), "state": MANUAL}, status=409)
+        raise
+
+
+def _q(request: web.Request, name: str, default=None, cast=str):
+    raw = request.query.get(name)
+    if raw is None or raw == "":
+        return default
+    if cast is bool:
+        return raw.lower() in ("1", "true", "yes", "on")
+    try:
+        return cast(raw)
+    except ValueError:
+        raise ValueError(f"{name}: погане значення {raw!r}")
+
+
+async def channels_search(request: web.Request) -> web.Response:
+    return _json(await ops.search_channels(
+        request.app["browser"], _q(request, "q", ""),
+        in_about=_q(request, "in_about", False, bool),
+        min_subs=_q(request, "min_subs", None, int),
+        max_subs=_q(request, "max_subs", None, int),
+        country=_q(request, "country", "Россия"),
+        category=_q(request, "category"), language=_q(request, "language"),
+        sort=_q(request, "sort", "participants"),
+        limit=_q(request, "limit", 100, int),
+        max_pages=_q(request, "max_pages", 3, int)))
+
+
+async def catalog_tags(request: web.Request) -> web.Response:
+    return _json(await ops.tags(request.app["browser"], _q(request, "kind", "geo")))
+
+
+async def catalog_items(request: web.Request) -> web.Response:
+    return _json(await ops.catalog(
+        request.app["browser"], request.match_info["tag"],
+        kind=_q(request, "kind", "channel"),
+        category_id=_q(request, "category_id", 0, int),
+        limit=_q(request, "limit", 200, int),
+        max_pages=_q(request, "max_pages", 5, int)))
+
+
+async def channel_card(request: web.Request) -> web.Response:
+    return _json(await ops.channel(request.app["browser"], request.match_info["ref"],
+                                   kind=_q(request, "kind")))
+
+
+async def posts_search(request: web.Request) -> web.Response:
+    return _json(await ops.search_posts(
+        request.app["browser"], _q(request, "q", ""),
+        date_from=_q(request, "from"), date_to=_q(request, "to"),
+        peer_type=_q(request, "peer_type", "all"), sort=_q(request, "sort", "date"),
+        hide_forwards=_q(request, "hide_forwards", False, bool),
+        strong=_q(request, "strong", False, bool),
+        extended=_q(request, "extended", False, bool),
+        minus_words=_q(request, "minus_words", ""),
+        limit=_q(request, "limit", 100, int),
+        max_pages=_q(request, "max_pages", 3, int)))
+
+
+async def peer_links(request: web.Request) -> web.Response:
+    cfg: Config = request.app["cfg"]
+    return _json(ops.links(request.match_info["ref"], kind=_q(request, "kind"),
+                           post_id=_q(request, "post_id", None, int),
+                           base=cfg.base_url))
 
 
 async def health(request: web.Request) -> web.Response:
@@ -70,6 +164,21 @@ async def auth_manual_finish(request: web.Request) -> web.Response:
     await browser.finish_manual()
     state = await browser.check(reload=True)
     return _json(state.as_dict())
+
+
+async def raw(request: web.Request) -> web.Response:
+    """Сире тіло відповіді tgstat — для діагностики парсерів.
+    GET ?path=/channel/@x або POST {"path": ..., "form": [[k, v], ...]}."""
+    browser: Browser = request.app["browser"]
+    if request.method == "GET":
+        method, path, form = "GET", request.query.get("path", ""), None
+    else:
+        body = await request.json()
+        method, path, form = "POST", body.get("path", ""), body.get("form") or []
+    if not path.startswith("/") or "logout" in path or "payments" in path:
+        raise web.HTTPBadRequest(text="path: лише відносний шлях tgstat")
+    text = await browser.request(method, path, form)
+    return web.Response(text=text, content_type="text/plain")
 
 
 async def auth_screenshot(request: web.Request) -> web.Response:
@@ -110,13 +219,21 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def make_app(cfg: Config) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[errors])
     app["cfg"] = cfg
     app["browser"] = Browser(cfg)
     app.router.add_get("/health", health)
     app.router.add_get("/auth/status", auth_status)
     app.router.add_post("/auth/login", auth_login)
     app.router.add_get("/auth/screenshot", auth_screenshot)
+    app.router.add_get("/channels/search", channels_search)
+    app.router.add_get("/catalog/tags", catalog_tags)
+    app.router.add_get("/catalog/{tag}", catalog_items)
+    app.router.add_get("/channel/{ref:.+}", channel_card)
+    app.router.add_get("/posts/search", posts_search)
+    app.router.add_get("/links/{ref:.+}", peer_links)
+    app.router.add_get("/raw", raw)
+    app.router.add_post("/raw", raw)
     app.router.add_post("/auth/manual", auth_manual)
     app.router.add_post("/auth/manual/finish", auth_manual_finish)
     app.on_startup.append(on_startup)

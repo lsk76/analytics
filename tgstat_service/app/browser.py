@@ -10,6 +10,7 @@
 """
 import asyncio
 import logging
+import random
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from urllib.parse import unquote, urlsplit
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 from .config import Config
+from .parse import check_restricted
 from .session import ERROR, MANUAL, SNAPSHOT_JS, SessionState, classify
 
 log = logging.getLogger(__name__)
@@ -27,6 +29,30 @@ log = logging.getLogger(__name__)
 REFERER = "https://www.google.com/"
 _PROFILE_LOCKS = ("SingletonLock", "SingletonCookie", "SingletonSocket",
                   "DevToolsActivePort")
+# Запит робить сама сторінка tgstat (fetch із її cookies і CSRF-токеном): сесія
+# прив'язана до браузера, тож «зовнішній» HTTP-клієнт з тими ж cookies не пройде.
+REQUEST_JS = """
+async ({method, path, form}) => {
+    const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+    const opts = {method, credentials: 'include',
+                  headers: {'X-Requested-With': 'XMLHttpRequest'}};
+    if (method === 'POST') {
+        const p = new URLSearchParams();
+        p.set('_tgstat_csrk', csrf);
+        for (const [k, v] of form) p.append(k, v);
+        opts.headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+        opts.body = p.toString();
+    }
+    const r = await fetch(path, opts);
+    return {http: r.status, text: await r.text(), csrf: !!csrf};
+}
+"""
+
+
+class TgstatAuthError(Exception):
+    """Сесія непридатна (Cloudflare, розлогін) — потрібен вхід через VNC."""
+
+
 # Бінарник Google Chrome, який ставить `playwright install chrome`.
 GOOGLE_CHROME = Path("/opt/google/chrome/chrome")
 
@@ -57,6 +83,7 @@ class Browser:
         # Звичайний Chrome для ручного входу (без Playwright/CDP) і його сторож.
         self._manual: Optional[asyncio.subprocess.Process] = None
         self._manual_watch: Optional[asyncio.Task] = None
+        self._last_request = 0.0
 
     @property
     def running(self) -> bool:
@@ -280,3 +307,65 @@ class Browser:
             await self.ensure()
             page = await self.page()
             return await page.screenshot(type="png")
+
+    async def request(self, method: str, path: str,
+                      form: Optional[list[tuple[str, str]]] = None) -> str:
+        """Запит до tgstat від імені залогіненої сторінки. Повертає тіло.
+
+        GET — звичайна навігація вкладки (як людина відкриває сторінку),
+        POST — AJAX зі сторінки з її CSRF, як це робить сам сайт.
+        Запити йдуть по одному (лок) і не частіше за request_delay з випадковою
+        добавкою: на частоту tgstat відповідає 429 і reCAPTCHA.
+        """
+        async with self.lock:
+            await self.ensure()
+            page = await self.page()
+            await self._pace()
+            try:
+                if method == "GET":
+                    text = await self._goto(page, path)
+                else:
+                    text = await self._post(page, path, form or [])
+            finally:
+                self._last_request = asyncio.get_running_loop().time()
+            check_restricted(text)
+            return text
+
+    async def _pace(self) -> None:
+        delay = self.cfg.request_delay * (1 + random.random() / 2)
+        pause = self._last_request + delay - asyncio.get_running_loop().time()
+        if pause > 0:
+            await asyncio.sleep(pause)
+
+    async def _goto(self, page: Page, path: str) -> str:
+        referer = page.url if page.url.startswith(self.cfg.base_url) else REFERER
+        resp = await page.goto(f"{self.cfg.base_url}{path}", referer=referer,
+                               wait_until="domcontentloaded")
+        await self._wait_cloudflare(page)
+        status = resp.status if resp else 0
+        text = await page.content()
+        if "just a moment" in (await self._title(page)).lower():
+            raise TgstatAuthError("Cloudflare не пропускає — потрібен вхід через VNC")
+        if status >= 400 and status != 429:
+            raise RuntimeError(f"tgstat {status} на GET {path}")
+        return text
+
+    async def _post(self, page: Page, path: str, form: list) -> str:
+        if not page.url.startswith(self.cfg.base_url):
+            await self._open_home(page)
+            await self._wait_cloudflare(page)
+        args = {"method": "POST", "path": path, "form": form}
+        res = await page.evaluate(REQUEST_JS, args)
+        if not res["csrf"]:
+            # Сторінка без токена (челендж, помилка) — одна спроба оновитись.
+            await self._open_home(page)
+            await self._wait_cloudflare(page)
+            res = await page.evaluate(REQUEST_JS, args)
+        text = res["text"] or ""
+        if res["http"] in (401, 403) or "just a moment" in text[:3000].lower():
+            raise TgstatAuthError(
+                f"tgstat відповів {res['http']} на {path}: сесія непридатна, "
+                "потрібен вхід (docs/tgstat-service.md)")
+        if res["http"] >= 400 and res["http"] != 429:
+            raise RuntimeError(f"tgstat {res['http']} на POST {path}: {text[:200]}")
+        return text

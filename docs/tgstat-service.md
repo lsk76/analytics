@@ -5,8 +5,9 @@
 по каталогах, збір даних про канали, пошук публікацій, посилання на сторінки
 tgstat.
 
-**Стан на 2026-09-29: зроблено етап 1 — авторизація.** Пошук і збір додаються
-наступними етапами (план унизу).
+**Стан на 2026-09-29:** авторизація на проді (акаунт Premium), HTTP-API пошуку
+каналів, каталогів, картки каналу, пошуку публікацій і посилань. Далі —
+MCP-інструменти в `backend/analysis/services/mcp_api/` і рядок у `service_health`.
 
 ## Чому окремий сервіс і чому браузер
 
@@ -35,7 +36,51 @@ tgstat.
   Django-сторона звертатиметься до нього по HTTP (`http://tgstat:8020`) так
   само, як до `tg-gateway`.
 
-## HTTP API (внутрішня мережа compose, порт 8020)
+## HTTP API даних (внутрішня мережа compose, порт 8020)
+
+Усі GET, відповідь JSON. Кожен результат несе посилання: `tgstat_url`,
+`tgstat_stat_url`, `tme_url` (у приватних `null`), у постах ще `tgstat_post_url`
+і `tme_post_url`. **Кожна сторінка результатів = один запит до tgstat**, тому
+`max_pages` задає прямо кількість запитів (див. «Темп і капча»).
+
+| Шлях | Що | Параметри |
+|---|---|---|
+| `/channels/search` | пошук **каналів** за словами в назві (`in_about=1` — і в описі) | `q`, `in_about`, `min_subs`, `max_subs`, `country` (назва або id, дефолт «Россия», порожнє = будь-яка), `category`, `language` (назва або id, `app/filters.py`), `sort` (`participants`/`avg_reach`/`ci_index`/`members_7d`…), `limit` (100), `max_pages` (3) |
+| `/catalog/tags` | список підбірок | `kind=geo` (регіональні) або `theme` |
+| `/catalog/{tag}` | канали або **чати** підбірки, напр. `buratia-region` | `kind=channel\|chat`, `category_id`, `limit` (200), `max_pages` (5) |
+| `/channel/{ref}` | картка каналу/чату: назва, гео/мова, категорія, РКН, опис, підписники (+добу/тиждень/місяць), ІЦ (+згадки/репости), середнє охоплення + ERR/ERR24, рекламне охоплення 12/24/48 год, вік і дата створення, публікації, ER | `ref` = `@h`, `h`, `t.me/h` або URL tgstat; `kind` |
+| `/posts/search` | **пошук публікацій** (Premium) | `q`, `from`/`to` (`YYYY-MM-DD`), `peer_type` (`all`/`channel`/`chat`), `sort` (`date`/`views`), `hide_forwards`, `strong`, `extended`, `minus_words`, `limit` (100), `max_pages` (3) |
+| `/links/{ref}` | посилання tgstat/t.me **без запиту** до tgstat | `post_id`, `kind` |
+| `/raw` | сире тіло відповіді tgstat (діагностика парсерів) | GET `?path=/…`; POST `{"path", "form": [[k, v]…]}` |
+
+Помилки: `400` — погані параметри, `404` — tgstat не знає каналу,
+`503` + `state` (`captcha` / `login_required`) — потрібна людина у VNC,
+`409` + `state=manual` — саме йде ручний вхід.
+
+Чого в tgstat **немає**: пошуку чатів за словами (`/chats/search` дає 500,
+`/chats` — 404). Чати дістаються лише з підбірок: `/catalog/{tag}?kind=chat`.
+Пошук публікацій охоплює і повідомлення в чатах (`peer_type=chat`).
+
+Код: `tgstat_service/app/ops.py` (операції), `app/parse.py` (парсери, тести на
+знятих сторінках у `tests/fixtures/`). Взято й перевірено: поля форми пошуку
+каналів і каталогів — з `tools/discovery/tgstat_parser/`, схема пошуку
+публікацій (`/search`, далі `/search/list` з page/offset зі сторінки) — з
+`../sm-analytics`.
+
+### Темп і капча
+
+tgstat має власний антибот: 2026-09-29 уже за ~10 запитів із паузою 1.5 с він
+відповів **429 «Подозрение на робота» з reCAPTCHA** (AJAX: `{"status":"restricted"}`).
+Тому:
+
+- запити йдуть по одному, пауза `TGSTAT_REQUEST_DELAY` (дефолт 4 с) + до 50%
+  випадково; сторінки (`GET`) відкриваються навігацією вкладки, як у людини;
+- капча розпізнається (`state=captcha` у `/auth/status` і 503 в API), а не
+  парситься як «0 результатів»;
+- **капчу проходить людина**: `POST /auth/manual` → VNC → на tgstat пройти
+  reCAPTCHA → закрити вкладку. Автоматично її не обходимо.
+
+## HTTP API сесії
 
 | Метод | Шлях | Що робить |
 |---|---|---|
@@ -53,6 +98,7 @@ tgstat.
 | `ok` | залогінений, тариф Premium, CSRF є | нічого |
 | `login_required` | сайт відкрився, входу немає | увійти (нижче) |
 | `no_premium` | вхід є, тариф не Premium | пошук публікацій потребує Premium: увійти іншим акаунтом або оплатити |
+| `captcha` | власний антибот tgstat (429 + reCAPTCHA) за частоту запитів | ручний режим (`/auth/manual`), пройти капчу у VNC, закрити вкладку |
 | `cloudflare` | челендж або блок Cloudflare | відкрити VNC; зазвичай досить пройти челендж руками і, якщо треба, увійти |
 | `error` | браузер не піднявся, таймаут, немає CSRF | `docker compose logs tgstat` |
 | `manual` | іде ручний вхід у звичайному Chrome | увійти у VNC, потім закрити вкладку або `POST /auth/manual/finish` |
@@ -170,20 +216,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
 
 ## Наступні етапи (план)
 
-Кожен наступний етап — ендпоінти в тому ж сервісі поверх того ж `Browser`
-(запити йдуть `fetch` зі сторінки з CSRF, як у `tools/discovery/tgstat_parser/`),
-потім MCP-інструменти в `backend/analysis/services/mcp_api/`, які ходять у
-`http://tgstat:8020`, і рядок у `service_health`.
-
-1. **Пошук каналів і чатів за словами по каталогах**: `/channels/search`,
-   `/chats/search` (поля форми: `q`, `inAbout`, `participantsCountFrom`,
-   `countries[]`, `categories`, `page`/`offset`), підбірки `/tag/<регіон>/items`.
-2. **Збір інформації по каналу**: сторінка `/channel/@handle` і `/stat`
-   (підписники, охоплення, ER, ІЦ, вік, категорія, гео).
-3. **Пошук публікацій**: `/search` + `/search/list` (Premium), дати,
-   `peerType`. Готовий парсер карток — `../sm-analytics/TelegramAnalytics/tgstat_html.py`.
-4. **Посилання на tgstat**: кожен результат несе `tgstat_url`
-   (`{base}/channel/@h`, `{base}/channel/@h/stat`, `{base}/channel/@h/<post_id>`).
-
-Пошук серіалізується локом браузера (одна вкладка). Паралельність — не
-вимога цього етапу.
+1. MCP-інструменти `tgstat_*` у `backend/analysis/services/mcp_api/` (HTTP до
+   `http://tgstat:8020`, як `tg-gateway`), права — через `mcp_api/perms.py`.
+2. Рядок tgstat у `service_health` (стан сесії, капча).
+3. Імпорт знайдених каналів/чатів у довідник `Channel` (з `region_subject`).

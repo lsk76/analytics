@@ -1,0 +1,2446 @@
+<html lang="ru" class="  site-ru"><head>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-param" content="_tgstat_csrk">
+<meta name="csrf-token" content="CSRF">
+<title>Поиск в Telegram. Поиск по публикациям</title>
+<meta property="og:title" content="Поиск в Telegram. Поиск по публикациям">
+<meta property="og:description" content="Поиск публикаций по всем Telegram-каналам и чатам. TGStat.">
+<meta property="og:image" content="https://uk.tgstat.com/preview/18ee22fc49638bcf08235ea0a1044d32-widget.png">
+<meta property="og:site_name" content="TGStat.com">
+<meta property="twitter:title" content="Поиск в Telegram. Поиск по публикациям">
+<meta property="twitter:site" content="TGStat.com">
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:image" content="https://uk.tgstat.com/preview/18ee22fc49638bcf08235ea0a1044d32-widget.png">
+<meta name="twitter:description" content="Поиск публикаций по всем Telegram-каналам и чатам. TGStat.">
+<meta name="description" content="Поиск публикаций по всем Telegram-каналам и чатам. TGStat.">
+<meta name="keywords" content="каналы, telegram, поиск в telegram, поиск постов, поиск публикаций">
+<meta name="format-detection" content="telephone=no">
+<link href="/static/css/app.css?v=1778530248" rel="stylesheet">
+<script async="" src="https://mc.webvisor.org/metrika/tag_ww.js"></script><script></script>
+<link rel="alternate" hreflang="ru" href="https://uk.tgstat.com/search/result?lang=ru">
+<link rel="alternate" hreflang="en" href="https://uk.tgstat.com/search/result?lang=en">
+<link rel="alternate" hreflang="uz" href="https://uk.tgstat.com/search/result?lang=uz">
+
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=3">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=3">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=3">
+<link rel="manifest" href="/site.webmanifest?v=3">
+<link rel="mask-icon" href="/safari-pinned-tab.svg?v=3" color="#303744">
+<link rel="shortcut icon" href="/favicon.ico?v=3">
+<meta name="msapplication-TileColor" content="#2b5797">
+<meta name="theme-color" content="#303744">
+
+<meta name="apple-mobile-web-app-title" content="TGStat">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-startup-image" href="/favicon/apple-launch.png">
+    <style id="apexcharts-css">.apexcharts-canvas {
+  position: relative;
+  user-select: none;
+  /* cannot give overflow: hidden as it will crop tooltips which overflow outside chart area */
+}
+
+
+/* scrollbar is not visible by default for legend, hence forcing the visibility */
+.apexcharts-canvas ::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 6px;
+}
+
+.apexcharts-canvas ::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, .5);
+  box-shadow: 0 0 1px rgba(255, 255, 255, .5);
+  -webkit-box-shadow: 0 0 1px rgba(255, 255, 255, .5);
+}
+
+
+.apexcharts-inner {
+  position: relative;
+}
+
+.apexcharts-text tspan {
+  font-family: inherit;
+}
+
+.legend-mouseover-inactive {
+  transition: 0.15s ease all;
+  opacity: 0.20;
+}
+
+.apexcharts-series-collapsed {
+  opacity: 0;
+}
+
+.apexcharts-tooltip {
+  border-radius: 5px;
+  box-shadow: 2px 2px 6px -4px #999;
+  cursor: default;
+  font-size: 14px;
+  left: 62px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 12;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-tooltip.apexcharts-active {
+  opacity: 1;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-tooltip.apexcharts-theme-light {
+  border: 1px solid #e3e3e3;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.apexcharts-tooltip.apexcharts-theme-dark {
+  color: #fff;
+  background: rgba(30, 30, 30, 0.8);
+}
+
+.apexcharts-tooltip * {
+  font-family: inherit;
+}
+
+
+.apexcharts-tooltip-title {
+  padding: 6px;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.apexcharts-tooltip.apexcharts-theme-light .apexcharts-tooltip-title {
+  background: #ECEFF1;
+  border-bottom: 1px solid #ddd;
+}
+
+.apexcharts-tooltip.apexcharts-theme-dark .apexcharts-tooltip-title {
+  background: rgba(0, 0, 0, 0.7);
+  border-bottom: 1px solid #333;
+}
+
+.apexcharts-tooltip-text-y-value,
+.apexcharts-tooltip-text-goals-value,
+.apexcharts-tooltip-text-z-value {
+  display: inline-block;
+  font-weight: 600;
+  margin-left: 5px;
+}
+
+.apexcharts-tooltip-title:empty,
+.apexcharts-tooltip-text-y-label:empty,
+.apexcharts-tooltip-text-y-value:empty,
+.apexcharts-tooltip-text-goals-label:empty,
+.apexcharts-tooltip-text-goals-value:empty,
+.apexcharts-tooltip-text-z-value:empty {
+  display: none;
+}
+
+.apexcharts-tooltip-text-y-value,
+.apexcharts-tooltip-text-goals-value,
+.apexcharts-tooltip-text-z-value {
+  font-weight: 600;
+}
+
+.apexcharts-tooltip-text-goals-label, 
+.apexcharts-tooltip-text-goals-value {
+  padding: 6px 0 5px;
+}
+
+.apexcharts-tooltip-goals-group, 
+.apexcharts-tooltip-text-goals-label, 
+.apexcharts-tooltip-text-goals-value {
+  display: flex;
+}
+.apexcharts-tooltip-text-goals-label:not(:empty),
+.apexcharts-tooltip-text-goals-value:not(:empty) {
+  margin-top: -6px;
+}
+
+.apexcharts-tooltip-marker {
+  width: 12px;
+  height: 12px;
+  position: relative;
+  top: 0px;
+  margin-right: 10px;
+  border-radius: 50%;
+}
+
+.apexcharts-tooltip-series-group {
+  padding: 0 10px;
+  display: none;
+  text-align: left;
+  justify-content: left;
+  align-items: center;
+}
+
+.apexcharts-tooltip-series-group.apexcharts-active .apexcharts-tooltip-marker {
+  opacity: 1;
+}
+
+.apexcharts-tooltip-series-group.apexcharts-active,
+.apexcharts-tooltip-series-group:last-child {
+  padding-bottom: 4px;
+}
+
+.apexcharts-tooltip-series-group-hidden {
+  opacity: 0;
+  height: 0;
+  line-height: 0;
+  padding: 0 !important;
+}
+
+.apexcharts-tooltip-y-group {
+  padding: 6px 0 5px;
+}
+
+.apexcharts-tooltip-box, .apexcharts-custom-tooltip {
+  padding: 4px 8px;
+}
+
+.apexcharts-tooltip-boxPlot {
+  display: flex;
+  flex-direction: column-reverse;
+}
+
+.apexcharts-tooltip-box>div {
+  margin: 4px 0;
+}
+
+.apexcharts-tooltip-box span.value {
+  font-weight: bold;
+}
+
+.apexcharts-tooltip-rangebar {
+  padding: 5px 8px;
+}
+
+.apexcharts-tooltip-rangebar .category {
+  font-weight: 600;
+  color: #777;
+}
+
+.apexcharts-tooltip-rangebar .series-name {
+  font-weight: bold;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.apexcharts-xaxistooltip {
+  opacity: 0;
+  padding: 9px 10px;
+  pointer-events: none;
+  color: #373d3f;
+  font-size: 13px;
+  text-align: center;
+  border-radius: 2px;
+  position: absolute;
+  z-index: 10;
+  background: #ECEFF1;
+  border: 1px solid #90A4AE;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-xaxistooltip.apexcharts-theme-dark {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+
+.apexcharts-xaxistooltip:after,
+.apexcharts-xaxistooltip:before {
+  left: 50%;
+  border: solid transparent;
+  content: " ";
+  height: 0;
+  width: 0;
+  position: absolute;
+  pointer-events: none;
+}
+
+.apexcharts-xaxistooltip:after {
+  border-color: rgba(236, 239, 241, 0);
+  border-width: 6px;
+  margin-left: -6px;
+}
+
+.apexcharts-xaxistooltip:before {
+  border-color: rgba(144, 164, 174, 0);
+  border-width: 7px;
+  margin-left: -7px;
+}
+
+.apexcharts-xaxistooltip-bottom:after,
+.apexcharts-xaxistooltip-bottom:before {
+  bottom: 100%;
+}
+
+.apexcharts-xaxistooltip-top:after,
+.apexcharts-xaxistooltip-top:before {
+  top: 100%;
+}
+
+.apexcharts-xaxistooltip-bottom:after {
+  border-bottom-color: #ECEFF1;
+}
+
+.apexcharts-xaxistooltip-bottom:before {
+  border-bottom-color: #90A4AE;
+}
+
+.apexcharts-xaxistooltip-bottom.apexcharts-theme-dark:after {
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-xaxistooltip-bottom.apexcharts-theme-dark:before {
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-xaxistooltip-top:after {
+  border-top-color: #ECEFF1
+}
+
+.apexcharts-xaxistooltip-top:before {
+  border-top-color: #90A4AE;
+}
+
+.apexcharts-xaxistooltip-top.apexcharts-theme-dark:after {
+  border-top-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-xaxistooltip-top.apexcharts-theme-dark:before {
+  border-top-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-xaxistooltip.apexcharts-active {
+  opacity: 1;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-yaxistooltip {
+  opacity: 0;
+  padding: 4px 10px;
+  pointer-events: none;
+  color: #373d3f;
+  font-size: 13px;
+  text-align: center;
+  border-radius: 2px;
+  position: absolute;
+  z-index: 10;
+  background: #ECEFF1;
+  border: 1px solid #90A4AE;
+}
+
+.apexcharts-yaxistooltip.apexcharts-theme-dark {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+
+.apexcharts-yaxistooltip:after,
+.apexcharts-yaxistooltip:before {
+  top: 50%;
+  border: solid transparent;
+  content: " ";
+  height: 0;
+  width: 0;
+  position: absolute;
+  pointer-events: none;
+}
+
+.apexcharts-yaxistooltip:after {
+  border-color: rgba(236, 239, 241, 0);
+  border-width: 6px;
+  margin-top: -6px;
+}
+
+.apexcharts-yaxistooltip:before {
+  border-color: rgba(144, 164, 174, 0);
+  border-width: 7px;
+  margin-top: -7px;
+}
+
+.apexcharts-yaxistooltip-left:after,
+.apexcharts-yaxistooltip-left:before {
+  left: 100%;
+}
+
+.apexcharts-yaxistooltip-right:after,
+.apexcharts-yaxistooltip-right:before {
+  right: 100%;
+}
+
+.apexcharts-yaxistooltip-left:after {
+  border-left-color: #ECEFF1;
+}
+
+.apexcharts-yaxistooltip-left:before {
+  border-left-color: #90A4AE;
+}
+
+.apexcharts-yaxistooltip-left.apexcharts-theme-dark:after {
+  border-left-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-yaxistooltip-left.apexcharts-theme-dark:before {
+  border-left-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-yaxistooltip-right:after {
+  border-right-color: #ECEFF1;
+}
+
+.apexcharts-yaxistooltip-right:before {
+  border-right-color: #90A4AE;
+}
+
+.apexcharts-yaxistooltip-right.apexcharts-theme-dark:after {
+  border-right-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-yaxistooltip-right.apexcharts-theme-dark:before {
+  border-right-color: rgba(0, 0, 0, 0.5);
+}
+
+.apexcharts-yaxistooltip.apexcharts-active {
+  opacity: 1;
+}
+
+.apexcharts-yaxistooltip-hidden {
+  display: none;
+}
+
+.apexcharts-xcrosshairs,
+.apexcharts-ycrosshairs {
+  pointer-events: none;
+  opacity: 0;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-xcrosshairs.apexcharts-active,
+.apexcharts-ycrosshairs.apexcharts-active {
+  opacity: 1;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-ycrosshairs-hidden {
+  opacity: 0;
+}
+
+.apexcharts-selection-rect {
+  cursor: move;
+}
+
+.svg_select_boundingRect, .svg_select_points_rot {
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+.apexcharts-selection-rect + g .svg_select_boundingRect,
+.apexcharts-selection-rect + g .svg_select_points_rot {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.apexcharts-selection-rect + g .svg_select_points_l,
+.apexcharts-selection-rect + g .svg_select_points_r {
+  cursor: ew-resize;
+  opacity: 1;
+  visibility: visible;
+}
+
+.svg_select_points {
+  fill: #efefef;
+  stroke: #333;
+  rx: 2;
+}
+
+.apexcharts-svg.apexcharts-zoomable.hovering-zoom {
+  cursor: crosshair
+}
+
+.apexcharts-svg.apexcharts-zoomable.hovering-pan {
+  cursor: move
+}
+
+.apexcharts-zoom-icon,
+.apexcharts-zoomin-icon,
+.apexcharts-zoomout-icon,
+.apexcharts-reset-icon,
+.apexcharts-pan-icon,
+.apexcharts-selection-icon,
+.apexcharts-menu-icon,
+.apexcharts-toolbar-custom-icon {
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  line-height: 24px;
+  color: #6E8192;
+  text-align: center;
+}
+
+.apexcharts-zoom-icon svg,
+.apexcharts-zoomin-icon svg,
+.apexcharts-zoomout-icon svg,
+.apexcharts-reset-icon svg,
+.apexcharts-menu-icon svg {
+  fill: #6E8192;
+}
+
+.apexcharts-selection-icon svg {
+  fill: #444;
+  transform: scale(0.76)
+}
+
+.apexcharts-theme-dark .apexcharts-zoom-icon svg,
+.apexcharts-theme-dark .apexcharts-zoomin-icon svg,
+.apexcharts-theme-dark .apexcharts-zoomout-icon svg,
+.apexcharts-theme-dark .apexcharts-reset-icon svg,
+.apexcharts-theme-dark .apexcharts-pan-icon svg,
+.apexcharts-theme-dark .apexcharts-selection-icon svg,
+.apexcharts-theme-dark .apexcharts-menu-icon svg,
+.apexcharts-theme-dark .apexcharts-toolbar-custom-icon svg {
+  fill: #f3f4f5;
+}
+
+.apexcharts-canvas .apexcharts-zoom-icon.apexcharts-selected svg,
+.apexcharts-canvas .apexcharts-selection-icon.apexcharts-selected svg,
+.apexcharts-canvas .apexcharts-reset-zoom-icon.apexcharts-selected svg {
+  fill: #008FFB;
+}
+
+.apexcharts-theme-light .apexcharts-selection-icon:not(.apexcharts-selected):hover svg,
+.apexcharts-theme-light .apexcharts-zoom-icon:not(.apexcharts-selected):hover svg,
+.apexcharts-theme-light .apexcharts-zoomin-icon:hover svg,
+.apexcharts-theme-light .apexcharts-zoomout-icon:hover svg,
+.apexcharts-theme-light .apexcharts-reset-icon:hover svg,
+.apexcharts-theme-light .apexcharts-menu-icon:hover svg {
+  fill: #333;
+}
+
+.apexcharts-selection-icon,
+.apexcharts-menu-icon {
+  position: relative;
+}
+
+.apexcharts-reset-icon {
+  margin-left: 5px;
+}
+
+.apexcharts-zoom-icon,
+.apexcharts-reset-icon,
+.apexcharts-menu-icon {
+  transform: scale(0.85);
+}
+
+.apexcharts-zoomin-icon,
+.apexcharts-zoomout-icon {
+  transform: scale(0.7)
+}
+
+.apexcharts-zoomout-icon {
+  margin-right: 3px;
+}
+
+.apexcharts-pan-icon {
+  transform: scale(0.62);
+  position: relative;
+  left: 1px;
+  top: 0px;
+}
+
+.apexcharts-pan-icon svg {
+  fill: #fff;
+  stroke: #6E8192;
+  stroke-width: 2;
+}
+
+.apexcharts-pan-icon.apexcharts-selected svg {
+  stroke: #008FFB;
+}
+
+.apexcharts-pan-icon:not(.apexcharts-selected):hover svg {
+  stroke: #333;
+}
+
+.apexcharts-toolbar {
+  position: absolute;
+  z-index: 11;
+  max-width: 176px;
+  text-align: right;
+  border-radius: 3px;
+  padding: 0px 6px 2px 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.apexcharts-menu {
+  background: #fff;
+  position: absolute;
+  top: 100%;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  padding: 3px;
+  right: 10px;
+  opacity: 0;
+  min-width: 110px;
+  transition: 0.15s ease all;
+  pointer-events: none;
+}
+
+.apexcharts-menu.apexcharts-menu-open {
+  opacity: 1;
+  pointer-events: all;
+  transition: 0.15s ease all;
+}
+
+.apexcharts-menu-item {
+  padding: 6px 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.apexcharts-theme-light .apexcharts-menu-item:hover {
+  background: #eee;
+}
+
+.apexcharts-theme-dark .apexcharts-menu {
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+}
+
+@media screen and (min-width: 768px) {
+  .apexcharts-canvas:hover .apexcharts-toolbar {
+    opacity: 1;
+  }
+}
+
+.apexcharts-datalabel.apexcharts-element-hidden {
+  opacity: 0;
+}
+
+.apexcharts-pie-label,
+.apexcharts-datalabels,
+.apexcharts-datalabel,
+.apexcharts-datalabel-label,
+.apexcharts-datalabel-value {
+  cursor: default;
+  pointer-events: none;
+}
+
+.apexcharts-pie-label-delay {
+  opacity: 0;
+  animation-name: opaque;
+  animation-duration: 0.3s;
+  animation-fill-mode: forwards;
+  animation-timing-function: ease;
+}
+
+.apexcharts-canvas .apexcharts-element-hidden {
+  opacity: 0;
+}
+
+.apexcharts-hide .apexcharts-series-points {
+  opacity: 0;
+}
+
+.apexcharts-gridline,
+.apexcharts-annotation-rect,
+.apexcharts-tooltip .apexcharts-marker,
+.apexcharts-area-series .apexcharts-area,
+.apexcharts-line,
+.apexcharts-zoom-rect,
+.apexcharts-toolbar svg,
+.apexcharts-area-series .apexcharts-series-markers .apexcharts-marker.no-pointer-events,
+.apexcharts-line-series .apexcharts-series-markers .apexcharts-marker.no-pointer-events,
+.apexcharts-radar-series path,
+.apexcharts-radar-series polygon {
+  pointer-events: none;
+}
+
+
+/* markers */
+
+.apexcharts-marker {
+  transition: 0.15s ease all;
+}
+
+@keyframes opaque {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+
+/* Resize generated styles */
+
+@keyframes resizeanim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.resize-triggers {
+  animation: 1ms resizeanim;
+  visibility: hidden;
+  opacity: 0;
+}
+
+.resize-triggers,
+.resize-triggers>div,
+.contract-trigger:before {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.resize-triggers>div {
+  background: #eee;
+  overflow: auto;
+}
+
+.contract-trigger:before {
+  width: 200%;
+  height: 200%;
+}</style></head>
+
+    <body class="" data-layout="topnav" data-layout-config="{&quot;layoutBoxed&quot;:false,&quot;darkMode&quot;:false,&quot;showRightSidebarOnStart&quot;: true}">
+    
+    <div class="wrapper">
+
+        <div class="content-page d-flex flex-column p-0">
+            <div class="content p-0 col">
+                <div class="fixed-top">
+                    
+
+<div class="navbar-custom topnav-navbar topnav-navbar-dark">
+    <div class="container-fluid px-0 px-lg-3">
+        <div class="row no-gutters justify-content-between">
+            <div class="col">
+                <div class="row no-gutters align-items-center">
+                    <a class="d-flex d-lg-none nav-user justify-content-center align-items-center arrow-none px-1 px-sm-2" data-toggle="collapse" data-target="#topnav-menu-content">
+                        <i class="uil uil-bars font-24"></i>
+                    </a>
+
+                                            <a href="/" class="topnav-logo float-none px-0 px-2 d-flex align-items-center">
+                            <div class="topnav-logo-lg">
+                                <div class="float-left">
+                                    <img src="/img/logo.png" alt="" height="30" style="margin-top:-4px; margin-right: 9px;">
+                                </div>
+                                <div class="float-left">
+                                    <span class="text-info font-22 d-flex" style="color: #bbe4f0 !important;">TGStat</span>
+                                </div>
+                            </div>
+                            <div class="topnav-logo-sm">
+                                <div class="float-left">
+                                    <img src="/img/logo.png" alt="" height="30" style="margin-top:-4px; margin-right: 9px; margin-left: 5px;">
+                                </div>
+                                <div class="float-left">
+                                    <span class="text-info font-22 d-flex" style="color: #bbe4f0 !important;">TGStat</span>
+                                </div>
+                            </div>
+                            <div class="topnav-logo-xs">
+                                <div class="float-left">
+                                    <img src="/img/logo.png" alt="" height="30" style="margin-top:-4px; margin-right: 9px; margin-left: 5px;">
+                                </div>
+                            </div>
+                        </a>
+                    
+    
+                    <div class="app-search col dropdown d-flex align-items-center max-width-320px">
+                        <div class="position-relative w-100">
+                            <input name="query" type="text" class="app-search-input form-control font-16 font-sm-15" placeholder="Быстрый поиск..." autocomplete="off">
+                            <span class="uil uil-search search-icon"></span>
+                            <span class="spinner-border position-absolute d-none" style="top:10px; left:16px; width:0.95rem; height:0.95rem; border-width:0.13em;"></span>
+                            <i class="uil uil-times app-search-show-toggle app-search-icon-cross cursor-pointer d-block d-sm-none"></i>
+                        </div>
+
+                        <div class="app-search-dropdown-menu dropdown-menu dropdown-menu-animated width-320px overflow-auto">
+                            <div data-simplebar="init" class="max-height-320px"><div class="simplebar-wrapper" style="margin: 0px;"><div class="simplebar-height-auto-observer-wrapper"><div class="simplebar-height-auto-observer"></div></div><div class="simplebar-mask"><div class="simplebar-offset" style="right: 0px; bottom: 0px;"><div class="simplebar-content-wrapper" style="height: auto; overflow: hidden;"><div class="simplebar-content" style="padding: 0px;">
+                                <div class="app-search-result-container" data-container="app-search-result">
+                                    
+<small class="px-2 text-muted">
+    <b>Введите текст для поиска</b>
+</small>
+<hr class="my-1">
+
+
+<a href="/channels/search" class="dropdown-item notify-item text-dark px-2">
+    <div class="text-truncate">
+        <i class="uil-search font-14 mr-05"></i>
+        <span>Расширенный поиск каналов</span>
+    </div>
+</a>
+
+                                </div>
+                            </div></div></div></div><div class="simplebar-placeholder" style="width: 0px; height: 0px;"></div></div><div class="simplebar-track simplebar-horizontal" style="visibility: hidden;"><div class="simplebar-scrollbar" style="width: 0px; display: none;"></div></div><div class="simplebar-track simplebar-vertical" style="visibility: hidden;"><div class="simplebar-scrollbar" style="height: 0px; display: none;"></div></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-end">
+                <ul class="row no-gutters list-unstyled topbar-right-menu mb-0">
+                    <li class="notification-list d-block d-sm-none">
+                        <a class="nav-link mx-1 app-search-show-toggle" href="javascript: void(0);">
+                            <i class="uil uil-search noti-icon"></i>
+                        </a>
+                    </li>
+
+                    <li class="notification-list">
+                        <a class="nav-link theme-switcher mx-1 mx-sm-2" href="javascript: void(0);">
+                            <i class="uil uil-moon noti-icon theme-switcher-icon"></i>
+                        </a>
+                    </li>
+
+                    <!-- <li class="notification-list">
+                        <a class="nav-link right-bar-toggle" href="javascript: void(0);">
+                            <i class="uil uil-cog noti-icon"></i>
+                        </a>
+                    </li> -->
+
+
+                    
+                    
+                        <li class="dropdown notification-list">
+
+                                                            <a class="nav-link nav-user d-flex justify-content-center align-items-center arrow-none px-1 px-sm-3 mr-0 ml-0 ml-sm-2 dropdown-toggle" data-toggle="dropdown" id="topbar-userdrop" href="#" role="button" aria-haspopup="true" aria-expanded="false">
+                                    <span class="account-user-avatar rounded-circle border border-info border-2px" style="padding:1px">
+                                        
+                    <div class="avatar-sm rounded-circle " style="width:38px; height:38px;">
+                        <span class="avatar-title bg-info rounded-circle text-uppercase"> U </span>
+                    </div>
+                                                        </span>
+                                    <span>
+                                        <span class="account-user-name ml-15 text-truncate text-white" style="max-width:150px;">User</span>
+                                        <span class="account-position ml-15 text-info" style="max-width:150px;">
+                                            Premium
+                                        </span>
+                                    </span>
+                                </a>
+                            
+
+                            <div class="dropdown-menu dropdown-menu-right dropdown-menu-animated topbar-dropdown-menu profile-dropdown" aria-labelledby="topbar-userdrop">
+                                
+                                <a href="/my/profile" class="dropdown-item notify-item">
+                                    <i class="uil uil-user-circle mr-1"></i><span>Мой профиль</span>
+                                </a>
+
+                                <a href="/my/channels" class="dropdown-item notify-item">
+                                    <i class="uil uil-megaphone mr-1"></i><span>Мои каналы</span>
+                                </a>
+
+                                <a href="/my/alerts/subs" class="dropdown-item notify-item">
+                                    <i class="uil uil-focus-target mr-1"></i><span>Мои отслеживания</span>
+                                </a>
+
+                                
+                                <a href="/my/favorites" class="dropdown-item notify-item">
+                                    <i class="uil uil-favorite mr-1"></i><span>Избранное</span>
+                                </a>
+
+                                
+                                <div class="dropdown-divider"></div>
+
+                                <a href="/my/ads" class="dropdown-item notify-item">
+                                    <i class="uil uil-postcard mr-1"></i><span>Реклама на TGStat</span>
+                                </a>
+
+                                <div class="dropdown-divider"></div>
+
+                                <a href="/my/partnership" class="dropdown-item notify-item">
+                                    <i class="uil uil-suitcase mr-1"></i><span>Партнерская программа</span>
+                                </a>
+
+                                
+                                <div class="dropdown-divider"></div>
+
+                                <a href="#" data-src="/logout" data-logout-button="true" class="dropdown-item notify-item">
+                                    <i class="uil uil-sign-out-alt mr-1"></i><span>Выход</span>
+                                </a>
+
+                            </div>
+                        </li>
+                                    </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+                    
+
+
+<div class="topnav shadow-sm">
+    <div class="container-fluid">
+        <nav class="navbar navbar-light navbar-expand-lg topnav-menu ml-n3 ml-sm-0">
+
+            <div class="collapse navbar-collapse" id="topnav-menu-content">
+                <ul class="navbar-nav">
+
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle arrow-none" href="/" id="topnav-catalog" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                            <i class="uil-apps mr-1"></i>Каталог <div class="arrow-down"></div>
+                        </a>
+
+                        <div class="dropdown-menu" aria-labelledby="topnav-catalog">
+                            <a class="dropdown-item pr-4" href="/">
+                                <i class="uil-megaphone mr-1"></i>Каталог каналов и чатов                            </a>
+                            
+                            
+                            <a class="dropdown-item pr-4" href="/channels/search">
+                                <i class="uil-search mr-1"></i>Поиск каналов                            </a>
+
+                            <div class="dropdown-divider"></div>
+
+                            <a class="dropdown-item pr-4" href="/add/channel">
+                                <i class="uil-plus-circle mr-1"></i>Добавить канал/чат                            </a>
+                        </div>
+
+                    </li>
+
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle arrow-none" href="#" id="topnav-ratings" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                            <i class="uil-chart mr-1"></i>Рейтинги <div class="arrow-down"></div>
+                        </a>
+
+                        <div class="dropdown-menu" aria-labelledby="topnav-ratings">
+                            <a class="dropdown-item pr-4" href="/ratings/channels">
+                                <i class="uil-megaphone mr-1"></i>Рейтинг каналов                            </a>
+
+                            <a class="dropdown-item pr-4" href="/ratings/chats">
+                                <i class="uil-comments mr-1"></i>Рейтинг чатов                            </a>
+
+                            <a class="dropdown-item pr-4" href="/ratings/posts">
+                                <i class="uil-comment-alt-chart-lines  mr-1"></i>Рейтинг публикаций                            </a>
+
+                            <div class="dropdown-divider"></div>
+
+                            <a class="dropdown-item pr-4" href="/ratings">
+                                <i class="uil-trademark mr-1"></i>Рейтинги брендов и персон                            </a>
+                        </div>
+                    </li>
+
+                                            <li class="nav-item">
+                            <a class="nav-link" href="/analytics">
+                                <i class="uil-chart-line mr-1"></i>Аналитика                            </a>
+                        </li>
+                    
+                    
+
+                                            <li class="nav-item">
+                            <a class="nav-link" href="/search">
+                                <i class="uil-search-alt mr-1"></i>Поиск по публикациям                            </a>
+                        </li>
+
+                        <li class="nav-item">
+                                                            <a class="nav-link" href="/alerts">
+                                    <i class="uil-focus-target mr-1"></i>Мониторинг Telegram                                </a>
+                                                    </li>
+                    
+                    
+                </ul>
+            </div>
+        </nav>
+    </div>
+</div>                </div>
+
+                <div class="container-fluid px-2 px-md-3"> <!-- id="vue-app"-->
+
+<!--                    -->
+<!--                    -->
+                    <div class="posts-lists-container">
+
+    <h1 class="mt-4 mb-3 text-dark text-center">
+        Поиск публикаций в Telegram    </h1>
+
+    <form id="search-form" class="lm-form" action="/search" method="POST" autocomplete="off">
+<input type="hidden" name="_tgstat_csrk" value="CSRF">
+    <div class="row">
+        <div class="col col-12 px-0 px-sm-2">
+
+            <div class="card card-body border">
+                
+
+    <div class="row search-filters">
+        <div class="col col-12 col-lg-3 col-md-12 col-sm-12">
+
+            <input type="hidden" class="lm-page" name="page" value="1">            <input type="hidden" class="lm-offset" name="offset" value="20"><!--            --><!--            -->
+            <div class="form-group field-q">
+<label class="control-label" for="q">Текст для поиска</label>
+<input type="text" id="q" class="form-control" name="q" value="al;;sl;ds" autofocus="" placeholder="Введите текст для поиска">
+
+<p class="help-block help-block-error"></p>
+</div>
+            <button class="btn btn-block btn-light d-md-none collapse-arrow collapsed mt-n2 py-0 mb-2" type="button" data-toggle="collapse" data-target=".multi-collapse" aria-expanded="false">
+                Расширенный поиск <i class="uil-angle-down"></i>
+            </button>
+        </div>
+
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12 collapse-sm multi-collapse">
+            <div class="form-group field-peertype">
+<label class="control-label" for="peertype">Источник</label>
+<select id="peertype" class="form-control custom-select height39 js-trial-blocked-select" name="peerType" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="all">
+<option value="all">Каналы и чаты</option>
+<option value="channel" selected="">Каналы</option>
+<option value="chat">Чаты</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+        <div class="col col-6 col-lg-3 col-md-3 col-sm-6 collapse-sm multi-collapse" data-toggle="tooltip" data-placement="top" title="" data-original-title="">
+            <div class="form-group field-startdate">
+<label class="control-label" for="startdate">Период с</label>
+<input type="text" id="startdate" class="form-control" name="startDate" value="09.09.2026" placeholder="с" data-provide="datetime-picker" data-hide-empty-time="true">
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+        <div class="col col-6 col-lg-3 col-md-3 col-sm-6 collapse-sm multi-collapse" data-toggle="tooltip" data-placement="top" title="">
+            <div class="form-group field-enddate">
+<label class="control-label" for="enddate">Период по</label>
+<input type="text" id="enddate" class="form-control" name="endDate" value="16.09.2026" placeholder="по" data-provide="datetime-picker" data-hide-empty-time="true">
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+    </div>
+
+
+    <div class="row search-filters collapse-sm multi-collapse">
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12">
+
+            <div class="form-group field-strongsearch">
+<div class="custom-control custom-checkbox"><input type="hidden" name="strongSearch" value="0"><input type="checkbox" id="strongsearch" class="custom-control-input" name="strongSearch" value="1"><label class="custom-control-label" for="strongsearch">Точное совпадение<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Точное совпадение слова - отключает поиск по морфологическим формам слова или фразы"> </i></label><p class="help-block help-block-error"></p></div>
+</div>
+            <div class="form-group field-hideforwards">
+<div class="custom-control custom-checkbox"><input type="hidden" name="hideForwards" value="0"><input type="checkbox" id="hideforwards" class="custom-control-input" name="hideForwards" value="1"><label class="custom-control-label" for="hideforwards">Скрывать репосты<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Из результатов поиска будут скрыты публикации, которые являются репостами"> </i></label><p class="help-block help-block-error"></p></div>
+</div>
+            <div class="form-group field-extendedsyntax">
+<div class="custom-control custom-checkbox"><input type="hidden" name="extendedSyntax" value="0"><input type="checkbox" id="extendedsyntax" class="custom-control-input" name="extendedSyntax" value="1"><label class="custom-control-label" for="extendedsyntax">Расширенный язык<a class="uil uil-question-circle text-dark ml-1 popup_ajax cursor-pointer" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Включает расширенный язык запросов. Нажмите для подробной справки." data-src="/search/extended-syntax-help"> </a></label><p class="help-block help-block-error"></p></div>
+</div>        </div>
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12">
+
+            <div class="form-group field-hidedeleted">
+<div class="custom-control custom-checkbox"><input type="hidden" name="hideDeleted" value="0"><input type="checkbox" id="hidedeleted" class="custom-control-input" name="hideDeleted" value="1"><label class="custom-control-label" for="hidedeleted">Скрывать удаленные<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Из результатов поиска будут скрыты публикации, которые были удалены из Telegram"> </i></label><p class="help-block help-block-error"></p></div>
+</div>
+            <div class="form-group field-onlymentioned">
+<div class="custom-control custom-checkbox"><input type="hidden" name="onlyMentioned" value="0"><input type="checkbox" id="onlymentioned" class="custom-control-input" name="onlyMentioned" value="1"><label class="custom-control-label" for="onlymentioned">С упоминаниями каналов<i class="uil uil-question-circle text-dark ml-1" title="" aria-hidden="true" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Будут найдены только те публикации, в которых упоминаются ссылки на Telegram-каналы"> </i></label><p class="help-block help-block-error"></p></div>
+</div>        </div>
+
+        <div class="col col-12 col-lg-2 col-md-4 col-sm-12">
+
+            <div class="form-group field-country">
+<label class="control-label" for="country">Гео канала</label>
+<select id="country" class="form-control custom-select js-trial-blocked-select" name="country" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="">
+<option value="" selected="">не важно ...</option>
+<option value="global">Без территориальной принадлежности</option>
+<option value="ru">Россия</option>
+<option value="ua">Украина</option>
+<option value="uz">Узбекистан</option>
+<option value="by">Беларусь</option>
+<option value="kz">Казахстан</option>
+<option value="kg">Киргизия</option>
+<option value="ir">Иран</option>
+<option value="in">Индия</option>
+<option value="cn">Китай</option>
+<option value="et">Эфиопия</option>
+<option value="ab">Абхазия</option>
+<option value="au">Австралия</option>
+<option value="at">Австрия</option>
+<option value="az">Азербайджан</option>
+<option value="al">Албания</option>
+<option value="dz">Алжир</option>
+<option value="ar">Аргентина</option>
+<option value="am">Армения</option>
+<option value="bd">Бангладеш</option>
+<option value="be">Бельгия</option>
+<option value="bg">Болгария</option>
+<option value="ba">Босния и Герцеговина</option>
+<option value="br">Бразилия</option>
+<option value="gb">Великобритания</option>
+<option value="hu">Венгрия</option>
+<option value="ve">Венесуэла</option>
+<option value="vn">Вьетнам</option>
+<option value="de">Германия</option>
+<option value="gr">Греция</option>
+<option value="ge">Грузия</option>
+<option value="dk">Дания</option>
+<option value="eg">Египет</option>
+<option value="il">Израиль</option>
+<option value="id">Индонезия</option>
+<option value="iq">Ирак</option>
+<option value="ie">Ирландия</option>
+<option value="es">Испания</option>
+<option value="it">Италия</option>
+<option value="ye">Йемен</option>
+<option value="kh">Камбоджа</option>
+<option value="ca">Канада</option>
+<option value="cy">Кипр</option>
+<option value="kr">Корея</option>
+<option value="cu">Куба</option>
+<option value="lv">Латвия</option>
+<option value="lt">Литва</option>
+<option value="mk">Македония</option>
+<option value="my">Малайзия</option>
+<option value="mx">Мексика</option>
+<option value="md">Молдавия</option>
+<option value="mn">Монголия</option>
+<option value="mm">Мьянма</option>
+<option value="ng">Нигерия</option>
+<option value="nl">Нидерланды</option>
+<option value="no">Норвегия</option>
+<option value="ae">ОАЭ</option>
+<option value="pk">Пакистан</option>
+<option value="pa">Панама</option>
+<option value="pl">Польша</option>
+<option value="pt">Португалия</option>
+<option value="ro">Румыния</option>
+<option value="sa">Саудовская Аравия</option>
+<option value="rs">Сербия</option>
+<option value="sg">Сингапур</option>
+<option value="sy">Сирия</option>
+<option value="sk">Словакия</option>
+<option value="si">Словения</option>
+<option value="so">Сомали</option>
+<option value="sd">Судан</option>
+<option value="us">США</option>
+<option value="tj">Таджикистан</option>
+<option value="th">Тайланд</option>
+<option value="tz">Танзания</option>
+<option value="tm">Туркменистан</option>
+<option value="tr">Турция</option>
+<option value="uy">Уругвай</option>
+<option value="ph">Филиппины</option>
+<option value="fi">Финляндия</option>
+<option value="fr">Франция</option>
+<option value="hr">Хорватия</option>
+<option value="me">Черногория</option>
+<option value="cz">Чехия</option>
+<option value="ch">Швейцария</option>
+<option value="se">Швеция</option>
+<option value="lk">Шри-Ланка</option>
+<option value="ec">Эквадор</option>
+<option value="ee">Эстония</option>
+<option value="za">ЮАР</option>
+<option value="jp">Япония</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+
+        <div class="col col-12 col-lg-2 col-md-4 col-sm-12">
+            <div class="form-group field-language">
+<label class="control-label" for="language">Язык контента</label>
+<select id="language" class="form-control custom-select js-trial-blocked-select" name="language" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="">
+<option value="" selected="">не важно ...</option>
+<option value="russian">Русский</option>
+<option value="english">Английский</option>
+<option value="uzbek">Узбекский</option>
+<option value="ukrainian">Украинский</option>
+<option value="kazakh">Казахский</option>
+<option value="belarus">Белорусский</option>
+<option value="farsi">Фарси</option>
+<option value="hindi">Хинди</option>
+<option value="chinese">Китайский</option>
+<option value="tamil">Тамильский</option>
+<option value="amhar">Амхарский</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+
+        <div class="col col-12 col-lg-2 col-md-4 col-sm-12">
+            <div class="form-group field-category">
+<label class="control-label" for="category">Тематика канала</label>
+<select id="category" class="form-control custom-select js-trial-blocked-select" name="category" data-trial="0" data-payment-url="/payments/premium-search" data-default-val="">
+<option value="" selected="">не важно ...</option>
+<option value="telegram">Telegram</option>
+<option value="business">Бизнес и стартапы</option>
+<option value="blogs">Блоги</option>
+<option value="gambling">Букмекерство</option>
+<option value="video">Видео и фильмы</option>
+<option value="darknet">Даркнет</option>
+<option value="design">Дизайн</option>
+<option value="adult">Для взрослых</option>
+<option value="other">Другое</option>
+<option value="food">Еда и кулинария</option>
+<option value="health">Здоровье и Фитнес</option>
+<option value="games">Игры</option>
+<option value="instagram">Инстаграм</option>
+<option value="construction">Интерьер и строительство</option>
+<option value="art">Искусство</option>
+<option value="pics">Картинки и фото</option>
+<option value="career">Карьера</option>
+<option value="books">Книги</option>
+<option value="crypto">Криптовалюты</option>
+<option value="courses">Курсы и гайды</option>
+<option value="language">Лингвистика</option>
+<option value="marketing">Маркетинг, PR, реклама</option>
+<option value="medicine">Медицина</option>
+<option value="beauty">Мода и красота</option>
+<option value="music">Музыка</option>
+<option value="news">Новости и СМИ</option>
+<option value="education">Образование</option>
+<option value="edutainment">Познавательное</option>
+<option value="politics">Политика</option>
+<option value="law">Право</option>
+<option value="nature">Природа</option>
+<option value="sales">Продажи</option>
+<option value="psychology">Психология</option>
+<option value="travels">Путешествия</option>
+<option value="religion">Религия</option>
+<option value="handmade">Рукоделие</option>
+<option value="babies">Семья и дети</option>
+<option value="apps">Софт и приложения</option>
+<option value="sport">Спорт</option>
+<option value="tech">Технологии</option>
+<option value="transport">Транспорт</option>
+<option value="quotes">Цитаты</option>
+<option value="shock">Шок-контент</option>
+<option value="esoterics">Эзотерика</option>
+<option value="economics">Экономика</option>
+<option value="erotica">Эротика</option>
+<option value="entertainment">Юмор и развлечения</option>
+</select>
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+    </div>
+
+    <div class="row align-items-end">
+
+        <div class="col col-12 col-lg-6 col-md-12 col-sm-12 collapse-sm multi-collapse" data-toggle="tooltip" data-placement="top" title="">
+            <div class="form-group field-minuswords">
+<label class="control-label" for="minuswords">Минус-слова (через пробел)&nbsp; <i class="uil-question-circle" aria-hidden="true" data-toggle="tooltip" data-placement="top" title="Перечислите через пробел слова, которые не должны встречаться в тексте публикации"></i></label>
+<input type="text" id="minuswords" class="form-control" name="minusWords" value="" placeholder="Какие слова нужно исключить из поиска?">
+
+<p class="help-block help-block-error"></p>
+</div>        </div>
+
+        <div class="col col-12 col-lg-3 col-md-6 col-sm-12">
+            <div class="form-group">
+                <div class="btn-group btn-block" role="group">
+                    <button type="submit" class="btn btn-dark btn-block search-button">Искать</button>                                        <button type="button" class="btn btn-dark dropdown-toggle dropdown-toggle-split" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <span class="sr-only">Toggle Dropdown</span>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right">
+                        <button type="submit" class="dropdown-item js-trial-blocked-button" formaction="/search/export/xls" data-trial="0" data-payment-url="/payments/premium-search">Экспорт в Excel</button>                    </div>
+                                    </div>
+            </div>
+        </div>
+
+        <div class="col col-lg-3 col-sm-12 col-md-6 text-center">
+            <div class="mb-3">
+                                    Найдено: <b>2</b> публикаций                            </div>
+        </div>
+    </div>
+
+
+            </div>
+        </div>
+    </div>
+
+    
+    
+        <div class="mt-3">
+
+            
+<div class="row">
+    <div class="col col-12">
+
+        <div class="card card-body py-2 border">
+
+            <div class="row align-items-center mb-2">
+                <div class="col col-12 col-sm-6">
+                    <h4 class="text-dark">Кол-во упоминаний и охват</h4>
+                </div>
+                <div class="col col-12 col-sm-6 text-left text-sm-right">
+                    <div class="btn-group btn-group-toggle" data-toggle="buttons">
+                        <label class="btn btn-sm btn-outline-dark py-0 active">
+                            <input id="groupByDayChart" type="radio" name="chart_group" value="day" autocomplete="off" checked=""> по дням                        </label>
+
+                        <label class="btn btn-sm btn-outline-dark py-0">
+                            <input id="groupByMonthChart" type="radio" name="chart_group" value="month" autocomplete="off"> по месяцам                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div id="mentions-chart" class="mx-n3 mb-n2" style="min-height: 220px;"><div id="apexchartscpwqx0pk" class="apexcharts-canvas apexchartscpwqx0pk apexcharts-theme-light" style="width: 919px; height: 220px;"><svg id="SvgjsSvg1151" width="919" height="220" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev" class="apexcharts-svg" xmlns:data="ApexChartsNS" transform="translate(0, 0)" style="background: transparent;"><g id="SvgjsG1153" class="apexcharts-inner apexcharts-graphical" transform="translate(61.06666666666666, 0)"><defs id="SvgjsDefs1152"><clipPath id="gridRectMaskcpwqx0pk"><rect id="SvgjsRect1160" width="938" height="223" x="-70.56666666666666" y="-1.5" rx="0" ry="0" opacity="1" stroke-width="0" stroke="none" stroke-dasharray="0" fill="#fff"></rect></clipPath><clipPath id="forecastMaskcpwqx0pk"></clipPath><clipPath id="nonForecastMaskcpwqx0pk"></clipPath><clipPath id="gridRectMarkerMaskcpwqx0pk"><rect id="SvgjsRect1161" width="832.8666666666667" height="256" x="-18" y="-18" rx="0" ry="0" opacity="1" stroke-width="0" stroke="none" stroke-dasharray="0" fill="#fff"></rect></clipPath></defs><line id="SvgjsLine1159" x1="0" y1="0" x2="0" y2="220" stroke="#b6b6b6" stroke-dasharray="3" stroke-linecap="butt" class="apexcharts-xcrosshairs" x="0" y="0" width="1" height="220" fill="#b1b9c4" filter="none" fill-opacity="0.9" stroke-width="1"></line><g id="SvgjsG1202" class="apexcharts-xaxis" transform="translate(0, 0)"><g id="SvgjsG1203" class="apexcharts-xaxis-texts-g" transform="translate(0, -4)"></g></g><g id="SvgjsG1225" class="apexcharts-grid"><g id="SvgjsG1226" class="apexcharts-gridlines-horizontal"><line id="SvgjsLine1228" x1="-67.06666666666666" y1="0" x2="863.9333333333334" y2="0" stroke="#e0e0e0" stroke-dasharray="0" stroke-linecap="butt" class="apexcharts-gridline"></line><line id="SvgjsLine1229" x1="-67.06666666666666" y1="44" x2="863.9333333333334" y2="44" stroke="#e0e0e0" stroke-dasharray="0" stroke-linecap="butt" class="apexcharts-gridline"></line><line id="SvgjsLine1230" x1="-67.06666666666666" y1="88" x2="863.9333333333334" y2="88" stroke="#e0e0e0" stroke-dasharray="0" stroke-linecap="butt" class="apexcharts-gridline"></line><line id="SvgjsLine1231" x1="-67.06666666666666" y1="132" x2="863.9333333333334" y2="132" stroke="#e0e0e0" stroke-dasharray="0" stroke-linecap="butt" class="apexcharts-gridline"></line><line id="SvgjsLine1232" x1="-67.06666666666666" y1="176" x2="863.9333333333334" y2="176" stroke="#e0e0e0" stroke-dasharray="0" stroke-linecap="butt" class="apexcharts-gridline"></line><line id="SvgjsLine1233" x1="-67.06666666666666" y1="220" x2="863.9333333333334" y2="220" stroke="#e0e0e0" stroke-dasharray="0" stroke-linecap="butt" class="apexcharts-gridline"></line></g><g id="SvgjsG1227" class="apexcharts-gridlines-vertical"></g><line id="SvgjsLine1235" x1="0" y1="220" x2="796.8666666666667" y2="220" stroke="transparent" stroke-dasharray="0" stroke-linecap="butt"></line><line id="SvgjsLine1234" x1="0" y1="1" x2="0" y2="220" stroke="transparent" stroke-dasharray="0" stroke-linecap="butt"></line></g><g id="SvgjsG1162" class="apexcharts-bar-series apexcharts-plot-series"><g id="SvgjsG1163" class="apexcharts-series" rel="1" seriesName="Упоминаний" data:realIndex="1"><path id="SvgjsPath1167" d="M-39.84333333333334 220L-39.84333333333334 220Q-39.84333333333334 220 -39.84333333333334 220L39.84333333333334 220Q39.84333333333334 220 39.84333333333334 220L39.84333333333334 220L39.84333333333334 220L39.84333333333334 220L-39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220C-39.84333333333334 220 -39.84333333333334 220 -39.84333333333334 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M -39.84333333333334 220L -39.84333333333334 220Q -39.84333333333334 220 -39.84333333333334 220L 39.84333333333334 220Q 39.84333333333334 220 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220z" pathFrom="M -39.84333333333334 220L -39.84333333333334 220Q -39.84333333333334 220 -39.84333333333334 220L 39.84333333333334 220Q 39.84333333333334 220 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220zL -39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220L 39.84333333333334 220L -39.84333333333334 220" cy="220" cx="39.84333333333334" j="0" val="0" barHeight="0" barWidth="79.68666666666668"></path><path id="SvgjsPath1169" d="M73.9947619047619 220L73.9947619047619 220Q73.9947619047619 220 73.9947619047619 220L153.68142857142857 220Q153.68142857142857 220 153.68142857142857 220L153.68142857142857 220L153.68142857142857 220L153.68142857142857 220L73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220C73.9947619047619 220 73.9947619047619 220 73.9947619047619 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 73.9947619047619 220L 73.9947619047619 220Q 73.9947619047619 220 73.9947619047619 220L 153.68142857142857 220Q 153.68142857142857 220 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220z" pathFrom="M 73.9947619047619 220L 73.9947619047619 220Q 73.9947619047619 220 73.9947619047619 220L 153.68142857142857 220Q 153.68142857142857 220 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220zL 73.9947619047619 220L 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220L 153.68142857142857 220L 73.9947619047619 220" cy="220" cx="153.68142857142857" j="1" val="0" barHeight="0" barWidth="79.68666666666668"></path><path id="SvgjsPath1171" d="M187.83285714285716 220L187.83285714285716 220Q187.83285714285716 220 187.83285714285716 220L267.51952380952383 220Q267.51952380952383 220 267.51952380952383 220L267.51952380952383 220L267.51952380952383 220L267.51952380952383 220L187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220C187.83285714285716 220 187.83285714285716 220 187.83285714285716 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 187.83285714285716 220L 187.83285714285716 220Q 187.83285714285716 220 187.83285714285716 220L 267.51952380952383 220Q 267.51952380952383 220 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220z" pathFrom="M 187.83285714285716 220L 187.83285714285716 220Q 187.83285714285716 220 187.83285714285716 220L 267.51952380952383 220Q 267.51952380952383 220 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220zL 187.83285714285716 220L 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220L 267.51952380952383 220L 187.83285714285716 220" cy="220" cx="267.51952380952383" j="2" val="0" barHeight="0" barWidth="79.68666666666668"></path><path id="SvgjsPath1173" d="M301.6709523809524 220L301.6709523809524 220Q301.6709523809524 220 301.6709523809524 220L381.35761904761904 220Q381.35761904761904 220 381.35761904761904 220L381.35761904761904 220L381.35761904761904 220L381.35761904761904 220L301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220C301.6709523809524 220 301.6709523809524 220 301.6709523809524 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 301.6709523809524 220L 301.6709523809524 220Q 301.6709523809524 220 301.6709523809524 220L 381.35761904761904 220Q 381.35761904761904 220 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220z" pathFrom="M 301.6709523809524 220L 301.6709523809524 220Q 301.6709523809524 220 301.6709523809524 220L 381.35761904761904 220Q 381.35761904761904 220 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220zL 301.6709523809524 220L 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220L 381.35761904761904 220L 301.6709523809524 220" cy="220" cx="381.35761904761904" j="3" val="0" barHeight="0" barWidth="79.68666666666668"></path><path id="SvgjsPath1175" d="M415.50904761904764 220L415.50904761904764 220Q415.50904761904764 220 415.50904761904764 220L495.1957142857143 220Q495.1957142857143 220 495.1957142857143 220L495.1957142857143 220L495.1957142857143 220L495.1957142857143 220L415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220C415.50904761904764 220 415.50904761904764 220 415.50904761904764 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 415.50904761904764 220L 415.50904761904764 220Q 415.50904761904764 220 415.50904761904764 220L 495.1957142857143 220Q 495.1957142857143 220 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220z" pathFrom="M 415.50904761904764 220L 415.50904761904764 220Q 415.50904761904764 220 415.50904761904764 220L 495.1957142857143 220Q 495.1957142857143 220 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220zL 415.50904761904764 220L 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220L 495.1957142857143 220L 415.50904761904764 220" cy="220" cx="495.1957142857143" j="4" val="0" barHeight="0" barWidth="79.68666666666668"></path><path id="SvgjsPath1177" d="M529.3471428571429 220L529.3471428571429 5Q529.3471428571429 0 534.3471428571429 0L604.0338095238096 0Q609.0338095238096 0 609.0338095238096 5L609.0338095238096 5L609.0338095238096 220L609.0338095238096 220L529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220C529.3471428571429 220 529.3471428571429 220 529.3471428571429 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 529.3471428571429 220L 529.3471428571429 5Q 529.3471428571429 0 534.3471428571429 0L 604.0338095238096 0Q 609.0338095238096 0 609.0338095238096 5L 609.0338095238096 5L 609.0338095238096 220L 609.0338095238096 220z" pathFrom="M 529.3471428571429 220L 529.3471428571429 5Q 529.3471428571429 0 534.3471428571429 0L 604.0338095238096 0Q 609.0338095238096 0 609.0338095238096 5L 609.0338095238096 5L 609.0338095238096 220L 609.0338095238096 220zL 529.3471428571429 220L 609.0338095238096 220L 609.0338095238096 220L 609.0338095238096 220L 609.0338095238096 220L 609.0338095238096 220L 529.3471428571429 220" cy="0" cx="609.0338095238096" j="5" val="2" barHeight="220" barWidth="79.68666666666668"></path><path id="SvgjsPath1179" d="M643.1852380952381 220L643.1852380952381 220Q643.1852380952381 220 643.1852380952381 220L722.8719047619048 220Q722.8719047619048 220 722.8719047619048 220L722.8719047619048 220L722.8719047619048 220L722.8719047619048 220L643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220C643.1852380952381 220 643.1852380952381 220 643.1852380952381 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 643.1852380952381 220L 643.1852380952381 220Q 643.1852380952381 220 643.1852380952381 220L 722.8719047619048 220Q 722.8719047619048 220 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220z" pathFrom="M 643.1852380952381 220L 643.1852380952381 220Q 643.1852380952381 220 643.1852380952381 220L 722.8719047619048 220Q 722.8719047619048 220 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220zL 643.1852380952381 220L 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220L 722.8719047619048 220L 643.1852380952381 220" cy="220" cx="722.8719047619048" j="6" val="0" barHeight="0" barWidth="79.68666666666668"></path><path id="SvgjsPath1181" d="M757.0233333333334 220L757.0233333333334 220Q757.0233333333334 220 757.0233333333334 220L836.7100000000002 220Q836.7100000000002 220 836.7100000000002 220L836.7100000000002 220L836.7100000000002 220L836.7100000000002 220L757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220C757.0233333333334 220 757.0233333333334 220 757.0233333333334 220 " fill="rgba(142,154,171,0.25)" fill-opacity="1" stroke-opacity="1" stroke-linecap="butt" stroke-width="0" stroke-dasharray="0" class="apexcharts-bar-area" index="1" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 757.0233333333334 220L 757.0233333333334 220Q 757.0233333333334 220 757.0233333333334 220L 836.7100000000002 220Q 836.7100000000002 220 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220z" pathFrom="M 757.0233333333334 220L 757.0233333333334 220Q 757.0233333333334 220 757.0233333333334 220L 836.7100000000002 220Q 836.7100000000002 220 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220zL 757.0233333333334 220L 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220L 836.7100000000002 220L 757.0233333333334 220" cy="220" cx="836.7100000000002" j="7" val="0" barHeight="0" barWidth="79.68666666666668"></path><g id="SvgjsG1165" class="apexcharts-bar-goals-markers" style="pointer-events: none"><g id="SvgjsG1166" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1168" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1170" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1172" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1174" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1176" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1178" className="apexcharts-bar-goals-groups"></g><g id="SvgjsG1180" className="apexcharts-bar-goals-groups"></g></g></g></g><g id="SvgjsG1182" class="apexcharts-line-series apexcharts-plot-series"><g id="SvgjsG1183" class="apexcharts-series" seriesName="Просмотров" data:longestSeries="true" rel="1" data:realIndex="0"><path id="SvgjsPath1201" d="M0 220C39.843333333333334 220 73.99476190476192 220 113.83809523809525 220C153.68142857142857 220 187.83285714285716 220 227.6761904761905 220C267.51952380952383 220 301.67095238095243 220 341.51428571428573 220C381.3576190476191 220 415.50904761904764 220 455.352380952381 220C495.19571428571436 220 529.3471428571429 35.19999999999999 569.1904761904763 35.19999999999999C609.0338095238096 35.19999999999999 643.1852380952381 220 683.0285714285715 220C722.8719047619048 220 757.0233333333334 220 796.8666666666668 220 " fill="none" fill-opacity="1" stroke="rgba(39,172,210,0.85)" stroke-opacity="1" stroke-linecap="butt" stroke-width="3" stroke-dasharray="0" class="apexcharts-line" index="0" clip-path="url(#gridRectMaskcpwqx0pk)" pathTo="M 0 220C 39.843333333333334 220 73.99476190476192 220 113.83809523809525 220C 153.68142857142857 220 187.83285714285716 220 227.6761904761905 220C 267.51952380952383 220 301.67095238095243 220 341.51428571428573 220C 381.3576190476191 220 415.50904761904764 220 455.352380952381 220C 495.19571428571436 220 529.3471428571429 35.19999999999999 569.1904761904763 35.19999999999999C 609.0338095238096 35.19999999999999 643.1852380952381 220 683.0285714285715 220C 722.8719047619048 220 757.0233333333334 220 796.8666666666668 220" pathFrom="M 0 220C 39.843333333333334 220 73.99476190476192 220 113.83809523809525 220C 153.68142857142857 220 187.83285714285716 220 227.6761904761905 220C 267.51952380952383 220 301.67095238095243 220 341.51428571428573 220C 381.3576190476191 220 415.50904761904764 220 455.352380952381 220C 495.19571428571436 220 529.3471428571429 35.19999999999999 569.1904761904763 35.19999999999999C 609.0338095238096 35.19999999999999 643.1852380952381 220 683.0285714285715 220C 722.8719047619048 220 757.0233333333334 220 796.8666666666668 220"></path><g id="SvgjsG1184" class="apexcharts-series-markers-wrap" data:realIndex="0"><g id="SvgjsG1186" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1187" r="8" cx="0" cy="220" class="apexcharts-marker w10qp6o46k" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="0" j="0" index="0" default-marker-size="8"></circle><circle id="SvgjsCircle1188" r="8" cx="113.83809523809525" cy="220" class="apexcharts-marker wjneckzkol" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="1" j="1" index="0" default-marker-size="8"></circle></g><g id="SvgjsG1189" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1190" r="8" cx="227.6761904761905" cy="220" class="apexcharts-marker wecvyw84w" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="2" j="2" index="0" default-marker-size="8"></circle></g><g id="SvgjsG1191" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1192" r="8" cx="341.51428571428573" cy="220" class="apexcharts-marker wmpijafefg" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="3" j="3" index="0" default-marker-size="8"></circle></g><g id="SvgjsG1193" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1194" r="8" cx="455.352380952381" cy="220" class="apexcharts-marker wrw39hqltk" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="4" j="4" index="0" default-marker-size="8"></circle></g><g id="SvgjsG1195" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1196" r="8" cx="569.1904761904763" cy="35.19999999999999" class="apexcharts-marker wxib1le8z" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="5" j="5" index="0" default-marker-size="8"></circle></g><g id="SvgjsG1197" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1198" r="8" cx="683.0285714285715" cy="220" class="apexcharts-marker wrra1zoej" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="6" j="6" index="0" default-marker-size="8"></circle></g><g id="SvgjsG1199" class="apexcharts-series-markers" clip-path="url(#gridRectMarkerMaskcpwqx0pk)"><circle id="SvgjsCircle1200" r="8" cx="796.8666666666668" cy="220" class="apexcharts-marker wuljxbt5v" stroke="#ffffff" fill="#27acd2" fill-opacity="1" stroke-width="2" stroke-opacity="0.9" rel="7" j="7" index="0" default-marker-size="8"></circle></g></g></g><g id="SvgjsG1164" class="apexcharts-datalabels" data:realIndex="1"></g><g id="SvgjsG1185" class="apexcharts-datalabels" data:realIndex="0"></g></g><line id="SvgjsLine1236" x1="-67.06666666666666" y1="0" x2="863.9333333333334" y2="0" stroke="#b6b6b6" stroke-dasharray="0" stroke-width="1" stroke-linecap="butt" class="apexcharts-ycrosshairs"></line><line id="SvgjsLine1237" x1="-67.06666666666666" y1="0" x2="863.9333333333334" y2="0" stroke-dasharray="0" stroke-width="0" stroke-linecap="butt" class="apexcharts-ycrosshairs-hidden"></line><g id="SvgjsG1238" class="apexcharts-yaxis-annotations"></g><g id="SvgjsG1239" class="apexcharts-xaxis-annotations"></g><g id="SvgjsG1240" class="apexcharts-point-annotations"></g></g><rect id="SvgjsRect1158" width="0" height="0" x="0" y="0" rx="0" ry="0" opacity="1" stroke-width="0" stroke="none" stroke-dasharray="0" fill="#fefefe"></rect><g id="SvgjsG1212" class="apexcharts-yaxis" rel="0" transform="translate(-16, 0)"></g><g id="SvgjsG1213" class="apexcharts-yaxis" rel="1" transform="translate(942, 0)"><g id="SvgjsG1214" class="apexcharts-yaxis-texts-g"><text id="SvgjsText1215" font-family="Helvetica, Arial, sans-serif" x="-20" y="1.3" text-anchor="start" dominant-baseline="auto" font-size="11px" font-weight="400" fill="#373d3f" class="apexcharts-text apexcharts-yaxis-label " style="font-family: Helvetica, Arial, sans-serif;"><tspan id="SvgjsTspan1216">2.0</tspan><title>2.0</title></text><text id="SvgjsText1217" font-family="Helvetica, Arial, sans-serif" x="-20" y="74.63333333333333" text-anchor="start" dominant-baseline="auto" font-size="11px" font-weight="400" fill="#373d3f" class="apexcharts-text apexcharts-yaxis-label " style="font-family: Helvetica, Arial, sans-serif;"><tspan id="SvgjsTspan1218">1.3</tspan><title>1.3</title></text><text id="SvgjsText1219" font-family="Helvetica, Arial, sans-serif" x="-20" y="147.96666666666667" text-anchor="start" dominant-baseline="auto" font-size="11px" font-weight="400" fill="#373d3f" class="apexcharts-text apexcharts-yaxis-label " style="font-family: Helvetica, Arial, sans-serif;"><tspan id="SvgjsTspan1220">0.7</tspan><title>0.7</title></text><text id="SvgjsText1221" font-family="Helvetica, Arial, sans-serif" x="-20" y="221.3" text-anchor="start" dominant-baseline="auto" font-size="11px" font-weight="400" fill="#373d3f" class="apexcharts-text apexcharts-yaxis-label " style="font-family: Helvetica, Arial, sans-serif;"><tspan id="SvgjsTspan1222">0.0</tspan><title>0.0</title></text></g><g id="SvgjsG1223" class="apexcharts-yaxis-title"><text id="SvgjsText1224" font-family="Helvetica, Arial, sans-serif" x="10.7265625" y="110" text-anchor="end" dominant-baseline="auto" font-size="11px" font-weight="900" fill="#373d3f" class="apexcharts-text apexcharts-yaxis-title-text " style="font-family: Helvetica, Arial, sans-serif;" transform="rotate(90 0 0)"></text></g></g><g id="SvgjsG1154" class="apexcharts-annotations"></g></svg><div class="apexcharts-legend" style="max-height: 110px;"></div><div class="apexcharts-tooltip apexcharts-theme-light"><div class="apexcharts-tooltip-title" style="font-family: Helvetica, Arial, sans-serif; font-size: 12px;"></div><div class="apexcharts-tooltip-series-group" style="order: 1;"><span class="apexcharts-tooltip-marker" style="background-color: rgb(39, 172, 210);"></span><div class="apexcharts-tooltip-text" style="font-family: Helvetica, Arial, sans-serif; font-size: 12px;"><div class="apexcharts-tooltip-y-group"><span class="apexcharts-tooltip-text-y-label"></span><span class="apexcharts-tooltip-text-y-value"></span></div><div class="apexcharts-tooltip-goals-group"><span class="apexcharts-tooltip-text-goals-label"></span><span class="apexcharts-tooltip-text-goals-value"></span></div><div class="apexcharts-tooltip-z-group"><span class="apexcharts-tooltip-text-z-label"></span><span class="apexcharts-tooltip-text-z-value"></span></div></div></div><div class="apexcharts-tooltip-series-group" style="order: 2;"><span class="apexcharts-tooltip-marker" style="background-color: rgb(142, 154, 171);"></span><div class="apexcharts-tooltip-text" style="font-family: Helvetica, Arial, sans-serif; font-size: 12px;"><div class="apexcharts-tooltip-y-group"><span class="apexcharts-tooltip-text-y-label"></span><span class="apexcharts-tooltip-text-y-value"></span></div><div class="apexcharts-tooltip-goals-group"><span class="apexcharts-tooltip-text-goals-label"></span><span class="apexcharts-tooltip-text-goals-value"></span></div><div class="apexcharts-tooltip-z-group"><span class="apexcharts-tooltip-text-z-label"></span><span class="apexcharts-tooltip-text-z-value"></span></div></div></div></div><div class="apexcharts-yaxistooltip apexcharts-yaxistooltip-0 apexcharts-yaxistooltip-left apexcharts-theme-light"><div class="apexcharts-yaxistooltip-text"></div></div><div class="apexcharts-yaxistooltip apexcharts-yaxistooltip-1 apexcharts-yaxistooltip-right apexcharts-theme-light"><div class="apexcharts-yaxistooltip-text"></div></div></div></div>
+        </div>
+    </div>
+</div>
+
+
+
+            
+
+
+<div class="row justify-content-between">
+
+    <div class="col col-12 col-lg-4 col-md-12 col-sm-12 order-1 order-md-1">
+        <div id="sticky-left-column" class="sticky-left-column" style="">
+            <div id="sticky-left-column__inner" class="sticky-left-column__inner" style="position: relative;">
+                
+
+<div class="card border mb-2 mb-md-3 mb-lg-0">
+    <div class="card-body py-2 py-md-3">
+        <div class="card-widgets">
+            <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchSourceCollapse" role="button" aria-expanded="false" aria-controls="searchSourceCollapse">
+                <i class="uil-angle-down"></i>
+            </a>
+        </div>
+        <h5 class="card-title text-dark mb-0">Источник</h5>
+
+        <div id="searchSourceCollapse" class="collapse-sm pt-1">
+            <hr class="my-1">
+
+            <div class="btn-group btn-group-toggle mb-1 w-100 mt-3 mt-sm-0" data-toggle="buttons">
+                <label class="btn btn-sm btn-outline-dark py-0 active">
+                    <input id="sortSourceByPopular" type="radio" name="facets[source_sort]" value="members" autocomplete="off" checked=""><i class="uil-arrow-down"></i> по популярности                </label>
+
+                <label class="btn btn-sm btn-outline-dark py-0">
+                    <input id="sortSourceByFreq" type="radio" name="facets[source_sort]" value="freq" autocomplete="off"><i class="uil-arrow-down"></i> по частоте                </label>
+            </div>
+
+            <input type="hidden" id="facetChannelId" name="facets[channel_id]" value="">
+            <hr class="my-1">
+
+            <div class="collapsable-items collapsable-items-10">
+                <div class="list-group list-group-flush overflow-auto mt-0 channel-source-items mx-n3" style="max-height: 400px;" id="searchSourceScrollableContainer">
+                                            
+
+
+
+    
+    
+        
+    <div class="list-group-item list-group-item-action list-group-item-body px-3 py-0 channel-source-item collapsable-item d-block" data-id="11718861" data-freq="1" data-members="11539">
+        <div class="row align-items-center facet-row">
+            <div class="col col-9 facet-param">
+
+                <div class="media">
+                    <div class="my-1 mr-1" style="width:50px;">
+                        <img src="//static2.tgstat.ru/channels/_50/c4/c49c48f101b501e3155f7dcc25555c9f.jpg" class="b-lazy img-thumbnail rounded-circle b-loaded" style="width:50px; height:50px;">                    </div>
+                    <div class="media-body text-truncate">
+                        <div class="mt-2 mb-0 text-body">
+                            İndirim Varsa Anlık Fırsat Alışveriş Kampanya Kupon Haberleri                        </div>
+                        <small class="text-muted">
+                                                            <b>11539</b> подписчиков                                                    </small>
+                    </div>
+                </div>
+
+            </div>
+            <div class="col col-3 text-right facet-value">
+                1            </div>
+        </div>
+    </div>
+
+    
+    
+        
+    <div class="list-group-item list-group-item-action list-group-item-body px-3 py-0 channel-source-item collapsable-item d-block" data-id="10114684" data-freq="1" data-members="6575">
+        <div class="row align-items-center facet-row">
+            <div class="col col-9 facet-param">
+
+                <div class="media">
+                    <div class="my-1 mr-1" style="width:50px;">
+                        <img src="//static5.tgstat.ru/channels/_50/8e/8e82ca5e927eb05d49171ff8aca56a27.jpg" class="b-lazy img-thumbnail rounded-circle b-loaded" style="width:50px; height:50px;">                    </div>
+                    <div class="media-body text-truncate">
+                        <div class="mt-2 mb-0 text-body">
+                            İNDİRİM PAYLAŞIMLARI 🚨🛒 Trendyol Hepsiburada Çiçeksepeti                        </div>
+                        <small class="text-muted">
+                                                            <b>6575</b> подписчиков                                                    </small>
+                    </div>
+                </div>
+
+            </div>
+            <div class="col col-3 text-right facet-value">
+                1            </div>
+        </div>
+    </div>
+
+                                    </div>
+            </div>
+
+            <hr class="my-0">
+        </div>
+    </div>
+</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col col-12 col-lg-5 col-md-7 col-sm-12 order-3 order-md-2 px-0 px-sm-2">
+        <div id="sticky-center-column" class="sticky-center-column">
+            
+
+
+<div class="mx-2 mx-sm-0">
+    <div class="btn-group btn-group-toggle w-100 mb-2 mt-3 mt-sm-0" data-toggle="buttons">
+        <label class="btn btn-sm btn-outline-dark py-0 active">
+            <input type="radio" name="sort" value="date" autocomplete="off" checked="" class="sort-button-js" data-metric="date">
+            <i class="uil-arrow-down"></i> по дате        </label>
+
+        <label class="btn btn-sm btn-outline-dark py-0">
+            <input type="radio" name="sort" value="views" autocomplete="off" class="sort-button-js" data-metric="views">
+            <i class="uil-arrow-down"></i> по популярности        </label>
+    </div>
+</div>
+
+<div class="posts-list lm-list-container">
+            
+
+    <div id="post-94207501101" class="card card-body border p-2 px-1 px-sm-3 post-container  ">
+
+        <div class="post-header">
+            <div class="row">
+                <div class="col col-12 pr-0">
+                    <div class="media pb-1">
+
+                        <div class="mr-2">
+                            <a href="https://tgstat.com/ru/channel/@indirimvarsa">
+                                <img src="//static4.tgstat.ru/channels/_50/c4/c49c48f101b501e3155f7dcc25555c9f.jpg" class="rounded" style="width:32px; height:32px;">                            </a>
+                        </div>
+                        <div class="media-body text-truncate">
+                            <h5 class="m-0">
+                                <a href="https://tgstat.com/ru/channel/@indirimvarsa" class="text-dark">
+                                    İndirim Varsa Anlık Fırsat Alışveriş Kampanya Kupon Haberleri                                </a>
+                            </h5>
+                            <p class="text-muted m-0">
+                                <small>14 Sep, 19:50</small>
+                            </p>
+                        </div>
+
+                        <div class="dropdown mt-1 mr-2 mr-sm-0 float-right text-muted">
+                            <a href="#" class="dropdown-toggle arrow-none card-drop" data-toggle="dropdown" aria-expanded="false">
+                                <i class="uil-ellipsis-v"></i>
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-right">
+                                <a href="https://ttttt.me/indirimvarsa/122908" target="_blank" class="dropdown-item px-2">
+                                    <i class="uil-message mr-1 text-dark"></i> Открыть в Telegram                                </a>
+
+                                <a class="dropdown-item popup_ajax px-2" href="/ru/channel/@indirimvarsa/122908/share" data-src="/ru/channel/@indirimvarsa/122908/share">
+                                    <i class="uil-share-alt mr-1 text-dark"></i> Поделиться                                </a>
+
+                                <a class="dropdown-item popup_ajax px-2" href="#" data-src="/ru/channel/@indirimvarsa/122908/abuse">
+                                    <i class="uil-exclamation-octagon mr-1 text-dark"></i> Пожаловаться                                </a>
+
+                                
+                                
+                                                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="m-0">
+
+            
+        </div>
+
+        <div class="row my-2">
+            <div class="col col-12">
+                
+
+
+
+        <div class="post-body
+                                                isPhoto                                                                                                                                " data-popup-exception="a,button,.wrapper-video,.isPopup,.slick-dots">
+
+        
+
+        <div class="">
+
+            
+            <div class="indent-for-blocks ">
+
+                                    
+    
+
+
+
+    
+            <div class="post-img-placeholder-wrapper">
+            <div class="post-img-placeholder"></div>
+        </div>
+    
+                    
+
+    <div class="post-text"><b>🛍 D's Damat <mark>Ds</mark> Damat Kahverengi Desenli Klasik Deri Ayakkabi 1hf099551081m<br><br>🎯 1399 TL / Sepette 500 TL kuponla 3 adet <mark>al</mark>ımda 1232 TL 🚚 Kargo Bedava<br><br>🛒 </b><a href="https://&lt;mark&gt;sl&lt;/mark&gt;.n11.com/n/vvcPfmG" rel="nofollow"><b></b></a><b><a href="https://" rel="nofollow" target="_blank">https://</a><mark>sl</mark>.n11.com/n/vvcPfmG</b><b><br><br></b><b>#n11</b><b> </b><b>#indirim</b><b> </b><b>#reklam</b><b> </b><b>#amazon</b><b> </b><b>#trendyol</b><b> </b><b>#hepsiburada</b></div>
+
+    <div class="post-text"></div>
+
+                
+                
+            </div>
+        </div>
+    </div>
+            </div>
+        </div>
+
+        
+            <hr class="m-0 mb-2">
+
+            <div class="row">
+                <div class="col col-12 d-flex">
+                    <a class="btn btn-light btn-rounded py-05 px-13 mr-1 popup_ajax font-12 font-sm-13" role="button" data-src="/ru/channel/@indirimvarsa/122908/stat" href="/ru/channel/@indirimvarsa/122908/stat" title="" data-toggle="tooltip" data-placement="top" data-original-title="Количество просмотров публикации">
+                        <i class="uil-eye"></i>49                    </a>
+
+                    <a class="btn btn-light btn-rounded py-05 px-13 mr-1 popup_ajax font-12 font-sm-13" role="button" data-src="/ru/channel/@indirimvarsa/122908/quotes" href="/ru/channel/@indirimvarsa/122908/quotes" title="" data-toggle="tooltip" data-placement="top" data-original-title="Поделились в публичных каналах и чатах">
+                        <i class="uil-share-alt"></i>0                    </a>
+
+                    <span class="btn btn-light btn-rounded py-05 px-13 mr-1 font-12 font-sm-13" role="button" title="" data-toggle="tooltip" data-placement="top" data-original-title="Пересылок всего">
+                        <i class="uil-corner-up-right"></i>1                    </span>
+
+                    
+                    
+                    <div class="ml-auto">
+
+                        
+                        <a class="btn btn-light btn-rounded p-05 popup_ajax font-12 font-sm-13 d-sm-inline" role="button" data-src="/ru/channel/@indirimvarsa/122908" href="/ru/channel/@indirimvarsa/122908" title="" data-toggle="tooltip" data-placement="top" data-original-title="Постоянная ссылка на публикацию">
+                            <span class="uil-link-alt"></span>
+                        </a>
+                    </div>
+
+                    <div class="clearfix"></div>
+                </div>
+            </div>
+            </div>
+
+            
+
+    <div id="post-94207652712" class="card card-body border p-2 px-1 px-sm-3 post-container  ">
+
+        <div class="post-header">
+            <div class="row">
+                <div class="col col-12 pr-0">
+                    <div class="media pb-1">
+
+                        <div class="mr-2">
+                            <a href="https://tgstat.com/ru/channel/@indirimpaylasim">
+                                <img src="//static4.tgstat.ru/channels/_50/8e/8e82ca5e927eb05d49171ff8aca56a27.jpg" class="rounded" style="width:32px; height:32px;">                            </a>
+                        </div>
+                        <div class="media-body text-truncate">
+                            <h5 class="m-0">
+                                <a href="https://tgstat.com/ru/channel/@indirimpaylasim" class="text-dark">
+                                    İNDİRİM PAYLAŞIMLARI 🚨🛒 Trendyol Hepsiburada Çiçeksepeti                                </a>
+                            </h5>
+                            <p class="text-muted m-0">
+                                <small>14 Sep, 19:50</small>
+                            </p>
+                        </div>
+
+                        <div class="dropdown mt-1 mr-2 mr-sm-0 float-right text-muted">
+                            <a href="#" class="dropdown-toggle arrow-none card-drop" data-toggle="dropdown" aria-expanded="false">
+                                <i class="uil-ellipsis-v"></i>
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-right">
+                                <a href="https://ttttt.me/indirimpaylasim/129343" target="_blank" class="dropdown-item px-2">
+                                    <i class="uil-message mr-1 text-dark"></i> Открыть в Telegram                                </a>
+
+                                <a class="dropdown-item popup_ajax px-2" href="/ru/channel/@indirimpaylasim/129343/share" data-src="/ru/channel/@indirimpaylasim/129343/share">
+                                    <i class="uil-share-alt mr-1 text-dark"></i> Поделиться                                </a>
+
+                                <a class="dropdown-item popup_ajax px-2" href="#" data-src="/ru/channel/@indirimpaylasim/129343/abuse">
+                                    <i class="uil-exclamation-octagon mr-1 text-dark"></i> Пожаловаться                                </a>
+
+                                
+                                
+                                                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="m-0">
+
+            
+        </div>
+
+        <div class="row my-2">
+            <div class="col col-12">
+                
+
+
+
+        <div class="post-body
+                                                isPhoto                                                                                                                                " data-popup-exception="a,button,.wrapper-video,.isPopup,.slick-dots">
+
+        
+
+        <div class="">
+
+            
+            <div class="indent-for-blocks ">
+
+                                    
+    
+
+
+
+    
+            <div class="post-img-placeholder-wrapper">
+            <div class="post-img-placeholder"></div>
+        </div>
+    
+                    
+
+    <div class="post-text"><b>🛍 D's Damat <mark>Ds</mark> Damat Kahverengi Desenli Klasik Deri Ayakkabi 1hf099551081m<br><br>🎯 1399 TL / Sepette 500 TL kuponla 3 adet <mark>al</mark>ımda 1232 TL 🚚 Kargo Bedava<br><br>🛒 </b><a href="https://&lt;mark&gt;sl&lt;/mark&gt;.n11.com/n/vvcPfmG" rel="nofollow"><b></b></a><b><a href="https://" rel="nofollow" target="_blank">https://</a><mark>sl</mark>.n11.com/n/vvcPfmG</b><b><br><br></b><b>#n11</b><b> </b><b>#indirim</b><b> </b><b>#reklam</b><b> </b><b>#amazon</b><b> </b><b>#trendyol</b><b> </b><b>#hepsiburada</b></div>
+
+    <div class="post-text"></div>
+
+                
+                
+            </div>
+        </div>
+    </div>
+            </div>
+        </div>
+
+        
+            <hr class="m-0 mb-2">
+
+            <div class="row">
+                <div class="col col-12 d-flex">
+                    <a class="btn btn-light btn-rounded py-05 px-13 mr-1 popup_ajax font-12 font-sm-13" role="button" data-src="/ru/channel/@indirimpaylasim/129343/stat" href="/ru/channel/@indirimpaylasim/129343/stat" title="" data-toggle="tooltip" data-placement="top" data-original-title="Количество просмотров публикации">
+                        <i class="uil-eye"></i>35                    </a>
+
+                    <a class="btn btn-light btn-rounded py-05 px-13 mr-1 popup_ajax font-12 font-sm-13" role="button" data-src="/ru/channel/@indirimpaylasim/129343/quotes" href="/ru/channel/@indirimpaylasim/129343/quotes" title="" data-toggle="tooltip" data-placement="top" data-original-title="Поделились в публичных каналах и чатах">
+                        <i class="uil-share-alt"></i>0                    </a>
+
+                    <span class="btn btn-light btn-rounded py-05 px-13 mr-1 font-12 font-sm-13" role="button" title="" data-toggle="tooltip" data-placement="top" data-original-title="Пересылок всего">
+                        <i class="uil-corner-up-right"></i>1                    </span>
+
+                    
+                                                                                            <span class="btn btn-light btn-rounded py-05 px-13 mr-1 font-12 font-sm-13" role="button" title="" data-toggle="tooltip" data-html="true" data-placement="top" data-original-title="Количество реакций к публикации&lt;div class='row mt-2'&gt;&lt;div class='col-5'&gt;&lt;div class='text-left'&gt;❤️ - 1&lt;/div&gt;&lt;/div&gt;&lt;div class='col-6'&gt;&lt;/div&gt;&lt;/div&gt;" data-trigger="click">
+                            <i class="uil-thumbs-up"></i>1                        </span>
+                    
+                    <div class="ml-auto">
+
+                        
+                        <a class="btn btn-light btn-rounded p-05 popup_ajax font-12 font-sm-13 d-sm-inline" role="button" data-src="/ru/channel/@indirimpaylasim/129343" href="/ru/channel/@indirimpaylasim/129343" title="" data-toggle="tooltip" data-placement="top" data-original-title="Постоянная ссылка на публикацию">
+                            <span class="uil-link-alt"></span>
+                        </a>
+                    </div>
+
+                    <div class="clearfix"></div>
+                </div>
+            </div>
+            </div>
+
+    </div>
+
+<div class="alert alert-light bg-light text-dark border-0 lm-controls-container text-center">
+    <div class="lm-info-container">
+                    Показано <strong class="lm-current-loaded">2</strong> публикаций из <strong class="lm-total-count">2</strong>.            </div>
+
+            <div class="lm-button-container mt-2">
+
+            <button class="btn btn-outline-dark lm-button py-0" type="button">
+                Показать больше            </button>
+
+            <span class="lm-loader d-none spinner-border spinner-border-sm mr-1" role="status" aria-hidden="true"></span>
+        </div>
+    
+    <div class="clearfix"></div>
+</div>
+        </div>
+    </div>
+
+    <div class="col col-12 col-lg-3 col-md-5 col-sm-12 order-2 order-md-3">
+        <div id="sticky-right-column" class="sticky-right-column" style="">
+            <div id="sticky-right-column__inner" class="sticky-right-column__inner" style="position: relative;">
+                
+
+<div class="card border mb-2 mb-md-3">
+    <div class="card-body py-2 py-md-3">
+        <div class="card-widgets">
+            <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchViewsRangeCollapse" role="button" aria-expanded="false" aria-controls="searchViewsRangeCollapse">
+                <i class="uil-angle-down"></i>
+            </a>
+        </div>
+
+        <h5 class="card-title mb-0 text-dark">По кол-ву просмотров</h5>
+
+        <div id="searchViewsRangeCollapse" class="collapse-sm pt-1">
+
+            <hr class="my-1">
+
+            <div class="row mt-2 align-items-center facet-row">
+                <div class="col col-8 text-truncate mb-1 facet-param">
+                    <div class="custom-control custom-radio">
+                        <input type="radio" class="custom-control-input facet-filter-js" id="views_all" name="facets[views_range]" value="all" checked="">
+                        <label class="custom-control-label font-weight-normal" for="views_all">
+                            Любое                        </label>
+                    </div>
+                    <div class="col col-4 text-right font-12 text-muted facet-value">
+
+                    </div>
+                </div>
+            </div>
+
+                                                <div class="row align-items-center facet-row">
+                        <div class="col col-8 text-truncate facet-param">
+                            <div class="custom-control custom-radio">
+                                <input type="radio" class="custom-control-input facet-filter-js" id="views0" name="facets[views_range]" value="0">
+                                <label class="custom-control-label font-weight-normal" for="views0">
+                                    Менее 1000                                </label>
+                            </div>
+                        </div>
+                        <div class="col col-4 text-right font-12 text-muted facet-value">
+                            2                        </div>
+                    </div>
+                            
+        </div>
+    </div>
+</div>
+
+    <div class="card border mb-2 mb-md-3">
+        <div class="card-body py-2 py-md-3">
+            <div class="card-widgets">
+                <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchIsForwardedCollapse" role="button" aria-expanded="false" aria-controls="searchIsForwardedCollapse">
+                    <i class="uil-angle-down"></i>
+                </a>
+            </div>
+
+            <h5 class="card-title mb-0 text-dark">Репосты</h5>
+
+            <div id="searchIsForwardedCollapse" class="collapse-sm pt-1">
+
+                <hr class="mt-1 mb-2">
+
+                                    <div class="row align-items-center facet-row">
+                        <div class="col col-8 text-truncate facet-param">
+
+                            <div class="custom-control custom-checkbox custom-control-inline">
+                                <input type="checkbox" class="custom-control-input facet-filter-js" id="is_forward0" name="facets[is_forward][0]" value="1">
+                                <label class="custom-control-label font-weight-normal" for="is_forward0">
+                                                                            Оригинал                                                                    </label>
+                            </div>
+                        </div>
+                        <div class="col col-4 text-right font-12 text-muted facet-value">
+                            2                        </div>
+                    </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <div class="card border mb-2 mb-md-3">
+        <div class="card-body py-2 py-md-3">
+            <div class="card-widgets">
+                <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchIsDeletedCollapse" role="button" aria-expanded="false" aria-controls="searchIsDeletedCollapse">
+                    <i class="uil-angle-down"></i>
+                </a>
+            </div>
+
+            <h5 class="card-title mb-0 text-dark">Удаленные</h5>
+
+            <div id="searchIsDeletedCollapse" class="collapse-sm pt-1">
+
+                <hr class="mt-1 mb-2">
+
+                                    <div class="row align-items-center facet-row">
+                        <div class="col col-8 text-truncate facet-param">
+                            <div class="custom-control custom-checkbox custom-control-inline">
+                                <input type="checkbox" class="custom-control-input facet-filter-js" id="is_deleted0" name="facets[is_deleted][0]" value="1">
+                                <label class="custom-control-label font-weight-normal" for="is_deleted0">
+                                                                            Пост не удален                                                                    </label>
+                            </div>
+                        </div>
+                        <div class="col col-4 text-right font-12 text-muted facet-value">
+                            2                        </div>
+                    </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <div class="card border mb-2 mb-md-3">
+        <div class="card-body py-2 py-md-3">
+            <div class="card-widgets">
+                <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchPeerTypeCollapse" role="button" aria-expanded="false" aria-controls="searchPeerTypeCollapse">
+                    <i class="uil-angle-down"></i>
+                </a>
+            </div>
+
+            <h5 class="card-title mb-0 text-dark">По типу источника</h5>
+
+            <div id="searchPeerTypeCollapse" class="collapse-sm pt-1">
+
+                <hr class="mt-1 mb-2">
+
+                                    <div class="row align-items-center facet-row">
+                        <div class="col col-8 text-truncate facet-param">
+
+                            <div class="custom-control custom-checkbox custom-control-inline">
+                                <input type="checkbox" class="custom-control-input facet-filter-js" id="peer_type1" name="facets[peer_type][1]" value="1">
+                                <label class="custom-control-label font-weight-normal" for="peer_type1">
+                                                                            Канал                                                                    </label>
+                            </div>
+                        </div>
+                        <div class="col col-4 text-right font-12 text-muted facet-value">
+                            2                        </div>
+                    </div>
+                            </div>
+        </div>
+    </div>
+
+    <div class="card border mb-2 mb-md-3">
+        <div class="card-body py-2 py-md-3">
+            <div class="card-widgets">
+                <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchSourceGeoCollapse" role="button" aria-expanded="false" aria-controls="searchSourceGeoCollapse">
+                    <i class="uil-angle-down"></i>
+                </a>
+            </div>
+            <h5 class="card-title mb-0 text-dark">По географии источника</h5>
+
+            <div id="searchSourceGeoCollapse" class="collapse-sm pt-1">
+
+                <hr class="mt-1 mb-2">
+
+                                    <div class="row align-items-center facet-row">
+                        <div class="col col-8 text-truncate facet-param">
+                            <div class="custom-control custom-checkbox custom-control-inline">
+                                <input type="checkbox" class="custom-control-input facet-filter-js" id="country23" name="facets[country_id][23]" value="1">
+                                <label class="custom-control-label font-weight-normal" for="country23">
+                                    Турция                                </label>
+                            </div>
+                        </div>
+                        <div class="col col-4 text-right font-12 text-muted facet-value">
+                            2                        </div>
+                    </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <div class="card border mb-2 mb-md-3">
+        <div class="card-body py-2 py-md-3">
+            <div class="card-widgets">
+                <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchSourceLanguageCollapse" role="button" aria-expanded="false" aria-controls="searchSourceLanguageCollapse">
+                    <i class="uil-angle-down"></i>
+                </a>
+            </div>
+
+            <h5 class="card-title mb-0 text-dark">По языку контента</h5>
+
+            <div id="searchSourceLanguageCollapse" class="collapse-sm pt-1">
+                <hr class="mt-1 mb-2">
+
+                                    <div class="row align-items-center facet-row">
+                        <div class="col col-8 text-truncate facet-param">
+                            <div class="custom-control custom-checkbox custom-control-inline">
+                                <input type="checkbox" class="custom-control-input facet-filter-js" id="language16" name="facets[language_id][16]" value="1">
+                                <label class="custom-control-label font-weight-normal" for="language16">
+                                    Турецкий                                </label>
+                            </div>
+                        </div>
+                        <div class="col col-4 text-right font-12 text-muted facet-value">
+                            2                        </div>
+                    </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <div class="card border mb-2 mb-md-0">
+        <div class="card-body py-2 py-md-3">
+            <div class="card-widgets">
+                <a class="d-block d-md-none collapse-arrow collapsed" data-toggle="collapse" href="#searchSourceCategoryCollapse" role="button" aria-expanded="false" aria-controls="searchSourceCategoryCollapse">
+                    <i class="uil-angle-down"></i>
+                </a>
+            </div>
+
+            <h5 class="card-title mb-0 text-dark">По тематике источника</h5>
+
+            <div id="searchSourceCategoryCollapse" class="collapsable-items collapsable-items-5 collapse-sm pt-1">
+                <hr class="mt-1 mb-2">
+
+                <div class="row overflow-auto mt-0" id="searchCategoryScrollableContainer">
+
+                                                                <div class="col-12 collapsable-item d-block">
+                            <div class="row align-items-center facet-row">
+                                <div class="col col-8 text-truncate facet-param">
+                                    <div class="custom-control custom-checkbox custom-control-inline">
+                                        <input type="checkbox" class="custom-control-input facet-filter-js" id="category14" name="facets[category_id][14]" value="1">
+                                        <label class="custom-control-label font-weight-normal" for="category14">
+                                            Продажи                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col col-4 text-right font-12 text-muted facet-value">
+                                    2                                </div>
+                            </div>
+                        </div>
+                                    </div>
+
+                <hr class="my-2">
+
+                <a class="btn btn-outline-dark btn-block collapsable-items-expander collapse-arrow collapsed py-0 mt-1" data-collapsed-title="Полный список" data-title="Свернуть" href="javascript:void(0);" role="button" aria-expanded="false" id="searchCategoryScrollableContainerExpander">
+                    <span>Полный список</span> <i class="uil-angle-down"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+            </div>
+        </div>
+    </div>
+</div>
+        </div>
+
+    
+
+
+    </form>
+</div>
+
+                </div>
+            </div>
+
+            <div class="dark">
+    <footer class="footer position-relative shadow">
+        <div class="container-fluid">
+            <div class="row navbar-light">
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Каталог</div>
+                    <div class="navbar-nav">
+                        <a href="/" class="nav-link pt-0 pb-1">
+                            Каталог каналов и чатов                        </a>
+                        <a href="/tags" class="nav-link pt-0 pb-1">
+                            Подборки каналов                        </a>
+                        <a href="/channels/search" class="nav-link pt-0 pb-1">
+                            Поиск каналов                        </a>
+                        <a href="/add/channel" class="nav-link pt-0 pb-1">
+                           Добавить канал/чат                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Рейтинги</div>
+                    <div class="navbar-nav">
+                        <a href="/ratings/channels" class="nav-link pt-0 pb-1">
+                            Рейтинг каналов Telegram                        </a>
+                        <a href="/ratings/chats" class="nav-link pt-0 pb-1">
+                            Рейтинг чатов Telegram                        </a>
+                        <a href="/ratings/posts" class="nav-link pt-0 pb-1">
+                            Рейтинг публикаций                        </a>
+                        <a href="/ratings" class="nav-link pt-0 pb-1">
+                            Рейтинги брендов и персон                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">API</div>
+                    <div class="navbar-nav">
+                        <a href="https://tgstat.ru/api/stat" target="_blank" class="nav-link pt-0 pb-1">
+                            API статистики                        </a>
+                        <a href="https://tgstat.ru/api/search" target="_blank" class="nav-link pt-0 pb-1">
+                            API поиска публикаций                        </a>
+                        <a href="https://tgstat.ru/api/callback" target="_blank" class="nav-link pt-0 pb-1">
+                            API Callback
+                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Наши каналы</div>
+                    <div class="navbar-nav">
+                        <a href="https://t.me/TGStat" target="_blank" class="nav-link pt-0 pb-1">@TGStat</a>
+                        <a href="https://t.me/TGStat_Chat" target="_blank" class="nav-link pt-0 pb-1">@TGStat_Chat</a>
+                        <a href="https://t.me/telepulse" target="_blank" class="nav-link pt-0 pb-1">@telepulse</a>
+                        <a href="https://t.me/TGStatAPI" target="_blank" class="nav-link pt-0 pb-1">@TGStatAPI</a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Почитать</div>
+                    <div class="navbar-nav">
+                        <a href="/academy" class="nav-link d-inline pt-0 pb-1">
+                            Академия TGStat                        </a>
+                        <a href="https://tgstat.ru/research-2019" target="_blank" class="nav-link pt-0 pb-1">Исследование Telegram 2019</a>
+                        <a href="https://tgstat.ru/research-2021" target="_blank" class="nav-link pt-0 pb-1">Исследование Telegram 2021</a>
+                        <a href="https://tgstat.ru/research-2023" target="_blank" class="nav-link pt-0 pb-1">Исследование Telegram 2023</a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Контакты</div>
+                    <div class="navbar-nav">
+                        <a href="/help" class="nav-link pt-0 pb-1">Справочный центр</a>
+                        <a href="https://t.me/TGStatSupportBot" target="_blank" class="nav-link pt-0 pb-1">Поддержка</a>
+                        <a href="mailto:support@tgstat.ru" target="_blank" class="nav-link pt-0 pb-1">Почта</a>
+                        <a href="/p/tgstat-job" class="nav-link pt-0 pb-1">
+                            Вакансии                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Всякая всячина</div>
+                    <div class="navbar-nav">
+                        <a href="/p/agreement" class="nav-link pt-0 pb-1">
+                            Пользовательское соглашение                        </a>
+                        <a href="/p/privacy-policy" class="nav-link pt-0 pb-1">
+                            Политика конфиденциальности                        </a>
+                        <a href="/p/oferta" class="nav-link pt-0 pb-1">
+                            Публичная оферта                        </a>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="h4 mt-3">Наши боты</div>
+                    <div class="navbar-nav">
+                        <a href="https://t.me/TGStat_Bot" target="_blank" class="nav-link pt-0 pb-1">@TGStat_Bot</a>
+                        <a href="https://t.me/SearcheeBot" target="_blank" class="nav-link pt-0 pb-1">@SearcheeBot</a>
+                        <a href="https://t.me/TGAlertsBot" target="_blank" class="nav-link pt-0 pb-1">@TGAlertsBot</a>
+                        <a href="https://t.me/tg_analytics_bot" target="_blank" class="nav-link pt-0 pb-1">@tg_analytics_bot</a>
+                        <a href="https://t.me/TGStatChatBot" target="_blank" class="nav-link pt-0 pb-1">@TGStatChatBot</a>
+                    </div>
+                </div>
+            </div>
+
+                    </div>
+    </footer>
+</div>
+        </div>
+
+    </div>
+
+    
+    <script src="/static/js/app.js?v=1785995633"></script><div class="daterangepicker ltr single opensright"><div class="ranges"></div><div class="drp-calendar left single" style="display: block;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-calendar right" style="display: none;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-buttons"><span class="drp-selected">09.09.2026 00:00 - 09.09.2026 00:00</span><button class="cancelBtn btn btn-sm btn-default" type="button">Отмена</button><button class="applyBtn btn btn-sm btn-primary" disabled="disabled" type="button">Выбрать</button> </div></div><div class="daterangepicker ltr single opensright"><div class="ranges"></div><div class="drp-calendar left single" style="display: block;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-calendar right" style="display: none;"><div class="calendar-table"></div><div class="calendar-time"></div></div><div class="drp-buttons"><span class="drp-selected">16.09.2026 00:00 - 16.09.2026 00:00</span><button class="cancelBtn btn btn-sm btn-default" type="button">Отмена</button><button class="applyBtn btn btn-sm btn-primary" disabled="disabled" type="button">Выбрать</button> </div></div>
+<script></script>
+<script>jQuery(function ($) {
+        function setControls()
+        {
+            if ($('#extendedsyntax').is(':checked')) {
+                $('#strongsearch').attr('disabled', 'disabled');
+                $('#minuswords').attr('disabled', 'disabled');
+            } else {
+                $('#strongsearch').removeAttr('disabled');
+                $('#minuswords').removeAttr('disabled');
+            }
+        }
+
+        setControls();
+        $('#extendedsyntax').change(function() {
+            setControls();
+        });
+    var chartOptions = {
+        chart: {
+            type: 'line',
+            height: 220,
+            sparkline: {
+                enabled: true
+            },
+            zoom: {
+                autoScaleYaxis: true,
+            }
+        },
+        markers: {
+            size: 3,
+            hover: {
+                sizeOffset: 2
+            }
+        },
+        plotOptions: {
+            bar: {
+                columnWidth: '70%',
+                borderRadius: 5,
+            },
+        },
+        fill: {
+          opacity: [0.85, 0.25],
+        },
+        series: [{
+            name: 'reach',
+            type: 'line',
+            data: [],
+        }, {
+            name: 'count',
+            type: 'bar',
+            data: [],
+        }],
+        noData: {
+          text: 'Loading...'
+        },
+        xaxis: {
+            type: 'category',
+            labels: {
+                rotate: 0,
+            },
+            tickAmount: 6,
+            tooltip: {
+                enabled: false
+            }
+        },
+        yaxis: [
+          {
+            seriesName: 'reach',
+            decimalsInFloat: false,
+          },
+          {
+            seriesName: 'count',
+            opposite: true,
+            decimalsInFloat: false,
+          },
+        ],
+        dataLabels: {
+            enabled: false
+        },
+        stroke: {
+            width: [3, 0],
+            curve: ['smooth', 'stepline']
+        },
+        colors: ['#27acd2', '#8e9aab'],
+        tooltip: {
+          fixed: {
+            enabled: false,
+            position: 'topLeft',
+            offsetY: 30,
+            offsetX: 60
+          },
+          y: {
+            formatter: function(value) {
+                return parseInt(value);
+            },
+          },
+        },
+        grid: {
+            show: true,
+            padding: {
+                left: -12,
+            }
+        },
+        responsive: [
+            {
+                breakpoint: 767,
+                options: {
+                    stroke: {
+                        width: [2, 0],
+                    },
+                    chart: {
+                        height: 160,
+                    }
+                },
+            },
+            {
+                breakpoint: 3000,
+                options: {
+                    stroke: {
+                        width: [3, 0],
+                    },
+                    chart: {
+                        height: 220,
+                    }
+                },
+            }
+        ]
+    };
+        
+    var mentionsChart = new ApexCharts(document.querySelector('#mentions-chart'), chartOptions);
+    
+    mentionsChart.render();
+    updateChart('day', mentionsChart);
+    
+    function updateChart (groupBy, chart, callbackSuccess) {
+        
+        (new AjaxRequest()).execute({
+            type: 'POST',
+            url: '/search/mentions-chart',
+            data: $('#search-form').serialize() + '&group='+groupBy,
+            success: function(r) {
+                
+               if (r.status === 'ok') {
+                    chart.updateSeries([
+                        {
+                          name: 'Просмотров',
+                          data: r.data.reach
+                        },
+                        {
+                          name: 'Упоминаний',
+                          data: r.data.count
+                        }
+                    ]);
+                    
+                    if (r.chartOptions) {
+                        chart.updateOptions(r.chartOptions);
+                    }
+                    
+                    if (callbackSuccess) {
+                        callbackSuccess();
+                    }                   
+               }
+                
+            }
+        });
+    }
+    
+    $('#groupByDayChart').click(function() {
+        updateChart('day', mentionsChart, 
+            function() {
+            }
+        ); 
+    });
+    
+    $('#groupByMonthChart').click(function() {
+        updateChart('month', mentionsChart, 
+            function() {
+            }
+        ); 
+    });
+    $(document).ready(function() {
+       
+        if ($('#sticky-right-column').length > 0 && $('#sticky-left-column').length > 0) {
+            var rightSidebar = new StickySidebar('#sticky-right-column', {
+                containerSelector: '#sticky-center-column',
+                innerWrapperSelector: '#sticky-right-column__inner',
+                topSpacing: $('.fixed-top').height() + 30,
+                bottomSpacing: 40,
+                minWidth: 768 // < sm
+            });
+           
+            var leftSidebar = new StickySidebar('#sticky-left-column', {
+                containerSelector: '#sticky-center-column',
+                innerWrapperSelector: '#sticky-left-column__inner',
+                topSpacing: $('.fixed-top').height() + 30,
+                bottomSpacing: 40,
+                minWidth: 991 // < md
+            });            
+        }
+        
+        var bLazy = new Blazy({
+            breakpoints: [{
+                width: 100,
+                src: 'data-src'
+            }],
+            container: '#searchSourceScrollableContainer',
+            success: function(element) {
+                setTimeout(function() {
+                    var parent = element.parentNode;
+                    parent.className = parent.className.replace(/\bloading\b/,'');
+                }, 200);
+            }
+        });
+        
+        $(document).on('shown.bs.collapse', function () {
+            bLazy.revalidate();  
+        })
+        
+        var loadMore = $('.posts-lists-container').loadMore({
+            url: '/search/list',
+            errorCallback: function(errCode) {
+                
+            },
+            successCallback: function(r) {
+                leftSidebar.updateSticky();
+                rightSidebar.updateSticky();
+            }
+        });
+        
+        var isTrial = 0;
+        
+        // open categories full list
+        $('.collapsable-items-expander').click(function() {
+            setTimeout(function(){
+                leftSidebar.updateSticky();
+                rightSidebar.updateSticky();
+            }, 100);
+        });
+        
+        // handler click by source
+        $('#searchSourceScrollableContainer').on('click', 'div.channel-source-item', function(e) {
+            
+            e.preventDefault();
+            e.stopPropagation();
+          
+            var row = $(this);
+            var fieldForm = $('#search-form').find('input#facetChannelId');
+            var oldValue = fieldForm.val();
+            var newValue = row.data('id');
+            
+            if (row.hasClass('active')) {
+                fieldForm.val('');
+                row.removeClass('active');
+            } else {
+                fieldForm.val(newValue);
+                $('#searchSourceScrollableContainer div.channel-source-item').removeClass('active');
+                row.addClass('active');
+            }
+            
+            loadMore.sendRequest(true,
+                function() { // success
+                    leftSidebar.updateSticky();
+                    rightSidebar.updateSticky();
+                    Utils.scrollToAnchor('#sticky-center-column');
+                },
+                function() { // failure
+                    fieldForm.val(oldValue);
+                }
+            );
+        });
+    
+        // handler click by sort sources
+        $('#sortSourceByPopular').click(function() {
+            $('#searchSourceScrollableContainer div.channel-source-item').sort(function (a, b) {
+                return ($(b).data('members')) > ($(a).data('members')) ? 1 : -1;    
+            }).prependTo('#searchSourceScrollableContainer');
+            
+            bLazy.revalidate();
+            rightSidebar.updateSticky();
+        });
+        
+        // handler click by sort sources
+        $('#sortSourceByFreq').click(function() {
+            $('#searchSourceScrollableContainer div.channel-source-item').sort(function (a, b) {
+                return ($(b).data('freq')) > ($(a).data('freq')) ? 1 : -1;    
+            }).prependTo('#searchSourceScrollableContainer');
+            
+            bLazy.revalidate();
+            rightSidebar.updateSticky();
+        });
+     
+        // handler sort posts
+        $('.sort-button-js').click(function(e) {
+//            e.preventDefault();
+//            e.stopPropagation();
+            
+            var button = $(this);
+            var fieldForm = $('#search-form').find('input[name=sort]');
+            var oldValue = fieldForm.val();
+            
+            fieldForm.val($(this).data('metric'));
+            
+            loadMore.sendRequest(true, 
+                function() { // success
+//                    button.parents('.button-group').find('.sort-button-js').removeClass('active');
+//                    button.addClass('active');
+                },
+                function() { // failure
+                    fieldForm.val(oldValue);
+                }
+            );
+        });
+        
+        // handler facet filter
+        $('.facet-filter-js').click(function(e) {
+         
+            if (isTrial) {
+                
+                e.preventDefault();
+                e.stopPropagation();
+                
+                (new ModalWindow()).initFromUrl({
+                    url: '/payments/premium-search',
+                });
+                
+                $(this).val($(this).data('default-val'));
+                
+                return false;
+            }
+            
+            // reset chosen channel
+            $('#search-form').find('input#facetChannelId').val('');
+            
+            $('#searchSourceScrollableContainer').css({ opacity: 0.3 });
+            
+            loadMore.sendRequest(true,
+                function() { // success
+                    leftSidebar.updateSticky();
+                    rightSidebar.updateSticky();
+                },
+                function() { // failure
+                
+                }
+            );
+            
+            $.ajax({
+                type: 'POST',
+                url: '/search/facets',
+                data: $('#search-form').serialize(),
+                success: function(r) {
+                    let facets = r.facets;
+                    
+                    var facetsStrings = {};
+                    for(var facetType in facets) {
+                        for(var facetIndexValue in facets[facetType]) {
+                            facetsStrings['facets['+facetType+']['+facetIndexValue+']'] = facets[facetType][facetIndexValue];
+                        }
+                    }
+                    
+                    $('#searchIsDeletedCollapse input, #searchIsForwardedCollapse input, #searchPeerTypeCollapse input, #searchSourceGeoCollapse input, #searchSourceLanguageCollapse input, #searchSourceCategoryCollapse input')
+                    .each(function( index ) {
+                        if (facetsStrings[$(this).attr('name')]) {
+                            $(this).parents('.facet-row').find('.facet-param label').removeClass('text-strike');
+                            $(this).parents('.facet-row').find('.facet-value').removeClass('text-strike').text(facetsStrings[$(this).attr('name')]);
+                        } else {
+                            $(this).parents('.facet-row').find('.facet-param label').addClass('text-strike');
+                            $(this).parents('.facet-row').find('.facet-value').addClass('text-strike').text('');
+                        }
+                    });
+                    
+                    $('#searchViewsRangeCollapse input').each(function( index ) {
+                    
+                        if ($(this).val() !== 'all') {
+                            if (facetsStrings[$(this).attr('name') + '[' + $(this).val() + ']']) {
+                                $(this).parents('.facet-row').find('.facet-param label').removeClass('text-strike');
+                                $(this).parents('.facet-row').find('.facet-value').removeClass('text-strike').text(facetsStrings[$(this).attr('name') + '[' + $(this).val() + ']']);
+                            } else {
+                                $(this).parents('.facet-row').find('.facet-param label').addClass('text-strike');
+                                $(this).parents('.facet-row').find('.facet-value').addClass('text-strike').text('');
+                            }
+                        }
+                    });
+                    
+                    $('#searchSourceScrollableContainer').html(r.sources);
+                    $('#searchSourceScrollableContainer').css({ opacity: 1 });
+                    leftSidebar.updateSticky();
+                    bLazy.revalidate();
+                }
+            });
+        });
+        
+    });
+  
+    new TopSearch({
+        requestUrl: '/channels/global-search'
+    });
+});</script>
+    
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.webvisor.org/metrika/tag_ww.js', 'ym');
+
+    ym(44953966, 'init', {clickmap:true, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/44953966" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
+
+
+    
+
+
+<svg id="SvgjsSvg1001" width="2" height="0" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svgjs="http://svgjs.dev" style="overflow: hidden; top: -100%; left: -100%; position: absolute; opacity: 0;"><defs id="SvgjsDefs1002"></defs><polyline id="SvgjsPolyline1003" points="0,0"></polyline><path id="SvgjsPath1004" d="M0 0 "></path></svg></body></html>
