@@ -31,6 +31,7 @@ NO_PREMIUM = "no_premium"          # залогінений, але тариф �
 LOGIN_REQUIRED = "login_required"  # сторінка відкрилась, користувача немає
 CLOUDFLARE = "cloudflare"          # челендж/блок Cloudflare не пройдено
 ERROR = "error"                    # браузер не піднявся, таймаут тощо
+MANUAL = "manual"                  # іде ручний вхід у звичайному Chrome без Playwright
 
 _CF_TITLES = ("just a moment", "attention required", "cloudflare")
 

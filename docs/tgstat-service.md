@@ -43,6 +43,8 @@ tgstat.
 | GET | `/auth/status` | стан сесії за поточною сторінкою. `?reload=1` спершу перезаходить на головну: це оновлює кліренс, але збиває вхід, якщо він саме йде у VNC |
 | POST | `/auth/login` | відкриває головну tgstat у вікні браузера, щоб увійти через VNC |
 | GET | `/auth/screenshot` | PNG поточної вкладки: глянути, що там, без VNC |
+| POST | `/auth/manual` | **ручний вхід у звичайному Chrome**: сервіс закриває свій Chrome під Playwright і запускає на тому ж профілі той самий бінарник Chrome як звичайну програму, без Playwright/CDP і прапорців автоматизації |
+| POST | `/auth/manual/finish` | закрити звичайний Chrome (SIGTERM, cookies зберігаються) і повернути Chrome під Playwright; відповідає станом сесії |
 
 `/auth/status` повертає `state`:
 
@@ -53,6 +55,7 @@ tgstat.
 | `no_premium` | вхід є, тариф не Premium | пошук публікацій потребує Premium: увійти іншим акаунтом або оплатити |
 | `cloudflare` | челендж або блок Cloudflare | відкрити VNC; зазвичай досить пройти челендж руками і, якщо треба, увійти |
 | `error` | браузер не піднявся, таймаут, немає CSRF | `docker compose logs tgstat` |
+| `manual` | іде ручний вхід у звичайному Chrome | увійти у VNC, потім закрити вкладку або `POST /auth/manual/finish` |
 
 Ще в тілі відповіді: `user`, `plan`, `url`, `title`, `detail`, `checked_at`,
 `usable`, а коли сесія непридатна, то й `how_to_login`.
@@ -121,6 +124,20 @@ docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
 У вікні VNC пройти Cloudflare, якщо він з'явився, і увійти на tgstat
 акаунтом із Premium («Войти» → Telegram). Нічого не закривати: це той самий
 браузер, яким сервіс працюватиме далі.
+
+**Якщо Cloudflare або вхід tgstat не пускають браузер під Playwright**, увійдіть
+у звичайному Chrome. Це той самий бінарник і той самий профіль, тож TLS-відбиток
+не зміниться:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
+  python -c "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:8020/auth/manual', method='POST')).read().decode())"
+```
+
+У VNC з'явиться звичайний Chrome на tgstat.ru. Увійдіть, потім закрийте вкладку.
+Коли остання вкладка закрита, Chrome завершується, і сервіс сам повертає свій
+браузер (або `POST /auth/manual/finish`). Поки йде ручний вхід, `/auth/status`
+відповідає `manual`, а keepalive браузер не чіпає.
 
 ### 4. Перевірити
 

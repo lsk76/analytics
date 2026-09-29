@@ -10,6 +10,7 @@
 """
 import asyncio
 import logging
+import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -18,7 +19,7 @@ from urllib.parse import unquote, urlsplit
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 from .config import Config
-from .session import ERROR, SNAPSHOT_JS, SessionState, classify
+from .session import ERROR, MANUAL, SNAPSHOT_JS, SessionState, classify
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ log = logging.getLogger(__name__)
 REFERER = "https://www.google.com/"
 _PROFILE_LOCKS = ("SingletonLock", "SingletonCookie", "SingletonSocket",
                   "DevToolsActivePort")
+# Бінарник Google Chrome, який ставить `playwright install chrome`.
+GOOGLE_CHROME = Path("/opt/google/chrome/chrome")
 
 
 def parse_proxy(url: str) -> Optional[dict]:
@@ -51,18 +54,30 @@ class Browser:
         self.lock = asyncio.Lock()
         self._pw: Optional[Playwright] = None
         self._ctx: Optional[BrowserContext] = None
+        # Звичайний Chrome для ручного входу (без Playwright/CDP) і його сторож.
+        self._manual: Optional[asyncio.subprocess.Process] = None
+        self._manual_watch: Optional[asyncio.Task] = None
 
     @property
     def running(self) -> bool:
         return self._ctx is not None
 
-    async def start(self) -> None:
+    @property
+    def manual(self) -> bool:
+        return self._manual is not None
+
+    def _unlock_profile(self) -> Path:
         profile = Path(self.cfg.profile_dir)
         profile.mkdir(parents=True, exist_ok=True)
         # Локи лишаються після kill контейнера — з ними Chrome не стартує.
         for name in _PROFILE_LOCKS:
             (profile / name).unlink(missing_ok=True)
-        self._pw = await async_playwright().start()
+        return profile
+
+    async def start(self) -> None:
+        profile = self._unlock_profile()
+        if self._pw is None:
+            self._pw = await async_playwright().start()
         launch: dict[str, Any] = dict(
             user_data_dir=str(profile),
             headless=False,  # headless міняє User-Agent і ламає кліренс Cloudflare
@@ -107,6 +122,7 @@ class Browser:
         self._ctx = None
 
     async def stop(self) -> None:
+        await self.finish_manual()
         if self._ctx:
             await self._ctx.close()
         self._ctx = None
@@ -115,11 +131,82 @@ class Browser:
         self._pw = None
 
     async def ensure(self) -> None:
+        if self.manual:
+            raise RuntimeError("іде ручний вхід (звичайний Chrome) — "
+                               "спершу POST /auth/manual/finish")
         if self._ctx is None:
-            if self._pw:
-                await self._pw.stop()
-                self._pw = None
             await self.start()
+
+    # --- ручний вхід у звичайному Chrome -------------------------------------
+    # Cloudflare і логін tgstat можуть поводитись інакше з браузером під
+    # Playwright (прапорці автоматизації, CDP). На час входу відпускаємо профіль
+    # і запускаємо той самий бінарник Chrome як звичайну програму: TLS-відбиток
+    # і профіль ті самі, керування — лише людини через VNC. Коли вікно закрите
+    # (або /auth/manual/finish), сервіс знову бере профіль уже з сесією.
+
+    def _manual_binary(self) -> str:
+        if self.cfg.channel == "chrome" and GOOGLE_CHROME.exists():
+            return str(GOOGLE_CHROME)
+        assert self._pw is not None
+        return self._pw.chromium.executable_path
+
+    async def start_manual(self) -> None:
+        async with self.lock:
+            if self.manual:
+                return
+            if self._pw is None:
+                self._pw = await async_playwright().start()
+            if self._ctx:
+                ctx, self._ctx = self._ctx, None
+                await ctx.close()
+            profile = self._unlock_profile()
+            args = [
+                self._manual_binary(),
+                f"--user-data-dir={profile}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-dev-shm-usage",
+                "--window-position=0,0",
+                f"--window-size={self.cfg.screen_w},{self.cfg.screen_h}",
+                # Контейнер працює від root, а root-Chrome без цього не стартує.
+                "--no-sandbox",
+            ]
+            proxy = parse_proxy(self.cfg.proxy)
+            if proxy:
+                # Chrome не бере логін/пароль проксі з прапорця — лише сервер.
+                args.append(f"--proxy-server={proxy['server']}")
+            args.append(f"{self.cfg.base_url}/")
+            self._manual = await asyncio.create_subprocess_exec(
+                *args, stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL)
+            self._manual_watch = asyncio.create_task(self._watch_manual())
+            log.info("ручний вхід: звичайний Chrome pid=%s", self._manual.pid)
+
+    async def _watch_manual(self) -> None:
+        proc = self._manual
+        assert proc is not None
+        await proc.wait()
+        log.info("ручний Chrome закрито (код %s) — повертаю Playwright", proc.returncode)
+        async with self.lock:
+            self._manual = None
+            try:
+                await self.start()
+            except Exception:
+                log.exception("Chrome під Playwright не стартував після ручного входу")
+
+    async def finish_manual(self) -> None:
+        """Чемно закрити ручний Chrome: SIGTERM дає йому зберегти cookies."""
+        proc, watch = self._manual, self._manual_watch
+        if proc is None:
+            return
+        if proc.returncode is None:
+            proc.send_signal(signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), 20)
+            except asyncio.TimeoutError:
+                proc.kill()
+        if watch:
+            await watch
 
     async def page(self) -> Page:
         """Вкладка tgstat (якщо відкрита), інакше перша."""
@@ -160,6 +247,10 @@ class Browser:
         """Стан сесії. reload=True — перезайти на головну (оновлює кліренс
         Cloudflare); False — лише подивитись на поточну сторінку, не заважаючи
         входу, що саме йде у VNC."""
+        if self.manual:
+            return SessionState(MANUAL, checked_at=_now(), detail=(
+                "іде ручний вхід у звичайному Chrome; після входу закрий вікно "
+                "або POST /auth/manual/finish"))
         async with self.lock:
             try:
                 await self.ensure()

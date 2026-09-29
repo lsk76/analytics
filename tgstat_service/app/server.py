@@ -5,6 +5,8 @@
   GET  /auth/status        стан сесії (?reload=1 — перезайти на сайт)
   POST /auth/login         вивести tgstat у вікно VNC для ручного входу
   GET  /auth/screenshot    PNG поточної вкладки — глянути без VNC
+  POST /auth/manual        ручний вхід у ЗВИЧАЙНОМУ Chrome (без Playwright)
+  POST /auth/manual/finish закрити його і повернути Chrome під Playwright
 
 Сервіс не має БД і не тримає стану між запитами: усе, що переживає рестарт, —
 профіль Chrome у томі. Пошук/збір додаються наступними етапами поверх того ж
@@ -36,7 +38,7 @@ LOGIN_HOW = (
 
 async def health(request: web.Request) -> web.Response:
     browser: Browser = request.app["browser"]
-    return _json({"ok": True, "browser": browser.running})
+    return _json({"ok": True, "browser": browser.running, "manual": browser.manual})
 
 
 async def auth_status(request: web.Request) -> web.Response:
@@ -53,6 +55,21 @@ async def auth_login(request: web.Request) -> web.Response:
     browser: Browser = request.app["browser"]
     url = await browser.open_login()
     return _json({"opened": url, "how_to_login": LOGIN_HOW})
+
+
+async def auth_manual(request: web.Request) -> web.Response:
+    browser: Browser = request.app["browser"]
+    await browser.start_manual()
+    return _json({"manual": True, "how_to_login": LOGIN_HOW + (
+        " Після входу закрий вкладку Chrome (або POST /auth/manual/finish) — "
+        "сервіс сам повернеться до роботи з цим профілем.")})
+
+
+async def auth_manual_finish(request: web.Request) -> web.Response:
+    browser: Browser = request.app["browser"]
+    await browser.finish_manual()
+    state = await browser.check(reload=True)
+    return _json(state.as_dict())
 
 
 async def auth_screenshot(request: web.Request) -> web.Response:
@@ -100,6 +117,8 @@ def make_app(cfg: Config) -> web.Application:
     app.router.add_get("/auth/status", auth_status)
     app.router.add_post("/auth/login", auth_login)
     app.router.add_get("/auth/screenshot", auth_screenshot)
+    app.router.add_post("/auth/manual", auth_manual)
+    app.router.add_post("/auth/manual/finish", auth_manual_finish)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     return app
