@@ -31,8 +31,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from analysis.models import ResearchRun
+from analysis.models import (AnalysisTask, MonitorSample, MonitorSampleJob,
+                             ResearchRun)
 from analysis.pilot.prompts import build_user_prompt
+from django.utils import timezone as djtz
+
 from analysis.services import pipeline_runs
 
 log = logging.getLogger(__name__)
@@ -225,12 +228,63 @@ def _pending(bdir: Path) -> list[Path]:
     return out
 
 
+# --------------------------------------------------------------- автостарт
+
+# Стани запуску, у яких він ще «живий»: поки такий є, нового не створюємо.
+_OPEN = ["collecting", "collected", "awaiting_agent"]
+
+
+def _autostart(task) -> bool:
+    """Створити запуск тегування на вікно, яке зібрали, але ще не тегували.
+
+    Навіщо: вибірковий збір веде своя черга і ResearchRun не створює, а пачки
+    нарізаються тільки в межах запуску. Через це зібрані кандидати стояли на
+    mon_prescreened, поки людина не викличе run_tagging — саме так вересень
+    простояв годину при вже готовому зборі й вільному ранері.
+
+    Вікно береться з ПАСПОРТА вибірки (MonitorSample), а не з календаря: саме
+    за паспортом рахується знаменник частки, тож межі запуску мусять збігатися
+    з межами збору. Інакше чисельник і знаменник будуть з різних періодів.
+
+    Замість порогу «скільки постів накопичилось» — умова «збір цього вікна
+    завершено». Поріг за кількістю відкидав би останні кілька десятків
+    коментарів вікна назавжди; умова за станом збору таких дірок не робить.
+    """
+    if task.mon_collect_source != AnalysisTask.MON_SRC_TG_SAMPLE:
+        return False            # потік TeleZip веде run_create, не ми
+    if ResearchRun.objects.filter(task=task, status__in=_OPEN).exists():
+        return False            # один запуск за раз: два подвоїли б витрати
+    windows = (MonitorSample.objects.filter(task=task)
+               .values_list("period_start", "period_end").distinct()
+               .order_by("period_start"))
+    for d_from, d_to in windows:
+        if ResearchRun.objects.filter(task=task, date_from=d_from,
+                                      date_to=d_to).exists():
+            continue            # це вікно вже тегували (або тегують)
+        if not MonitorSampleJob.objects.filter(
+                task=task, mode=MonitorSampleJob.MODE_COLLECT, status="done",
+                date_from=d_from, date_to=d_to).exists():
+            continue            # збір вікна ще не завершився
+        n = pipeline_runs.taggable_posts(task, d_from, d_to).count()
+        if not n:
+            continue
+        run = ResearchRun.objects.create(
+            task=task, title="тегування вибірки (авто)",
+            date_from=d_from, date_to=d_to,
+            chunk_days=task.collect_chunk_days or 3,
+            status="collected", started_at=djtz.now())
+        log.info("agent_tag: автозапуск #%s для %s %s…%s — %s постів на тегування",
+                 run.id, task.slug, d_from, d_to, n)
+        return True             # по одному вікну за тік
+    return False
+
+
 def mon_agent_tag_once(task) -> bool:
     """Розмітити пачки всіх запусків задачі, що чекають агента.
 
     Контракт run_worker: True — щось зробили (тік не спить).
     """
-    did = False
+    did = _autostart(task)
     for run in (ResearchRun.objects
                 .filter(task=task, status="awaiting_agent").order_by("id")):
         bdir = Path(pipeline_runs.batch_dir(run))

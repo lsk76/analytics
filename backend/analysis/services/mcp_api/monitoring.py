@@ -7,6 +7,7 @@ from django.utils import timezone
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, MonitorSample,
                              MonitorSampleJob, Post, ResearchRubric, ResearchRun, Source,
                              SourceSubscription)
+from analysis.services import pipeline_runs
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
@@ -924,20 +925,9 @@ def _pending_window(task):
 
 
 def _taggable(task, d_from, d_to):
-    """РІВНО той набір, що візьме monitor_prepare_batches --require-prescreen
-    --only-untagged. Ключове: він дивиться не на стадію, а на «прескрін сказав
-    так, а тегів ще немає». Рахувати по стадії mon_prescreened не можна — там
-    висять і вже протеговані пости (хвіст, який лишає _finish), і тоді
-    інструмент обіцяв би 900 постів роботи там, де її нуль."""
-    return (Post.objects.filter(task=task,
-                                posted_at__date__gte=d_from,
-                                posted_at__date__lte=d_to,
-                                classification__has_key="_prescreen",
-                                classification___prescreen__could_be_criticism=True,
-                                tags__isnull=True)
-            .exclude(text="")
-            .exclude(classification__is_filtered=True)
-            .distinct())
+    """Делегат до services.pipeline_runs.taggable_posts — предикат один на всіх
+    (ручний run_tagging і автостарт запуску в agent_runner)."""
+    return pipeline_runs.taggable_posts(task, d_from, d_to)
 
 
 @tool("run_tagging", group="monitoring", mutates=True, params={

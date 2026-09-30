@@ -68,6 +68,26 @@ def _advance(run: ResearchRun) -> bool:
     return False
 
 
+def taggable_posts(task, d_from, d_to):
+    """РІВНО той набір, який візьме monitor_prepare_batches --require-prescreen
+    --only-untagged: прескрін сказав «так», а тегів ще немає.
+
+    Рахувати по стадії mon_prescreened не можна: там висять і вже протеговані
+    пости (хвіст, який лишає _finish), і тоді виходило б «900 постів роботи»
+    там, де її нуль. Живе тут, а не в MCP-шарі, бо тим самим предикатом
+    користуються і ручний run_tagging, і автостарт запуску в agent_runner.
+    """
+    return (Post.objects.filter(task=task,
+                                posted_at__date__gte=d_from,
+                                posted_at__date__lte=d_to,
+                                classification__has_key="_prescreen",
+                                classification___prescreen__could_be_criticism=True,
+                                tags__isnull=True)
+            .exclude(text="")
+            .exclude(classification__is_filtered=True)
+            .distinct())
+
+
 def _window_posts(run: ResearchRun):
     return Post.objects.filter(task=run.task,
                                posted_at__date__gte=run.date_from,
