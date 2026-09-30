@@ -83,6 +83,19 @@ services:
   # ОДНА репліка: два збори в тому самому вікні зіпсували б знаменник частки,
   # а акаунти впали б у FloodWait. Інтервал великий — черга рідка, разова.
   worker-mon-sample:    { <<: *worker, command: python manage.py run_worker --stage mon_sample --interval 60 }
+
+  # Агент-ранер: єдиний крок конвеєра, який раніше робила людина —
+  # розмітка пачок запуску в стані awaiting_agent (services/agent_runner.py).
+  # Бінарника Claude Code в образі немає (він самодостатній, Node не потрібен),
+  # тому монтуємо з хоста; токен приходить із .env через спільний env_file,
+  # особисті ключі НЕ монтуються. volumes перелічені повністю: ключ у сервісі
+  # заміняє список із *worker, а не додається до нього.
+  worker-mon-agent-tag:
+    <<: *worker
+    command: python manage.py run_worker --stage mon_agent_tag --interval 120
+    volumes:
+      - ./backend:/app/backend
+      - ${CLAUDE_BIN_HOST:-/home/deploy-analytics/.local/bin/claude}:/usr/local/bin/claude:ro
   worker-ev-runs:       { <<: *worker, command: python manage.py run_worker --stage ev_runs }
   worker-res-collect:   { <<: *worker, command: python manage.py run_worker --stage res_collect }
   worker-res-filter:    { <<: *worker, command: python manage.py run_worker --stage res_filter }

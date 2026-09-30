@@ -41,8 +41,9 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from analysis.models import AnalysisTask
-from analysis.services import (monitor_stages, pipeline_runs, research_stages,
-                               sample_stage, stages, tgsearch_stages)
+from analysis.services import (agent_runner, monitor_stages, pipeline_runs,
+                               research_stages, sample_stage, stages,
+                               tgsearch_stages)
 
 ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                # гібридні ранери запусків (див. services/pipeline_runs.py):
@@ -54,6 +55,9 @@ ALL_RUNNERS = {**stages.STAGE_RUNNERS, **monitor_stages.STAGE_RUNNERS,
                # вибірковий збір коментарів Telegram-акаунтами (черга
                # MonitorSampleJob, див. services/sample_stage.py)
                **sample_stage.STAGE_RUNNERS,
+               # агент-ранер: awaiting_agent -> *_done.json без людини
+               # (services/agent_runner.py; модель прибита, права вузькі)
+               **agent_runner.STAGE_RUNNERS,
                # research-конвеєр (тематичні дослідження, services/research_stages.py)
                "res_collect": monitor_stages.mon_collect_once,
                "res_filter": research_stages.res_filter_once,
