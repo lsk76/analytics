@@ -3193,13 +3193,18 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                             .annotate(bucket=src.trunc(src.date_field))
                             .values("bucket", "region_subject__name")
                             .annotate(n=Count("id", distinct=True)))
-                for r in num_rows:
-                    t = den.get((r["region_subject__name"], r["bucket"]))
-                    if t:
-                        coverage.append({"date": r["bucket"].isoformat(),
-                                         "region": r["region_subject__name"],
-                                         "pct": round(100.0 * r["n"] / t, 2),
-                                         "n": r["n"], "t": t})
+                num = {(r["region_subject__name"], r["bucket"]): r["n"] for r in num_rows}
+                # Точки віддаємо ПО ЗНАМЕННИКУ, а не по числителю: період без
+                # критики — це 0%, а не пропуск. На добовій сітці вибіркової
+                # задачі нуль подій має майже половина пар (регіон, день), і
+                # якщо їх не віддати, лінія зшивається (spanGaps) між лише
+                # ненульовими значеннями й завищує рівень удвічі.
+                for (reg, bucket), tot in den.items():
+                    if not reg or not tot:
+                        continue
+                    n = num.get((reg, bucket), 0)
+                    coverage.append({"date": bucket.isoformat(), "region": reg,
+                                     "pct": round(100.0 * n / tot, 2), "n": n, "t": tot})
                 coverage.sort(key=lambda x: (x["region"], x["date"]))
 
         # Distribution by reach buckets (vertical bar): how many events fall into
