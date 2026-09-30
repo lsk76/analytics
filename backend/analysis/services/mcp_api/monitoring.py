@@ -1,12 +1,12 @@
 """Моніторинги: задачі, збори (runs), whitelist чатів, джерела інформпростору, зрізи подій."""
 from datetime import timedelta
 
-from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models import Count, Max, Min, Prefetch, Q, Sum
 from django.utils import timezone
 
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, MonitorSample,
-                             MonitorSampleJob, Post, ResearchRubric, ResearchRun, Source,
-                             SourceSubscription)
+                             MonitorSampleJob, Post, ResearchRubric, ResearchRun, Setting,
+                             Source, SourceSubscription)
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
@@ -1364,6 +1364,117 @@ def rubric_delete(ref: str, confirm: bool = False):
     return f"{label}: видалено"
 
 
+# --------------------------------------------------------------------------- джерела
+# Стеля пакетної правки: «вимкни ці 20 джерел» має бути ОДИН виклик, а список
+# на тисячі — помилка в аргументі, а не намір (те саме рішення, що _CHAT_ADD_MAX).
+_SOURCE_BATCH_MAX = 200
+
+
+def _visible_sources():
+    """Джерела, видимі викликачу. Джерело саме по собі нічиє, тож видимість
+    успадковується від підписок: не-суперюзер бачить лише ті, що живлять ЙОГО
+    задачі."""
+    qs = Source.objects.select_related("channel", "channel__region_subject", "tg_account")
+    if not registry.actor().is_superuser:
+        qs = qs.filter(id__in=common.scope_by_task(
+            SourceSubscription.objects.filter(is_active=True)).values("source_id"))
+    return qs
+
+
+def _resolve_sources(ref: str) -> list:
+    """`ref` як список: «12, 13, sfgate» → [Source, …]. Спершу резолвимо ВСІ,
+    і лише потім пишемо — щоб пакет не застосувався наполовину через одну
+    криву назву. Нерозпізнані віддаємо одним списком, а не по одному на виклик."""
+    refs = _split_csv(ref)
+    if not refs:
+        raise ToolError("дай джерело: id, посилання або частина назви; "
+                        "кілька — через кому")
+    if len(refs) > _SOURCE_BATCH_MAX:
+        raise ToolError(f"за раз не більше {_SOURCE_BATCH_MAX} джерел, прийшло {len(refs)}")
+    found, errors, seen = [], [], set()
+    for r in refs:
+        try:
+            s = common.resolve_source(r)
+        except ToolError as e:
+            errors.append(str(e))
+            continue
+        if s.id not in seen:
+            seen.add(s.id)
+            found.append(s)
+    if errors:
+        raise ToolError("нічого не змінено, бо не розпізнано: " + "; ".join(errors))
+    return found
+
+
+def _own_source_or_die(s) -> None:
+    if registry.actor().is_superuser:
+        return
+    if not common.scope_by_task(
+            SourceSubscription.objects.filter(is_active=True, source=s)).exists():
+        raise ToolError(f"джерело #{s.id} не підключене до жодної твоєї задачі — "
+                        "правити його може лише власник або адмін")
+
+
+# --- мережі (холдинги) джерел ------------------------------------------------
+# «Мережа» — редакційний факт (хто кому належить), а не властивість збору, і в
+# схемі БД її свідомо нема: склад мереж змінює оператор рядком у Setting, без
+# міграції й деплою (те саме рішення, що digest_report_prompt).
+
+def _network_map() -> dict:
+    """`Setting source_networks_json` → {"Hearst": ["sfgate.com", "chron.com"]}.
+
+    Патерн збігається з посиланням або @юзернеймом джерела (підрядок).
+    """
+    import json
+    raw = Setting.get("source_networks_json", "")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        raise ToolError(f"Setting source_networks_json — не JSON: {e}")
+    if not isinstance(data, dict):
+        raise ToolError('Setting source_networks_json: очікується {"мережа": ["патерн", …]}')
+    return {str(k): [str(x).strip().lstrip("@").lower() for x in (v or []) if str(x).strip()]
+            for k, v in data.items()}
+
+
+def _networks_or_die() -> dict:
+    nets = _network_map()
+    if not nets:
+        raise ToolError(
+            "мереж джерел не задано. Створи рядок Setting «source_networks_json» "
+            '(значення: {"Hearst": ["sfgate.com", "chron.com"]}) — setting_set або '
+            "/admin/analysis/setting/. Це операторський конфіг, у схемі БД мереж немає.")
+    return nets
+
+
+def _resolve_network(name: str) -> tuple:
+    nets = _networks_or_die()
+    want = str(name).strip().lower()
+    hits = [k for k in nets if k.lower() == want] or [k for k in nets if want in k.lower()]
+    if not hits:
+        raise ToolError(f"мережі «{name}» немає в source_networks_json; є: {', '.join(nets)}")
+    if len(hits) > 1:
+        raise ToolError(f"«{name}» неоднозначне: {', '.join(hits)}")
+    return hits[0], nets[hits[0]]
+
+
+def _network_of(source, nets: dict) -> str:
+    hay = f"{source.url} @{source.channel.username or ''}".lower()
+    for name, pats in nets.items():
+        if any(p and p in hay for p in pats):
+            return name
+    return ""
+
+
+def _network_source_ids(patterns: list) -> list:
+    q = Q(pk__in=[])
+    for p in patterns:
+        q |= Q(channel__url__icontains=p) | Q(channel__username__iexact=p)
+    return list(Source.objects.filter(q).values_list("id", flat=True))
+
+
 @tool("sources_list", group="monitoring", params={
       "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
       "kind": "Тип джерела: telegram | rss | web | vk. Порожньо = усі.",
@@ -1372,14 +1483,9 @@ def rubric_delete(ref: str, confirm: bool = False):
 def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
                  limit: int = 60):
     """Джерела інформпростору: розклад полінгу, health, якість, до яких задач підключені."""
-    qs = (Source.objects.select_related("channel", "channel__region_subject", "tg_account")
+    qs = (_visible_sources()
           .annotate(n_subs=Count("subscriptions", filter=Q(subscriptions__is_active=True)))
           .order_by("kind", "channel__title"))
-    # джерело саме по собі нічиє, тож видимість успадковується від підписок:
-    # не-суперюзер бачить лише ті, що живлять ЙОГО задачі
-    if not registry.actor().is_superuser:
-        qs = qs.filter(id__in=common.scope_by_task(
-            SourceSubscription.objects.filter(is_active=True)).values("source_id"))
     if task:
         t = common.resolve_task(task)
         qs = qs.filter(subscriptions__task=t, subscriptions__is_active=True).distinct()
@@ -1415,49 +1521,189 @@ def sources_list(task: str = "", kind: str = "", problems_only: bool = False,
 
 
 @tool("source_update", group="monitoring", mutates=True, params={
-      "ref": "Джерело: числовий id, частина URL або назви.",
+      "ref": "Джерело: числовий id, частина URL або назви. КІЛЬКА ЧЕРЕЗ КОМУ — одна правка на всіх ('12, 13, sfgate'), стеля 200. Нерозпізнана назва скасовує весь пакет.",
       "is_active": "Увімкнути/вимкнути опитування джерела.",
       "poll_interval_sec": "Інтервал полінгу в секундах (нижня межа 60).",
       "poll_now": "true — поставити джерело в чергу негайно.",
-      "reset_cursor": "true — забути, докуди вже прочитано, і перечитати заново. Може дати вал постів.",
-      "account": "Telegram-акаунт для полінгу (для kind=telegram): id/номер/назва або '-'."})
+      "reset_cursor": "true — забути, докуди вже прочитано, і перечитати заново. Може дати вал постів; на пакеті (>1 джерела) лише з confirm=true.",
+      "account": "Telegram-акаунт для полінгу (для kind=telegram): id/номер/назва або '-'.",
+      "confirm": "Підтвердити скидання курсора на пакеті джерел."})
 def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = None,
                   poll_now: bool = False, reset_cursor: bool = False,
-                  account: str = ""):
-    """Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill)."""
-    s = common.resolve_source(ref)
-    if not registry.actor().is_superuser:
-        mine = common.scope_by_task(
-            SourceSubscription.objects.filter(is_active=True, source=s)).exists()
-        if not mine:
-            raise ToolError(f"джерело #{s.id} не підключене до жодної твоєї задачі — "
-                            "правити його може лише власник або адмін")
-    changed = []
-    if is_active is not None:
-        s.is_active = bool(is_active)
-        changed.append(f"активне={fmt.flag(s.is_active)}")
-    if poll_interval_sec is not None:
-        s.poll_interval_sec = max(60, int(poll_interval_sec))
-        changed.append(f"інтервал={s.poll_interval_sec}с")
-    if poll_now:
-        s.next_poll_at = timezone.now()
-        s.locked_at = None
-        changed.append("полінг «зараз»")
-    if reset_cursor:
-        s.poll_cursor = {}
-        changed.append("курсор скинуто (перечитає заново — може дати вал постів)")
-    if account:
-        if account.strip() in ("-", "none", "нема"):
-            s.tg_account = None
-            changed.append("акаунт відв'язано")
-        else:
-            a = common.resolve_account(account)
-            s.tg_account = a
-            changed.append(f"акаунт=#{a.id} {a.name}")
-    if not changed:
-        return f"#{s.id} {s.name}: нічого не змінено"
-    s.save()
-    return f"#{s.id} {s.name}: " + "; ".join(changed)
+                  account: str = "", confirm: bool = False):
+    """Змінити джерело (або ПАКЕТ джерел): активність, інтервал, «опитати зараз»,
+    скидання курсора (backfill).
+
+    `ref` приймає список через кому — «вимкнути ці 20 джерел» це один виклик,
+    а не двадцять. Спершу резолвиться весь список (крива назва = нічого не
+    змінено), потім застосовується однакова правка.
+    """
+    sources = _resolve_sources(ref)
+    for s in sources:
+        _own_source_or_die(s)
+    if reset_cursor and len(sources) > 1 and not confirm:
+        raise ToolError(f"reset_cursor на {len(sources)} джерелах перечитає їх з нуля "
+                        "(вал постів і робота скріну) — повтори з confirm=true")
+    acc = None
+    if account and account.strip() not in ("-", "none", "нема"):
+        acc = common.resolve_account(account)
+    rows, changed_any = [], False
+    for s in sources:
+        changed = []
+        if is_active is not None:
+            s.is_active = bool(is_active)
+            changed.append(f"активне={fmt.flag(s.is_active)}")
+        if poll_interval_sec is not None:
+            s.poll_interval_sec = max(60, int(poll_interval_sec))
+            changed.append(f"інтервал={s.poll_interval_sec}с")
+        if poll_now:
+            s.next_poll_at = timezone.now()
+            s.locked_at = None
+            changed.append("полінг «зараз»")
+        if reset_cursor:
+            s.poll_cursor = {}
+            changed.append("курсор скинуто (перечитає заново — може дати вал постів)")
+        if account:
+            if acc is None:
+                s.tg_account = None
+                changed.append("акаунт відв'язано")
+            else:
+                s.tg_account = acc
+                changed.append(f"акаунт=#{acc.id} {acc.name}")
+        if changed:
+            s.save()
+            changed_any = True
+        rows.append([f"#{s.id}", fmt.trunc(s.name, 34),
+                     "; ".join(changed) or "нічого не змінено"])
+    if len(rows) == 1:
+        return f"#{sources[0].id} {sources[0].name}: {rows[0][2]}"
+    return fmt.joinsec(
+        fmt.section(f"Джерел змінено: {len(rows)}" if changed_any else "Нічого не змінено",
+                    fmt.table(["id", "джерело", "що зроблено"], rows)))
+
+
+@tool("source_stats", group="monitoring", params={
+      "task": "Задача (id/slug/назва — лише своя). Порожньо = усі свої.",
+      "days": "Останні N днів за датою поста. Ігнорується, якщо задано date_from/date_to.",
+      "date_from": "Пости від, YYYY-MM-DD.",
+      "date_to": "Пости до, YYYY-MM-DD.",
+      "kind": "Тип джерела: telegram | rss | web | vk. Порожньо = усі.",
+      "source": "Один конкретний ref джерела (id/посилання/назва) — решту не рахувати.",
+      "network": "Лише джерела мережі (Setting source_networks_json).",
+      "min_posts": "Не показувати джерела, де постів менше за це.",
+      "order": "posts (дефолт) | events | sole | name.",
+      "limit": "Скільки джерел показати."})
+def source_stats(task: str = "", days: int = 30, date_from: str = "", date_to: str = "",
+                 kind: str = "", source: str = "", network: str = "", min_posts: int = 0,
+                 order: str = "posts", limit: int = 40):
+    """Внесок КОЖНОГО джерела за період: постів зібрано, скільки з них дали подію,
+    скільки подій, і скільки з тих подій тримається ЛИШЕ на ньому.
+
+    Відповідає на «чи варте це джерело полінгу» без читання карток руками.
+    «лише його» = подія, у якої ВСІ пости з цього джерела (і жодного поста без
+    джерела) — рахується по всіх постах події, а не лише по тих, що у вікні.
+    Працює для будь-якого типу (rss/web/telegram), бо групує по `Post.source`,
+    а не по @юзернейму каналу.
+    """
+    t = common.resolve_task(task) if task else None
+    srcs = _visible_sources()
+    if t is not None:
+        # лише підписані джерела: інакше «Джерела: 662» для задачі, у якої їх 233
+        srcs = srcs.filter(subscriptions__task=t, subscriptions__is_active=True).distinct()
+    if kind:
+        if kind not in dict(Source.KIND_CHOICES):
+            raise ToolError(f"kind: {', '.join(dict(Source.KIND_CHOICES))}")
+        srcs = srcs.filter(kind=kind)
+    if source:
+        srcs = srcs.filter(pk=common.resolve_source(source).pk)
+    net_name = ""
+    if network:
+        net_name, pats = _resolve_network(network)
+        ids = _network_source_ids(pats)
+        if not ids:
+            raise ToolError(f"мережа «{net_name}»: жодне джерело не підпадає під патерни "
+                            f"{', '.join(pats) or '—'}")
+        srcs = srcs.filter(pk__in=ids)
+    by_id = {s.id: s for s in srcs}
+    if not by_id:
+        return "джерел за цим фільтром немає"
+
+    posts = common.scope_by_task(Post.objects.filter(source_id__in=by_id))
+    desc = []
+    if t is not None:
+        posts, desc = posts.filter(task=t), desc + [f"задача {t.slug}"]
+    if date_from or date_to:
+        if date_from:
+            posts = posts.filter(posted_at__date__gte=common.parse_date(date_from, "date_from"))
+        if date_to:
+            posts = posts.filter(posted_at__date__lte=common.parse_date(date_to, "date_to"))
+        desc.append(f"період {date_from or '…'} … {date_to or '…'}")
+    elif days:
+        since = timezone.now() - timedelta(days=max(1, int(days)))
+        posts, desc = posts.filter(posted_at__gte=since), desc + [f"за {days} дн"]
+    if net_name:
+        desc.append(f"мережа {net_name}")
+
+    agg = {r["source_id"]: r for r in posts.order_by().values("source_id").annotate(
+        n=Count("id"), n_ev_posts=Count("event_id"),
+        n_events=Count("event_id", distinct=True))}
+    # «лише його» — властивість ПОДІЇ (усі її пости з одного джерела), тож
+    # distinct-джерела рахуємо по всіх постах цих подій, а не по вікну.
+    sole = {r["source_id"]: r["n"] for r in posts.filter(
+        event_id__in=_sole_event_ids(posts)).order_by().values("source_id").annotate(
+            n=Count("event_id", distinct=True))}
+    nets = _network_map()
+    rows = []
+    for sid, s in by_id.items():
+        a = agg.get(sid) or {}
+        n = a.get("n", 0)
+        if n < max(0, int(min_posts)):
+            continue
+        rows.append([sid, s, n, a.get("n_ev_posts", 0), a.get("n_events", 0), sole.get(sid, 0)])
+    key = {"posts": lambda r: -r[2], "events": lambda r: -r[4], "sole": lambda r: -r[5],
+           "name": lambda r: r[1].name.lower()}.get(order)
+    if not key:
+        raise ToolError("order: posts | events | sole | name")
+    rows.sort(key=lambda r: r[1].name.lower())   # рівні за метрикою — за алфавітом
+    rows.sort(key=key)
+    shown = rows[:limit]
+    head = ["id", "тип", "акт", "джерело"] + (["мережа"] if nets else []) + [
+        "постів", "з подією", "%", "подій", "лише його"]
+    table = []
+    for sid, s, n, n_ev_posts, n_events, n_sole in shown:
+        row = [f"#{sid}", s.kind, fmt.flag(s.is_active), fmt.trunc(s.name, 30)]
+        if nets:
+            row.append(_network_of(s, nets) or "—")
+        row += [n, n_ev_posts, fmt.pct(n_ev_posts, n), n_events, n_sole]
+        table.append(row)
+    total_posts = sum(r[2] for r in rows)
+    total_ev = posts.exclude(event_id=None).values("event_id").distinct().count()
+    total_sole = posts.filter(event_id__in=_sole_event_ids(posts)) \
+        .values("event_id").distinct().count()
+    return fmt.joinsec(
+        fmt.section(f"Джерела: {len(rows)} (показано {len(shown)})",
+                    "; ".join(desc) or "без фільтрів"),
+        fmt.table(head, table) if table else "нічого не знайдено",
+        fmt.kv([("постів усього", total_posts),
+                ("подій торкнулись", total_ev),
+                ("з них тримаються на одному джерелі", f"{total_sole} "
+                 f"({fmt.pct(total_sole, total_ev)})")]),
+        "Ті самі події списком: events_list(source=<ref>, uniq=sole_source).")
+
+
+def _sole_event_ids(posts_qs=None):
+    """Підзапит «події, у яких УСІ пости з одного джерела».
+
+    Подія з хоч одним постом без джерела (TeleZip-конвеєри) сюди не потрапляє —
+    інакше «унікальне» означало б «ми не знаємо, звідки решта».
+    """
+    qs = Post.objects.filter(event__isnull=False)
+    if posts_qs is not None:
+        qs = qs.filter(event_id__in=posts_qs.exclude(event_id=None).values("event_id"))
+    return (qs.order_by().values("event_id")
+            .annotate(ns=Count("source_id", distinct=True),
+                      no_source=Count("id", filter=Q(source__isnull=True)))
+            .filter(ns=1, no_source=0).values("event_id"))
 
 
 @tool("events_stats", group="monitoring", params={
@@ -1527,7 +1773,10 @@ EVENT_FILTER_DOCS = {
     "settlement": "Населений пункт (частина назви).",
     "tag": "Теги: `категорія:тег` або просто `тег`; кілька через кому = ВСІ мають бути (як фасети в адмінці). Категорії: tag_categories або task_show.",
     "query": "Текст в описі події (icontains).",
-    "channel": "@username каналу/джерела, який писав про подію (фільтр «Канал/Джерело»).",
+    "channel": "Канал/джерело, який писав про подію: @username, домен, частина назви або #id довідника (для rss/web теж, не лише Telegram).",
+    "source": "Джерело інформпростору (`Source`): id, посилання або частина назви. Точніше за channel, коли джерел кілька на один домен.",
+    "network": "Мережа/холдинг джерел (склад — Setting source_networks_json): події, про які писало хоч одне джерело мережі.",
+    "uniq": "Унікальність (порожньо = не фільтрувати): sole_post — подія з одного поста; sole_channel — один канал; sole_source — усі пости з ОДНОГО джерела; sole_network — усі пости з однієї мережі.",
     "min_channels": "Мінімум унікальних каналів події (фільтр «Кількість каналів»). 0 = без обмеження.",
     "min_reach": "Мінімальне охоплення. 0 = без обмеження.",
 }
@@ -1535,7 +1784,7 @@ EVENT_FILTER_DOCS = {
 
 def _event_filters(task="", days=0, date_from="", date_to="", review_status="approved",
                    region="", settlement="", tag="", query="", channel="",
-                   min_channels=0, min_reach=0):
+                   min_channels=0, min_reach=0, source="", network="", uniq=""):
     """Спільний набір фільтрів для events_list/events_stats — дзеркало
     list_filter адмінки подій (Період, Свіжість, Дослідження, Статус аудиту,
     Субʼєкт РФ, фасети тегів, Канал/Джерело, Кількість каналів, Охоплення)."""
@@ -1572,13 +1821,79 @@ def _event_filters(task="", days=0, date_from="", date_to="", review_status="app
     if query:
         qs, desc = qs.filter(summary__icontains=query), desc + [f"текст ~{query}"]
     if channel:
-        qs = qs.filter(posts__channel__username__iexact=channel.lstrip("@"))
-        desc.append(f"канал @{channel.lstrip('@')}")
+        # @username працює лише для Telegram; rss/web-джерело інакше не
+        # відфільтрувати взагалі — тому домен/назва/#id теж приймаються.
+        ref = channel.strip()
+        if ref.lstrip("#").isdigit():
+            qs = qs.filter(posts__channel_id=common.as_int(ref, "channel"))
+        else:
+            name = ref.lstrip("@")
+            qs = qs.filter(Q(posts__channel__username__iexact=name)
+                           | Q(posts__channel__url__icontains=name)
+                           | Q(posts__channel__title__icontains=name)
+                           | Q(posts__channel_name__icontains=name))
+        desc.append(f"канал/джерело ~{ref}")
+    if source:
+        src = common.resolve_source(source)
+        qs, desc = qs.filter(posts__source=src), desc + [f"джерело #{src.id} {src.name}"]
+    if network:
+        net_name, pats = _resolve_network(network)
+        ids = _network_source_ids(pats)
+        if not ids:
+            raise ToolError(f"мережа «{net_name}»: жодне джерело не підпадає під патерни "
+                            f"{', '.join(pats) or '—'}")
+        qs, desc = qs.filter(posts__source_id__in=ids), desc + [f"мережа {net_name}"]
     if min_channels:
         qs, desc = qs.filter(channel_count__gte=int(min_channels)), desc + [f"каналів ≥{min_channels}"]
     if min_reach:
         qs, desc = qs.filter(reach__gte=int(min_reach)), desc + [f"охоплення ≥{min_reach}"]
+    if uniq:
+        qs, desc = _filter_uniq(qs, uniq), desc + [f"унікальність {uniq}"]
     return qs.distinct(), desc
+
+
+# Скільки подій ще можна перебрати в памʼяті для uniq=sole_network: мережу не
+# порахувати в SQL (її склад — патерни з Setting), тож або вузьке вікно, або
+# чесна відмова замість тихого «зависло».
+_UNIQ_NETWORK_MAX = 20000
+
+
+def _filter_uniq(qs, mode: str):
+    """Серверний прапорець «унікальність»: подію не підтверджує ніхто інший."""
+    mode = str(mode).strip().lower()
+    if mode in ("sole_post", "1post"):
+        return qs.filter(post_count__lte=1)
+    if mode in ("sole_channel", "1channel"):
+        return qs.filter(channel_count__lte=1)
+    if mode in ("sole_source", "1source"):
+        return qs.filter(id__in=_sole_event_ids())
+    if mode in ("sole_network", "1network"):
+        return qs.filter(id__in=_sole_network_event_ids(qs))
+    raise ToolError("uniq: sole_post | sole_channel | sole_source | sole_network")
+
+
+def _sole_network_event_ids(qs) -> list:
+    """Події, усі пости яких — з джерел ОДНІЄЇ мережі.
+
+    Джерело поза мережами (і пост без джерела) вважається окремим «власником»,
+    тож змішана подія сюди не потрапляє.
+    """
+    nets = _networks_or_die()
+    owner = {}
+    for src in Source.objects.select_related("channel"):
+        owner[src.id] = _network_of(src, nets)
+    n = qs.count()
+    if n > _UNIQ_NETWORK_MAX:
+        raise ToolError(f"uniq=sole_network рахується в памʼяті, а під фільтр підпадає "
+                        f"{n} подій (стеля {_UNIQ_NETWORK_MAX}) — звузь задачу/період")
+    seen = {}
+    pairs = Post.objects.filter(event_id__in=qs.values("id")) \
+        .order_by().values_list("event_id", "source_id").distinct()
+    for ev, sid in pairs.iterator():
+        net = owner.get(sid) if sid else ""
+        seen.setdefault(ev, set()).add(("net", net) if net else ("src", sid))
+    return [ev for ev, owners in seen.items()
+            if len(owners) == 1 and next(iter(owners))[0] == "net"]
 
 
 def _tags_short(ev, n=6):
@@ -1588,13 +1903,15 @@ def _tags_short(ev, n=6):
 @tool("events_list", group="monitoring", params={**EVENT_FILTER_DOCS,
       "order": "newest (дефолт) | oldest | reach | channels.",
       "limit": "Скільки подій показати.",
-      "full": "true — картки з ПОВНИМ описом, усіма тегами й посиланням на пост замість таблиці з обрізаними полями (не треба потім кликати event_show на кожну).",
-      "chars": "У режимі full: скільки символів опису на подію (0 = без обрізання). Дефолт 1200 — щоб 30 подій не з'їли весь контекст."})
+      "full": "true — картки з ПОВНИМ описом, усіма тегами й ПОСИЛАННЯМИ на пости замість таблиці з обрізаними полями (не треба потім кликати event_show на кожну).",
+      "chars": "У режимі full: скільки символів опису на подію (0 = без обрізання). Дефолт 1200 — щоб 30 подій не з'їли весь контекст.",
+      "post_links": "У режимі full: скільки посилань на пости показати під кожною подією (0 = без посилань). Дефолт 5, решта — в event_show."})
 def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: str = "",
                 review_status: str = "approved", region: str = "", settlement: str = "",
                 tag: str = "", query: str = "", channel: str = "", min_channels: int = 0,
-                min_reach: int = 0, order: str = "newest", limit: int = 30,
-                full: bool = False, chars: int = 1200):
+                min_reach: int = 0, source: str = "", network: str = "", uniq: str = "",
+                order: str = "newest", limit: int = 30,
+                full: bool = False, chars: int = 1200, post_links: int = 5):
     """Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,
     регіон, теги (фасети), канал, кількість каналів, охоплення.
 
@@ -1610,7 +1927,8 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
     """
     from django.db.models import OuterRef, Subquery
     qs, desc = _event_filters(task, days, date_from, date_to, review_status, region,
-                              settlement, tag, query, channel, min_channels, min_reach)
+                              settlement, tag, query, channel, min_channels, min_reach,
+                              source=source, network=network, uniq=uniq)
     ordering = {"newest": ("-event_date", "-id"), "oldest": ("event_date", "id"),
                 "reach": ("-reach", "-id"), "channels": ("-channel_count", "-id")}.get(order)
     if not ordering:
@@ -1625,10 +1943,17 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
     picked = list(qs.select_related("task", "region_subject").prefetch_related("tags")
                   .order_by(*ordering)[:limit])
     if full:
+        if post_links:
+            picked = list(Event.objects.filter(
+                id__in=[e.id for e in picked]).select_related("task", "region_subject")
+                .prefetch_related("tags", Prefetch("posts", queryset=Post.objects
+                                                   .select_related("channel")
+                                                   .order_by("posted_at", "id")))
+                .annotate(head_post_id=Subquery(head_post)).order_by(*ordering))
         return fmt.joinsec(
             fmt.section(f"Події: {total} (показано {len(picked)}, повні описи)",
                         "; ".join(desc) or "без фільтрів"),
-            *(_event_card(e, chars) for e in picked),
+            *(_event_card(e, chars, post_links) for e in picked),
             "" if picked else "нічого не знайдено")
     rows = []
     for e in picked:
@@ -1646,26 +1971,48 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
         fmt.section(f"Події: {total} (показано {len(rows)})", "; ".join(desc) or "без фільтрів"),
         fmt.table(headers, rows) if rows else "нічого не знайдено",
         "Фільтри: days/date_from/date_to, review_status, region, settlement, tag (кат:тег, кома = І), "
-        "query, channel, min_channels, min_reach; order=newest|oldest|reach|channels. "
-        "Повні описи одразу: full=true.")
+        "query, channel (будь-який тип джерела), source, network, uniq (sole_post|sole_channel|"
+        "sole_source|sole_network), min_channels, min_reach; order=newest|oldest|reach|channels. "
+        "Повні описи з посиланнями на пости: full=true. Внесок джерел: source_stats.")
 
 
-def _event_card(e, chars: int = 1200) -> str:
+def _event_card(e, chars: int = 1200, post_links: int = 5) -> str:
     """Подія повністю, без обрізання полів — для `events_list(full=true)`."""
     text = e.summary or ""
     if chars and len(text) > chars:
         text = text[:chars] + f"\n… обрізано, усього {len(text)} симв (chars=0 — без обрізання)"
     where = " / ".join(x for x in [(e.region_subject.name if e.region_subject_id else e.region),
                                    e.settlement] if x) or "—"
+    mark = " · 🔸єдиний пост" if (e.post_count or 0) <= 1 else (
+        " · 🔸один канал" if (e.channel_count or 0) <= 1 else "")
     return fmt.section(
-        f"Подія #{e.id} · {e.event_date or '—'} · {e.task.slug}",
+        f"Подія #{e.id} · {e.event_date or '—'} · {e.task.slug}{mark}",
         fmt.kv([
             ("аудит", e.review_status + (f" · {fmt.trunc(e.review_notes, 90)}" if e.review_notes else "")),
             ("де", where),
             ("теги", ", ".join(f"{t.category}:{t.name}" for t in e.tags.all()) or "—"),
             ("постів/каналів/охоплення", f"{e.post_count}/{e.channel_count}/{e.reach}"),
             ("пост", f"#{e.head_post_id} (post_show)" if getattr(e, "head_post_id", None) else "—"),
-        ]) + "\n" + (text or "(без опису)"))
+        ]) + _post_links(e, post_links) + "\n" + (text or "(без опису)"))
+
+
+def _post_links(e, n: int = 5) -> str:
+    """Посилання на пости події просто в картці — щоб не кликати `event_show`
+    на кожну подію лише за URL-ами (найдорожча звичка агентів)."""
+    if not n:
+        return ""
+    posts = list(e.posts.all())[:int(n)]
+    if not posts:
+        return ""
+    lines = []
+    for p in posts:
+        who = p.channel_name or (p.channel.title if p.channel_id else "") or "—"
+        lines.append(f"  {p.url}  ← #{p.id} {fmt.trunc(who, 28)} "
+                     f"{str(p.posted_at)[:10] if p.posted_at else ''}".rstrip())
+    more = (e.post_count or 0) - len(posts)
+    if more > 0:
+        lines.append(f"  … ще {more} постів (event_show)")
+    return "\nпости:\n" + "\n".join(lines)
 
 
 @tool("event_show", group="monitoring", params={"ref": "id події (з events_list)."})
@@ -2146,37 +2493,48 @@ def _guess_kind(url: str) -> str:
 
 
 @tool("source_subscribe", group="monitoring", mutates=True, params={
-      "ref": "Джерело: id, посилання або частина назви.",
+      "ref": "Джерело: id, посилання або частина назви. КІЛЬКА ЧЕРЕЗ КОМУ — одна дія на всіх, стеля 200. Нерозпізнана назва скасовує весь пакет.",
       "task": "Задача (id/slug/назва — лише своя).",
       "active": "true — підписати/увімкнути; false — вимкнути підписку (історія лишається).",
       "priority": "Пріоритет підписки (менше = вище). 0 = не змінювати."})
 def source_subscribe(ref: str, task: str, active: bool = True, priority: int = 0):
-    """Підписати infospace-задачу на джерело (або вимкнути підписку).
+    """Підписати infospace-задачу на джерело (або вимкнути підписку) — одне або ПАКЕТ.
 
     Лише конвеєр infospace. Підписка робить джерело «робочим» для info_collect.
-    Вимкнення не видаляє ні джерело, ні зібране.
+    Вимкнення не видаляє ні джерело, ні зібране. `ref` приймає список через кому:
+    «відключити ці 20 джерел від задачі» = один виклик.
     """
-    src = common.resolve_source(ref)
+    sources = _resolve_sources(ref)
     t = common.resolve_task(task)
     if t.pipeline != AnalysisTask.PIPELINE_INFOSPACE:
         raise ToolError(
             f"{t.slug} — конвеєр {t.pipeline}, підписка на джерело лише для infospace. "
             + _PIPELINE_HOW.get(t.pipeline, ""))
-    sub, created = SourceSubscription.objects.get_or_create(
-        task=t, source=src, defaults={"is_active": bool(active)})
-    changed = []
-    if not created and sub.is_active != bool(active):
-        sub.is_active = bool(active)
-        changed.append("is_active")
-    if priority:
-        sub.priority = int(priority)
-        changed.append("priority")
-    if changed:
-        sub.save(update_fields=changed)
-    state = "активна" if sub.is_active else "вимкнена"
-    return (f"підписка {t.slug} → #{src.id} {src.name}: "
-            f"{'створено' if created else ('оновлено' if changed else 'без змін')}, "
-            f"{state}, пріоритет {sub.priority}")
+    rows, tally = [], {"створено": 0, "оновлено": 0, "без змін": 0}
+    for src in sources:
+        sub, created = SourceSubscription.objects.get_or_create(
+            task=t, source=src, defaults={"is_active": bool(active)})
+        changed = []
+        if not created and sub.is_active != bool(active):
+            sub.is_active = bool(active)
+            changed.append("is_active")
+        if priority:
+            sub.priority = int(priority)
+            changed.append("priority")
+        if changed:
+            sub.save(update_fields=changed)
+        what = "створено" if created else ("оновлено" if changed else "без змін")
+        tally[what] += 1
+        rows.append([f"#{src.id}", fmt.trunc(src.name, 34), what,
+                     "активна" if sub.is_active else "вимкнена", sub.priority])
+    if len(rows) == 1:
+        src, r = sources[0], rows[0]
+        return (f"підписка {t.slug} → #{src.id} {src.name}: {r[2]}, {r[3]}, "
+                f"пріоритет {r[4]}")
+    return fmt.joinsec(
+        fmt.section(f"Підписки {t.slug}: {len(rows)} джерел",
+                    ", ".join(f"{k} {v}" for k, v in tally.items() if v)),
+        fmt.table(["id", "джерело", "дія", "стан", "пріор."], rows))
 
 
 @tool("task_create", group="monitoring", mutates=True, scope=SCOPE_CREATE, params={

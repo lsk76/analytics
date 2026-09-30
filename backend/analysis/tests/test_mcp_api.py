@@ -983,3 +983,138 @@ def test_chat_add_batch():
     with pytest.raises(ToolError, match="не більше"):
         mcp_api.call("chat_add", {"task": "mon-batch",
                                   "channel": ",".join(f"@c{i}" for i in range(301))})
+
+
+# --- джерела: внесок і пакетні правки ---------------------------------------
+
+@pytest.fixture
+def infospace_events():
+    """Дві події: одну підтверджують два джерела, другу — лише одне (унікальна)."""
+    from analysis.models import Event, Post
+    task = TaskFactory(slug="inf-stats")
+    a = SourceFactory(name="Альфа", url="https://alpha.example/feed.xml")
+    b = SourceFactory(name="Бета", url="https://beta.example/feed.xml")
+    SubscriptionFactory(task=task, source=a)
+    SubscriptionFactory(task=task, source=b)
+    shared = Event.objects.create(task=task, event_date=timezone.now().date(),
+                                  summary="спільний сюжет", post_count=2, channel_count=2,
+                                  review_status=Event.REVIEW_APPROVED)
+    only_a = Event.objects.create(task=task, event_date=timezone.now().date(),
+                                  summary="тільки альфа", post_count=1, channel_count=1,
+                                  review_status=Event.REVIEW_APPROVED)
+    now = timezone.now()
+    Post.objects.create(task=task, source=a, channel=a.channel, event=shared, stage="done",
+                        url="https://alpha.example/1", text="раз", posted_at=now)
+    Post.objects.create(task=task, source=b, channel=b.channel, event=shared, stage="done",
+                        url="https://beta.example/1", text="два", posted_at=now)
+    Post.objects.create(task=task, source=a, channel=a.channel, event=only_a, stage="done",
+                        url="https://alpha.example/2", text="три", posted_at=now)
+    # пост без події — у «постів» рахується, у «з подією» ні
+    Post.objects.create(task=task, source=b, stage="info_collected",
+                        url="https://beta.example/2", text="чотири", posted_at=now)
+    return task, a, b, shared, only_a
+
+
+def test_source_stats_counts_posts_events_and_unique(infospace_events):
+    task, a, b, shared, only_a = infospace_events
+    out = mcp_api.call("source_stats", {"task": task.slug})
+    rows = {line.split()[0]: line.split() for line in out.splitlines()
+            if line.startswith("#")}
+    # Альфа: 2 поста, 2 з подією, 2 події, 1 «лише його»
+    assert rows[f"#{a.id}"][-4:] == ["2", "100%", "2", "1"]
+    # Бета: 2 поста, лише 1 з подією, 1 подія, унікальних нема
+    assert rows[f"#{b.id}"][-4:] == ["1", "50%", "1", "0"]
+    assert "подій торкнулись" in out and "тримаються на одному джерелі" in out
+    # фільтр по одному джерелу й сортування не падають
+    solo = mcp_api.call("source_stats", {"task": task.slug, "source": str(a.id),
+                                        "order": "sole"})
+    assert f"#{a.id}" in solo and f"#{b.id}" not in solo
+    with pytest.raises(ToolError, match="order"):
+        mcp_api.call("source_stats", {"order": "по-настрою"})
+
+
+def test_events_list_uniqueness_and_source_filter(infospace_events):
+    task, a, b, shared, only_a = infospace_events
+    # «лише одне джерело» — серверний прапорець, а не вгадування з тексту
+    out = mcp_api.call("events_list", {"task": task.slug, "uniq": "sole_source"})
+    assert "тільки альфа" in out and "спільний сюжет" not in out
+    assert "сole" not in out  # без описок у підказці
+    # один пост / один канал
+    assert "тільки альфа" in mcp_api.call("events_list", {"task": task.slug,
+                                                          "uniq": "sole_post"})
+    assert "тільки альфа" in mcp_api.call("events_list", {"task": task.slug,
+                                                          "uniq": "sole_channel"})
+    # джерело як фільтр: rss-джерело не мало @username, тому раніше не фільтрувалось
+    assert "спільний сюжет" in mcp_api.call("events_list", {"task": task.slug,
+                                                            "source": str(b.id)})
+    assert "тільки альфа" not in mcp_api.call("events_list", {"task": task.slug,
+                                                               "source": str(b.id)})
+    assert "спільний сюжет" in mcp_api.call("events_list", {"task": task.slug,
+                                                            "channel": "beta.example"})
+    with pytest.raises(ToolError, match="uniq"):
+        mcp_api.call("events_list", {"task": task.slug, "uniq": "єдиний"})
+
+
+def test_events_list_full_gives_post_links(infospace_events):
+    task, a, b, shared, only_a = infospace_events
+    out = mcp_api.call("events_list", {"task": task.slug, "full": True})
+    assert "пости:" in out
+    assert "https://alpha.example/1" in out and "https://beta.example/1" in out
+    assert "🔸єдиний пост" in out                      # маркер унікальності в шапці
+    off = mcp_api.call("events_list", {"task": task.slug, "full": True, "post_links": 0})
+    assert "https://alpha.example/1" not in off
+
+
+def test_events_list_network_needs_setting(infospace_events):
+    task, a, b, shared, only_a = infospace_events
+    with pytest.raises(ToolError, match="source_networks_json"):
+        mcp_api.call("events_list", {"task": task.slug, "network": "Hearst"})
+    Setting.objects.create(key="source_networks_json",
+                           value='{"Hearst": ["alpha.example", "beta.example"]}')
+    out = mcp_api.call("events_list", {"task": task.slug, "network": "hearst"})
+    assert "спільний сюжет" in out and "тільки альфа" in out
+    # обидві події цілком у межах однієї мережі
+    sole = mcp_api.call("events_list", {"task": task.slug, "uniq": "sole_network"})
+    assert "спільний сюжет" in sole and "тільки альфа" in sole
+    # джерело поза мережею робить подію змішаною
+    Setting.objects.filter(key="source_networks_json").update(
+        value='{"Hearst": ["alpha.example"]}')
+    sole = mcp_api.call("events_list", {"task": task.slug, "uniq": "sole_network"})
+    assert "тільки альфа" in sole and "спільний сюжет" not in sole
+    assert "мережа" in mcp_api.call("source_stats", {"task": task.slug})
+    with pytest.raises(ToolError, match="немає в source_networks_json"):
+        mcp_api.call("events_list", {"task": task.slug, "network": "Gannett"})
+
+
+def test_source_update_applies_to_whole_batch():
+    a, b = SourceFactory(name="Перше"), SourceFactory(name="Друге")
+    out = mcp_api.call("source_update", {"ref": f"{a.id}, {b.id}", "is_active": False})
+    a.refresh_from_db(), b.refresh_from_db()
+    assert a.is_active is False and b.is_active is False
+    assert "Джерел змінено: 2" in out
+    # скидання курсора на пакеті — лише з confirm (перечитає все з нуля)
+    with pytest.raises(ToolError, match="confirm=true"):
+        mcp_api.call("source_update", {"ref": f"{a.id},{b.id}", "reset_cursor": True})
+    mcp_api.call("source_update", {"ref": f"{a.id},{b.id}", "reset_cursor": True,
+                                   "confirm": True})
+    # крива назва в списку не змінює НІЧОГО (пакет або весь, або ніякий)
+    with pytest.raises(ToolError, match="нічого не змінено"):
+        mcp_api.call("source_update", {"ref": f"{a.id}, такого-нема", "is_active": True})
+    a.refresh_from_db()
+    assert a.is_active is False
+    with pytest.raises(ToolError, match="не більше 200"):
+        mcp_api.call("source_update", {"ref": ",".join(str(i) for i in range(201)),
+                                       "is_active": True})
+
+
+def test_source_subscribe_batch_switches_many_off():
+    task = TaskFactory(slug="inf-batch")
+    srcs = [SourceFactory(name=f"Дж {i}") for i in range(3)]
+    refs = ", ".join(str(s.id) for s in srcs)
+    out = mcp_api.call("source_subscribe", {"ref": refs, "task": "inf-batch"})
+    assert "створено 3" in out
+    off = mcp_api.call("source_subscribe", {"ref": refs, "task": "inf-batch",
+                                           "active": False})
+    assert "оновлено 3" in off
+    assert not Source.objects.get(pk=srcs[0].pk).subscriptions.filter(
+        task=task, is_active=True).exists()

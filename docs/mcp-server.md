@@ -332,7 +332,9 @@ TeleZip (`tz_*`) акаунта не використовує.
 **Списки віддають зміст, а не лише id.** `events_list(full=true)` і
 `posts_list(full=true)` замість таблиці з обрізаними полями віддають картки з
 повним описом/текстом, усіма тегами, посиланням і класифікацією — щоб не
-кликати `event_show`/`post_show` на кожен рядок. `chars` обмежує текст на запис
+кликати `event_show`/`post_show` на кожен рядок. `events_list(full=true)` дає
+ще й ПОСИЛАННЯ на пости події (до `post_links`, дефолт 5) — ходити в кожну
+подію лише за URL-ами не треба. `chars` обмежує текст на запис
 (дефолт 1200/1500, `0` = без обрізання), бо 30 повних подій інакше з'їдають
 контекст.
 
@@ -424,11 +426,12 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `rubric_update` **[пише]** | змінити рубрику | ref, tag_category, tag_name, keywords, extra_prompt, is_active, order |
 | `rubric_delete` **[пише]** | видалити рубрику (`confirm=true`) | ref, confirm |
 | `sources_list` | джерела інформпростору: розклад, health, якість | task='', kind='', problems_only=False, limit=60 |
-| `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account |
+| `source_stats` | **внесок кожного джерела** за період: постів, скільки дали подію (%), подій, скільки подій тримається ЛИШЕ на ньому. Групує по `Post.source`, тож працює для rss/web так само, як для telegram | task, days=30, date_from, date_to, kind, source, network, min_posts, order=posts&#124;events&#124;sole&#124;name, limit=40 |
+| `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора. `ref` приймає СПИСОК через кому (стеля 200) — «вимкнути ці 20 джерел» це один виклик | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account, confirm |
 | `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |
-| `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет | ref, task, active=True, priority=0 |
+| `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет; `ref` приймає СПИСОК через кому (стеля 200) | ref, task, active=True, priority=0 |
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
-| `events_list` | список подій із фільтрами адмінки`full=true` — повні описи, усі теги й посилання на пост замість таблиці з обрізаними полями; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, min_channels, min_reach, order, limit=30, full, chars |
+| `events_list` | список подій із фільтрами адмінки; `full=true` — повні описи, усі теги й ПОСИЛАННЯ на пости замість таблиці з обрізаними полями; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, source, network, uniq, min_channels, min_reach, order, limit=30, full, chars, post_links=5 |
 | `event_show` | картка події: id, опис, регіон, теги, аудит, пости-джерела з id поста | ref |
 | `posts_list` | зібрані пости задачі: id, стадія, релевантність, подія, уривок. Потрібен task, event або posts | task, event, posts, stage, days=14, date_from, date_to, relevant, has_event, query, limit=20 |
 | `post_show` | картка поста: текст, класифікація, помилка стадії, теги, посилання | ref |
@@ -449,6 +452,38 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language |
 | `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус, **аудиторія** | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems, subscribers, audience_note |
 
+### Унікальність і мережі джерел
+
+«Цю подію більше ніхто не підтверджує» — це серверний фільтр, а не здогад із
+тексту. `events_list(uniq=…)`:
+
+| значення | що означає |
+|----------|------------|
+| `sole_post` | подія з ОДНОГО поста (`post_count<=1`) |
+| `sole_channel` | один канал (`channel_count<=1`; в infospace лічильник каналів не заповнюється) |
+| `sole_source` | УСІ пости події — з одного `Source` (і жодного поста без джерела) |
+| `sole_network` | усі пости — з джерел ОДНІЄЇ мережі (холдингу) |
+
+`source=<ref>` фільтрує події за джерелом інформпростору (rss/web теж — на
+відміну від `channel`, який раніше бив лише по @username Telegram; тепер він
+приймає й домен, назву або `#id` довідника). Зв'язка `source=X, uniq=sole_source`
+= «події, які тримаються лише на джерелі X», а `source_stats` дає ті самі числа
+списком по всіх джерелах.
+
+**Мережі (холдинги) — операторський конфіг, не схема БД.** У моделях немає поля
+«кому належить джерело»: склад мереж задається рядком `Setting`
+**`source_networks_json`** (`/admin/analysis/setting/` або `setting_set`):
+
+```json
+{"Hearst": ["sfgate.com", "chron.com", "timesunion.com"],
+ "Gannett": ["usatoday.com", "azcentral.com"]}
+```
+
+Патерн збігається з посиланням або @юзернеймом джерела (підрядок). Без цього
+рядка `network=` і `uniq=sole_network` чесно відмовляються, а не вигадують.
+`uniq=sole_network` рахується в пам'яті (склад мережі — патерни, не SQL), тож
+понад 20 000 подій під фільтром = відмова «звузь період».
+
 ## 6. Типові сценарії
 
 ```
@@ -456,6 +491,8 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 «чому монітор мовчить?»     task_show → chats_list(problems_only) → account_check(ref=…)
 «акаунт не резолвить»       account_spam_check → (limited?) account_warm_up → account_jobs
 «джерело не оновлюється»    sources_list(problems_only) → source_update(poll_now) → worker_once(info_collect)
+«чи варте джерело полінгу»  source_stats(task=…, order=sole) → events_list(source=…, uniq=sole_source, full=true)
+                            → source_update(ref="12, 13, 14", is_active=false)   # пакетом
 «зібрати період»            run_create → run_show → (ready) events_stats
 «зібрати вибірку (tg_sample)» sample_collect(mode=dry_run) → sample_collect(mode=probe)
                             → sample_collect(mode=collect, confirm=true) → samples_list(log=true)
@@ -532,6 +569,7 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 ## 8. Тести
 
 `backend/analysis/tests/test_mcp_api.py`: реєстр і манифест, резолви посилань,
+внесок джерел (`source_stats`), унікальність подій і мережі, пакетні правки джерел,
 ідемпотентність `run_create`, скасування збору, правки чатів/джерел/задач,
 довідник каналів, події (список із фільтрами, аудит, теги), рендер без мережі.
 `backend/analysis/tests/test_mcp_access.py`: ролі, видимість (задачі, акаунти,
