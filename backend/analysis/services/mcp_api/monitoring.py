@@ -5,8 +5,8 @@ from django.db.models import Count, Max, Min, Prefetch, Q, Sum
 from django.utils import timezone
 
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, MonitorSample,
-                             MonitorSampleJob, Post, ResearchRubric, ResearchRun, Setting,
-                             Source, SourceSubscription)
+                             MonitorSampleJob, Post, ResearchRubric, ResearchRun, Source,
+                             SourceSubscription)
 from analysis.services.mcp_api import common, fmt, registry
 from analysis.services.mcp_api.registry import SCOPE_CREATE, ToolError, tool
 
@@ -1415,66 +1415,6 @@ def _own_source_or_die(s) -> None:
                         "правити його може лише власник або адмін")
 
 
-# --- мережі (холдинги) джерел ------------------------------------------------
-# «Мережа» — редакційний факт (хто кому належить), а не властивість збору, і в
-# схемі БД її свідомо нема: склад мереж змінює оператор рядком у Setting, без
-# міграції й деплою (те саме рішення, що digest_report_prompt).
-
-def _network_map() -> dict:
-    """`Setting source_networks_json` → {"Hearst": ["sfgate.com", "chron.com"]}.
-
-    Патерн збігається з посиланням або @юзернеймом джерела (підрядок).
-    """
-    import json
-    raw = Setting.get("source_networks_json", "")
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as e:
-        raise ToolError(f"Setting source_networks_json — не JSON: {e}")
-    if not isinstance(data, dict):
-        raise ToolError('Setting source_networks_json: очікується {"мережа": ["патерн", …]}')
-    return {str(k): [str(x).strip().lstrip("@").lower() for x in (v or []) if str(x).strip()]
-            for k, v in data.items()}
-
-
-def _networks_or_die() -> dict:
-    nets = _network_map()
-    if not nets:
-        raise ToolError(
-            "мереж джерел не задано. Створи рядок Setting «source_networks_json» "
-            '(значення: {"Hearst": ["sfgate.com", "chron.com"]}) — setting_set або '
-            "/admin/analysis/setting/. Це операторський конфіг, у схемі БД мереж немає.")
-    return nets
-
-
-def _resolve_network(name: str) -> tuple:
-    nets = _networks_or_die()
-    want = str(name).strip().lower()
-    hits = [k for k in nets if k.lower() == want] or [k for k in nets if want in k.lower()]
-    if not hits:
-        raise ToolError(f"мережі «{name}» немає в source_networks_json; є: {', '.join(nets)}")
-    if len(hits) > 1:
-        raise ToolError(f"«{name}» неоднозначне: {', '.join(hits)}")
-    return hits[0], nets[hits[0]]
-
-
-def _network_of(source, nets: dict) -> str:
-    hay = f"{source.url} @{source.channel.username or ''}".lower()
-    for name, pats in nets.items():
-        if any(p and p in hay for p in pats):
-            return name
-    return ""
-
-
-def _network_source_ids(patterns: list) -> list:
-    q = Q(pk__in=[])
-    for p in patterns:
-        q |= Q(channel__url__icontains=p) | Q(channel__username__iexact=p)
-    return list(Source.objects.filter(q).values_list("id", flat=True))
-
-
 @tool("sources_list", group="monitoring", params={
       "task": 'Задача: числовий id, slug або частина назви. Неоднозначність або чужа задача — відповість «не знайдено».',
       "kind": "Тип джерела: telegram | rss | web | vk. Порожньо = усі.",
@@ -1589,12 +1529,11 @@ def source_update(ref: str, is_active: bool = None, poll_interval_sec: int = Non
       "date_to": "Пости до, YYYY-MM-DD.",
       "kind": "Тип джерела: telegram | rss | web | vk. Порожньо = усі.",
       "source": "Один конкретний ref джерела (id/посилання/назва) — решту не рахувати.",
-      "network": "Лише джерела мережі (Setting source_networks_json).",
       "min_posts": "Не показувати джерела, де постів менше за це.",
       "order": "posts (дефолт) | events | sole | name.",
       "limit": "Скільки джерел показати."})
 def source_stats(task: str = "", days: int = 30, date_from: str = "", date_to: str = "",
-                 kind: str = "", source: str = "", network: str = "", min_posts: int = 0,
+                 kind: str = "", source: str = "", min_posts: int = 0,
                  order: str = "posts", limit: int = 40):
     """Внесок КОЖНОГО джерела за період: постів зібрано, скільки з них дали подію,
     скільки подій, і скільки з тих подій тримається ЛИШЕ на ньому.
@@ -1616,14 +1555,6 @@ def source_stats(task: str = "", days: int = 30, date_from: str = "", date_to: s
         srcs = srcs.filter(kind=kind)
     if source:
         srcs = srcs.filter(pk=common.resolve_source(source).pk)
-    net_name = ""
-    if network:
-        net_name, pats = _resolve_network(network)
-        ids = _network_source_ids(pats)
-        if not ids:
-            raise ToolError(f"мережа «{net_name}»: жодне джерело не підпадає під патерни "
-                            f"{', '.join(pats) or '—'}")
-        srcs = srcs.filter(pk__in=ids)
     by_id = {s.id: s for s in srcs}
     if not by_id:
         return "джерел за цим фільтром немає"
@@ -1641,8 +1572,6 @@ def source_stats(task: str = "", days: int = 30, date_from: str = "", date_to: s
     elif days:
         since = timezone.now() - timedelta(days=max(1, int(days)))
         posts, desc = posts.filter(posted_at__gte=since), desc + [f"за {days} дн"]
-    if net_name:
-        desc.append(f"мережа {net_name}")
 
     agg = {r["source_id"]: r for r in posts.order_by().values("source_id").annotate(
         n=Count("id"), n_ev_posts=Count("event_id"),
@@ -1652,7 +1581,6 @@ def source_stats(task: str = "", days: int = 30, date_from: str = "", date_to: s
     sole = {r["source_id"]: r["n"] for r in posts.filter(
         event_id__in=_sole_event_ids(posts)).order_by().values("source_id").annotate(
             n=Count("event_id", distinct=True))}
-    nets = _network_map()
     rows = []
     for sid, s in by_id.items():
         a = agg.get(sid) or {}
@@ -1667,14 +1595,12 @@ def source_stats(task: str = "", days: int = 30, date_from: str = "", date_to: s
     rows.sort(key=lambda r: r[1].name.lower())   # рівні за метрикою — за алфавітом
     rows.sort(key=key)
     shown = rows[:limit]
-    head = ["id", "тип", "акт", "джерело"] + (["мережа"] if nets else []) + [
-        "постів", "з подією", "%", "подій", "лише його"]
+    head = ["id", "тип", "акт", "джерело", "постів", "з подією", "%", "подій",
+            "лише його"]
     table = []
     for sid, s, n, n_ev_posts, n_events, n_sole in shown:
-        row = [f"#{sid}", s.kind, fmt.flag(s.is_active), fmt.trunc(s.name, 30)]
-        if nets:
-            row.append(_network_of(s, nets) or "—")
-        row += [n, n_ev_posts, fmt.pct(n_ev_posts, n), n_events, n_sole]
+        row = [f"#{sid}", s.kind, fmt.flag(s.is_active), fmt.trunc(s.name, 30),
+               n, n_ev_posts, fmt.pct(n_ev_posts, n), n_events, n_sole]
         table.append(row)
     total_posts = sum(r[2] for r in rows)
     total_ev = posts.exclude(event_id=None).values("event_id").distinct().count()
@@ -1775,8 +1701,7 @@ EVENT_FILTER_DOCS = {
     "query": "Текст в описі події (icontains).",
     "channel": "Канал/джерело, який писав про подію: @username, домен, частина назви або #id довідника (для rss/web теж, не лише Telegram).",
     "source": "Джерело інформпростору (`Source`): id, посилання або частина назви. Точніше за channel, коли джерел кілька на один домен.",
-    "network": "Мережа/холдинг джерел (склад — Setting source_networks_json): події, про які писало хоч одне джерело мережі.",
-    "uniq": "Унікальність (порожньо = не фільтрувати): sole_post — подія з одного поста; sole_channel — один канал; sole_source — усі пости з ОДНОГО джерела; sole_network — усі пости з однієї мережі.",
+    "uniq": "Унікальність (порожньо = не фільтрувати): sole_post — подія з одного поста; sole_channel — один канал; sole_source — усі пости з ОДНОГО джерела.",
     "min_channels": "Мінімум унікальних каналів події (фільтр «Кількість каналів»). 0 = без обмеження.",
     "min_reach": "Мінімальне охоплення. 0 = без обмеження.",
 }
@@ -1784,7 +1709,7 @@ EVENT_FILTER_DOCS = {
 
 def _event_filters(task="", days=0, date_from="", date_to="", review_status="approved",
                    region="", settlement="", tag="", query="", channel="",
-                   min_channels=0, min_reach=0, source="", network="", uniq=""):
+                   min_channels=0, min_reach=0, source="", uniq=""):
     """Спільний набір фільтрів для events_list/events_stats — дзеркало
     list_filter адмінки подій (Період, Свіжість, Дослідження, Статус аудиту,
     Субʼєкт РФ, фасети тегів, Канал/Джерело, Кількість каналів, Охоплення)."""
@@ -1836,13 +1761,6 @@ def _event_filters(task="", days=0, date_from="", date_to="", review_status="app
     if source:
         src = common.resolve_source(source)
         qs, desc = qs.filter(posts__source=src), desc + [f"джерело #{src.id} {src.name}"]
-    if network:
-        net_name, pats = _resolve_network(network)
-        ids = _network_source_ids(pats)
-        if not ids:
-            raise ToolError(f"мережа «{net_name}»: жодне джерело не підпадає під патерни "
-                            f"{', '.join(pats) or '—'}")
-        qs, desc = qs.filter(posts__source_id__in=ids), desc + [f"мережа {net_name}"]
     if min_channels:
         qs, desc = qs.filter(channel_count__gte=int(min_channels)), desc + [f"каналів ≥{min_channels}"]
     if min_reach:
@@ -1850,12 +1768,6 @@ def _event_filters(task="", days=0, date_from="", date_to="", review_status="app
     if uniq:
         qs, desc = _filter_uniq(qs, uniq), desc + [f"унікальність {uniq}"]
     return qs.distinct(), desc
-
-
-# Скільки подій ще можна перебрати в памʼяті для uniq=sole_network: мережу не
-# порахувати в SQL (її склад — патерни з Setting), тож або вузьке вікно, або
-# чесна відмова замість тихого «зависло».
-_UNIQ_NETWORK_MAX = 20000
 
 
 def _filter_uniq(qs, mode: str):
@@ -1867,33 +1779,7 @@ def _filter_uniq(qs, mode: str):
         return qs.filter(channel_count__lte=1)
     if mode in ("sole_source", "1source"):
         return qs.filter(id__in=_sole_event_ids())
-    if mode in ("sole_network", "1network"):
-        return qs.filter(id__in=_sole_network_event_ids(qs))
-    raise ToolError("uniq: sole_post | sole_channel | sole_source | sole_network")
-
-
-def _sole_network_event_ids(qs) -> list:
-    """Події, усі пости яких — з джерел ОДНІЄЇ мережі.
-
-    Джерело поза мережами (і пост без джерела) вважається окремим «власником»,
-    тож змішана подія сюди не потрапляє.
-    """
-    nets = _networks_or_die()
-    owner = {}
-    for src in Source.objects.select_related("channel"):
-        owner[src.id] = _network_of(src, nets)
-    n = qs.count()
-    if n > _UNIQ_NETWORK_MAX:
-        raise ToolError(f"uniq=sole_network рахується в памʼяті, а під фільтр підпадає "
-                        f"{n} подій (стеля {_UNIQ_NETWORK_MAX}) — звузь задачу/період")
-    seen = {}
-    pairs = Post.objects.filter(event_id__in=qs.values("id")) \
-        .order_by().values_list("event_id", "source_id").distinct()
-    for ev, sid in pairs.iterator():
-        net = owner.get(sid) if sid else ""
-        seen.setdefault(ev, set()).add(("net", net) if net else ("src", sid))
-    return [ev for ev, owners in seen.items()
-            if len(owners) == 1 and next(iter(owners))[0] == "net"]
+    raise ToolError("uniq: sole_post | sole_channel | sole_source")
 
 
 def _tags_short(ev, n=6):
@@ -1909,7 +1795,7 @@ def _tags_short(ev, n=6):
 def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: str = "",
                 review_status: str = "approved", region: str = "", settlement: str = "",
                 tag: str = "", query: str = "", channel: str = "", min_channels: int = 0,
-                min_reach: int = 0, source: str = "", network: str = "", uniq: str = "",
+                min_reach: int = 0, source: str = "", uniq: str = "",
                 order: str = "newest", limit: int = 30,
                 full: bool = False, chars: int = 1200, post_links: int = 5):
     """Список подій із фільтрами адмінки: період/свіжість, задача, статус аудиту,
@@ -1928,7 +1814,7 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
     from django.db.models import OuterRef, Subquery
     qs, desc = _event_filters(task, days, date_from, date_to, review_status, region,
                               settlement, tag, query, channel, min_channels, min_reach,
-                              source=source, network=network, uniq=uniq)
+                              source=source, uniq=uniq)
     ordering = {"newest": ("-event_date", "-id"), "oldest": ("event_date", "id"),
                 "reach": ("-reach", "-id"), "channels": ("-channel_count", "-id")}.get(order)
     if not ordering:
@@ -1971,8 +1857,8 @@ def events_list(task: str = "", days: int = 30, date_from: str = "", date_to: st
         fmt.section(f"Події: {total} (показано {len(rows)})", "; ".join(desc) or "без фільтрів"),
         fmt.table(headers, rows) if rows else "нічого не знайдено",
         "Фільтри: days/date_from/date_to, review_status, region, settlement, tag (кат:тег, кома = І), "
-        "query, channel (будь-який тип джерела), source, network, uniq (sole_post|sole_channel|"
-        "sole_source|sole_network), min_channels, min_reach; order=newest|oldest|reach|channels. "
+        "query, channel (будь-який тип джерела), source, uniq (sole_post|sole_channel|"
+        "sole_source), min_channels, min_reach; order=newest|oldest|reach|channels. "
         "Повні описи з посиланнями на пости: full=true. Внесок джерел: source_stats.")
 
 

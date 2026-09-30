@@ -1065,27 +1065,6 @@ def test_events_list_full_gives_post_links(infospace_events):
     assert "https://alpha.example/1" not in off
 
 
-def test_events_list_network_needs_setting(infospace_events):
-    task, a, b, shared, only_a = infospace_events
-    with pytest.raises(ToolError, match="source_networks_json"):
-        mcp_api.call("events_list", {"task": task.slug, "network": "Hearst"})
-    Setting.objects.create(key="source_networks_json",
-                           value='{"Hearst": ["alpha.example", "beta.example"]}')
-    out = mcp_api.call("events_list", {"task": task.slug, "network": "hearst"})
-    assert "спільний сюжет" in out and "тільки альфа" in out
-    # обидві події цілком у межах однієї мережі
-    sole = mcp_api.call("events_list", {"task": task.slug, "uniq": "sole_network"})
-    assert "спільний сюжет" in sole and "тільки альфа" in sole
-    # джерело поза мережею робить подію змішаною
-    Setting.objects.filter(key="source_networks_json").update(
-        value='{"Hearst": ["alpha.example"]}')
-    sole = mcp_api.call("events_list", {"task": task.slug, "uniq": "sole_network"})
-    assert "тільки альфа" in sole and "спільний сюжет" not in sole
-    assert "мережа" in mcp_api.call("source_stats", {"task": task.slug})
-    with pytest.raises(ToolError, match="немає в source_networks_json"):
-        mcp_api.call("events_list", {"task": task.slug, "network": "Gannett"})
-
-
 def test_source_update_applies_to_whole_batch():
     a, b = SourceFactory(name="Перше"), SourceFactory(name="Друге")
     out = mcp_api.call("source_update", {"ref": f"{a.id}, {b.id}", "is_active": False})
