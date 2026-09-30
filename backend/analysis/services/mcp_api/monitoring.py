@@ -1,7 +1,7 @@
 """Моніторинги: задачі, збори (runs), whitelist чатів, джерела інформпростору, зрізи подій."""
 from datetime import timedelta
 
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, Max, Min, Q, Sum
 from django.utils import timezone
 
 from analysis.models import (AnalysisTask, Channel, Event, MonitorChat, MonitorSample,
@@ -18,7 +18,8 @@ _PIPELINE_HOW = {
     "monitor": "monitor — критика в чатах, не інформпростір. Чати: chat_add. "
                "Промпти: task_update prescreen_prompt, tagger_prompt. Спосіб збору — "
                "поле mon_collect_source у картці: telezip (run_create, платно) або "
-               "tg_sample (вибірка акаунтами, команда monitor_sample_collect).",
+               "tg_sample (вибірка акаунтами: збір sample_collect, далі тегування "
+               "run_tagging).",
     "research": "research — тематичне дослідження каналів. Чати: chat_add. "
                 "Рубрики: rubric_create. Промпт агента: task_update tagger_prompt.",
     "infospace": "infospace — полінг джерел, не TeleZip. Джерела: source_add. "
@@ -258,7 +259,7 @@ def _short_value(task, name):
     if name == "pipeline":
         return f"{task.pipeline} — {task.get_pipeline_display()}"
     if name == "mon_collect_source":
-        how = ("команда monitor_sample_collect --task SLUG --from … --to …; "
+        how = ("збір sample_collect, далі тегування run_tagging; "
                "TeleZip НЕ використовується, кожному чату потрібен акаунт, "
                "паспорти вікон — MonitorSample"
                if task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE
@@ -636,8 +637,8 @@ def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
             and t.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE):
         raise ToolError(
             f"{t.slug} збирається ВИБІРКОЮ через Telegram-акаунти "
-            "(mon_collect_source=tg_sample), а не TeleZip: збір запускає команда "
-            "`manage.py monitor_sample_collect --task " + t.slug + " --from … --to …`. "
+            "(mon_collect_source=tg_sample), а не TeleZip: збір — sample_collect, "
+            "тегування вже зібраного — run_tagging. "
             "run_create тут лише витратив би гроші на TeleZip і змішав вибірку зі "
             "суцільним потоком. Якщо цій задачі СПРАВДІ треба TeleZip — спершу "
             "task_update mon_collect_source=telezip.")
@@ -888,6 +889,128 @@ def sample_cancel(job_id: int):
     j.status, j.finished_at = "cancelled", timezone.now()
     j.save(update_fields=["status", "finished_at"])
     return (f"Завдання #{j.id} ({j.task.slug} {j.date_from}…{j.date_to}) знято з черги.")
+
+
+# ---------------------------------------------------------------------------
+# Тегування вже зібраної вибірки.
+#
+# Вибірковий збір веде MonitorSampleJob і ResearchRun НЕ створює, а події в
+# monitor народжуються лише в _try_ingest ранера pipeline_runs.mon_runs_once —
+# тобто всередині життєвого циклу ResearchRun. Через це tg_sample-задача
+# доїжджала до mon_prescreened і спинялась назавжди, а тегування лишалось суто
+# консольним (monitor_prepare_batches + monitor_ingest_tags), як це робили в
+# #19 fedcrit-sib-dv. Тут run створюється БЕЗ чанків збору: збирати вже нічого,
+# а _try_prepare нуль чанків читає як «збір закрито» і одразу готує батчі.
+# ---------------------------------------------------------------------------
+_TAG_OPEN_RUNS = ["collecting", "collected", "awaiting_agent"]
+
+
+def _sample_window(task):
+    """Межі вже зібраних вікон вибірки — дефолтний період тегування."""
+    agg = MonitorSample.objects.filter(task=task).aggregate(
+        lo=Min("period_start"), hi=Max("period_end"))
+    return agg["lo"], agg["hi"]
+
+
+def _pending_window(task):
+    """Межі постів, що чекають тегування. Резерв, коли паспортів вікон немає:
+    задачі, зібрані до MonitorSample (напр. #19 fedcrit-sib-dv), інакше
+    отримували відмову там, де роботи 900 постів."""
+    agg = (Post.objects.filter(task=task, stage=Post.STAGE_MON_PRESCREENED)
+           .aggregate(lo=Min("posted_at"), hi=Max("posted_at")))
+    lo, hi = agg["lo"], agg["hi"]
+    return (timezone.localdate(lo) if lo else None,
+            timezone.localdate(hi) if hi else None)
+
+
+def _taggable(task, d_from, d_to):
+    """РІВНО той набір, що візьме monitor_prepare_batches --require-prescreen
+    --only-untagged. Ключове: він дивиться не на стадію, а на «прескрін сказав
+    так, а тегів ще немає». Рахувати по стадії mon_prescreened не можна — там
+    висять і вже протеговані пости (хвіст, який лишає _finish), і тоді
+    інструмент обіцяв би 900 постів роботи там, де її нуль."""
+    return (Post.objects.filter(task=task,
+                                posted_at__date__gte=d_from,
+                                posted_at__date__lte=d_to,
+                                classification__has_key="_prescreen",
+                                classification___prescreen__could_be_criticism=True,
+                                tags__isnull=True)
+            .exclude(text="")
+            .exclude(classification__is_filtered=True)
+            .distinct())
+
+
+@tool("run_tagging", group="monitoring", mutates=True, params={
+      "task": 'Задача: числовий id, slug або частина назви. Лише monitor із вибірковим збором (mon_collect_source=tg_sample).',
+      "date_from": "Перший день періоду, YYYY-MM-DD. Порожньо = від найранішого зібраного вікна вибірки.",
+      "date_to": "Останній день періоду, YYYY-MM-DD, ВКЛЮЧНО. Порожньо = до найпізнішого зібраного вікна.",
+      "title": "Необовʼязкова назва для списку зборів."})
+def run_tagging(task: str, date_from: str = "", date_to: str = "", title: str = ""):
+    """Тегування ВЖЕ ЗІБРАНОЇ вибірки: прескрін-позитиви → батчі агентам → події.
+
+    Для monitor-задач із mon_collect_source=tg_sample, де збір веде
+    sample_collect і ResearchRun не виникає сам собою. TeleZip не задіяний,
+    чанки збору не плануються — за збір гроші не йдуть.
+
+    Саму роботу веде worker-mon-runs: готує батчі у backend/_dir/runs/run_<id>/
+    (+ SYSTEM_PROMPT.md), чекає на *_done.json від агентів і сам робить інжест —
+    події 1:1 на коментар, без дедупу. Прогрес і шлях до батчів — run_show.
+    """
+    t = _sample_task(task)
+    d_from = common.parse_date(date_from, "date_from") if date_from else None
+    d_to = common.parse_date(date_to, "date_to") if date_to else None
+    if not (d_from and d_to):
+        lo, hi = _sample_window(t)
+        if not (lo and hi):
+            lo, hi = _pending_window(t)
+        d_from, d_to = d_from or lo, d_to or hi
+    if not (d_from and d_to):
+        raise ToolError(
+            f"{t.slug}: немає ні паспортів вікон вибірки, ні постів на "
+            "mon_prescreened — тегувати нічого. Збір: sample_collect "
+            "(починай з mode=dry_run), стан — samples_list.")
+    if d_to < d_from:
+        raise ToolError("date_to раніше за date_from")
+    busy = (ResearchRun.objects.filter(task=t, status__in=_TAG_OPEN_RUNS,
+                                       date_from=d_from, date_to=d_to)
+            .order_by("id").last())
+    if busy:
+        raise ToolError(
+            f"для {t.slug} {d_from}…{d_to} уже є незакритий запуск #{busy.id} "
+            f"({busy.get_status_display()}) — другий лише подвоїв би тегування. "
+            f"Прогрес: run_show run_id={busy.id}; зняти: run_cancel.")
+    window = Post.objects.filter(task=t, posted_at__date__gte=d_from,
+                                 posted_at__date__lte=d_to)
+    todo = _taggable(t, d_from, d_to).count()
+    waiting = window.filter(stage__in=[Post.STAGE_MON_COLLECTED,
+                                       Post.STAGE_MON_FILTERED]).count()
+    if not todo and not waiting:
+        tagged = window.filter(tags__isnull=False).distinct().count()
+        raise ToolError(
+            f"{t.slug} {d_from}…{d_to}: тегувати нічого — прескрін-позитивів без "
+            "тегів нуль."
+            + (f" У вікні вже протеговано {tagged} постів — події дивись "
+               "events_list; хвіст на mon_prescreened у цьому разі косметика."
+               if tagged else
+               " Постів вікна прескрін ще не позначав: перевір стадії в task_show, "
+               "а період — date_from/date_to."))
+    run = ResearchRun.objects.create(
+        task=t, title=title or "тегування вибірки", date_from=d_from, date_to=d_to,
+        chunk_days=t.collect_chunk_days or 3, status="collected",
+        started_at=timezone.now())
+    parts = [f"Тегування #{run.id} для {t.slug}: {d_from}…{d_to}, на тегуванні "
+             f"{todo} постів (прескрін-позитиви). TeleZip не задіяний, чанків "
+             "збору немає — за збір не платиться."]
+    if waiting:
+        parts.append(f"⚠ Ще {waiting} постів на mon_collected/mon_filtered: ранер "
+                     "почне готувати батчі лише коли їх доїдять worker-mon-filter "
+                     "і worker-mon-prescreen.")
+    parts.append(
+        f"Далі: worker-mon-runs нарізає батчі у backend/_dir/runs/run_{run.id}/ "
+        "разом із SYSTEM_PROMPT.md. Протегувати їх має АГЕНТ — записати "
+        "batch_NNN_done.json; сам ранер тексти не розмічає. Інжест і створення "
+        f"подій далі автоматичні. Прогрес: run_show run_id={run.id}.")
+    return "\n".join(parts)
 
 
 @tool("chats_list", group="monitoring", params={

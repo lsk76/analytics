@@ -34,6 +34,8 @@ PERMS = {
     "task_create": "analysis.add_analysistask",
     "runs_list": "analysis.view_researchrun", "run_show": "analysis.view_researchrun",
     "run_create": "analysis.add_researchrun", "run_cancel": "analysis.change_researchrun",
+    # тегування вже зібраної вибірки: теж ResearchRun, лише без чанків збору
+    "run_tagging": "analysis.add_researchrun",
     # вибіркові збори (tg_sample): своя черга завдань, не ResearchRun
     "sample_collect": "analysis.add_monitorsamplejob",
     "samples_list": "analysis.view_monitorsamplejob",

@@ -414,6 +414,7 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `sample_collect` **[пише]** | замовити ВИБІРКОВИЙ збір коментарів Telegram-акаунтами (monitor із `mon_collect_source=tg_sample`; TeleZip не чіпається). Не виконує сам: ставить завдання в чергу, яку розгрібає `worker-mon-sample`. `mode=collect` — лише з `confirm=true` | task, date_from, date_to, mode='dry_run', per_region=1500, probe_ids=200, regions='', seed=0, resume=False, confirm=False |
 | `samples_list` | черга вибіркових зборів: завдання, їх стан, вивід команди (`log=true`) і зібрані вікна (паспорти = знаменник частки) | task='', limit=10, log=False |
 | `sample_cancel` **[пише]** | зняти завдання вибірки, яке ще не почалось (pending) | job_id |
+| `run_tagging` **[пише]** | ТЕГУВАННЯ вже зібраної вибірки (`mon_collect_source=tg_sample`): створює `ResearchRun` БЕЗ чанків збору, далі `worker-mon-runs` готує батчі агентам і сам робить інжест → події. TeleZip не чіпається. Період порожній = межі паспортів вибірки, а якщо їх немає — межі постів, що чекають тегування | task, date_from='', date_to='', title='' |
 | `chats_list` | whitelist чатів: акаунт, режим, свіжість | task='', active, stream_only, problems_only, limit=60 |
 | `chat_add` **[пише]** | додати чат у whitelist monitor/research/tgsearch; невідомий @username створюється в довіднику | task, channel, is_active, stream_enabled, forward_media, account, priority |
 | `chat_update` **[пише]** | активність / стрім / акаунт / пріоритет / критичне джерело / нотатка | chat, is_active, stream_enabled, account, priority, forward_media, is_critical_source, notes |
@@ -458,6 +459,8 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 «зібрати період»            run_create → run_show → (ready) events_stats
 «зібрати вибірку (tg_sample)» sample_collect(mode=dry_run) → sample_collect(mode=probe)
                             → sample_collect(mode=collect, confirm=true) → samples_list(log=true)
+                            → run_tagging → run_show (awaiting_agent: протегувати батчі)
+                            → run_show (done) → events_list
 «поміняти промпт»           task_show → prompt_try (чернетка) → task_update
                             → posts_retag(confirm=false) → posts_retag(confirm=true, limit=…)
                             глобальне Setting: settings_list → setting_show → setting_set
