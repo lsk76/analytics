@@ -28,7 +28,10 @@ PERMS = {
     "proxies_list": "accounts.view_proxy", "proxy_check": "accounts.change_proxy",
     # --- задачі, збори, чати, джерела, події, довідник
     "tasks_list": V_TASK, "task_show": V_TASK, "task_update": "analysis.change_analysistask",
-    "prompt_try": "analysis.change_analysistask", "posts_retag": "analysis.change_event",
+    "prompt_try": "analysis.change_analysistask",
+    # проба monitor-промптів: та сама планка, що й у prompt_try —
+    # інструмент не пише в БД, але кличе LLM і править методику
+    "monitor_prompt_try": "analysis.change_analysistask", "posts_retag": "analysis.change_event",
     "posts_list": "analysis.view_post", "post_show": "analysis.view_post",
     "posts_requeue": "analysis.change_analysistask",
     "task_create": "analysis.add_analysistask",
