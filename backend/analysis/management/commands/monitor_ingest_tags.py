@@ -45,7 +45,12 @@ from analysis.models import AnalysisTask, Post, Tag
 from analysis.services.monitor_stages import sync_comment_event
 
 
-VALID_CATEGORIES = {"criticism_target", "topic", "opinion", "fed_crit"}
+# crit_level/er_crit — осі, які промпт рахує механічно з criticism_target
+# (рівень критики і критика ЄР). Без них у тегах лишалась тільки бінарна
+# вісь fed_crit, а головна цифра дослідження — частка ФЕДЕРАЛЬНОЇ критики —
+# не була записана ніде, хоча модель її віддавала (так вийшло і в #19).
+VALID_CATEGORIES = {"criticism_target", "topic", "opinion", "fed_crit",
+                    "crit_level", "er_crit"}
 FED_CRIT_YES = "критика_фед_влади"      # головна вісь задач із категорією fed_crit
 
 
@@ -118,8 +123,14 @@ class Command(BaseCommand):
 
                 tags_to_attach = []
                 for cat in VALID_CATEGORIES:
-                    for name in (verdict.get(cat) or []):
-                        t = _get_tag(cat, name)
+                    # Промпт віддає частину осей рядком ("fed_crit":"критика_фед_влади"),
+                    # а частину списком. Без нормалізації рядок перебирався
+                    # ПОБУКВЕНО і кожна буква ставала тегом — так у #27 зʼявилось
+                    # 11 сміттєвих тегів по 487 подій. Те саме приведення вже
+                    # робить розрахунок is_relevant нижче.
+                    val = verdict.get(cat)
+                    for name in (val if isinstance(val, list) else [val] if val else []):
+                        t = _get_tag(cat, str(name))
                         if t: tags_to_attach.append(t)
 
                 # proposed_tags — теж створюємо одразу (опція (c))
