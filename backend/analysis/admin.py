@@ -3121,15 +3121,28 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                     })
                 tag_time.append({"category": c.key, "label": c.label, "rows": out_t})
 
-        # ---- % подій від усіх повідомлень (знаменник — ChannelDailyStat) -----
+        # ---- % подій від усіх повідомлень ------------------------------------
         # Є лише для monitor-задач (критика): частка критичних коментарів серед
         # УСІХ повідомлень чатів. Для подієвих задач знаменника немає — блок
         # порожній і картка не рендериться.
+        #
+        # ЗНАМЕННИК ЗБЕРІГАЄТЬСЯ ПО-РІЗНОМУ, залежно від способу збору задачі
+        # (AnalysisTask.mon_collect_source) — звідси дві гілки:
+        #   telezip (суцільний потік) → ChannelDailyStat: денний агрегат по
+        #     (задача, канал, день), у знаменнику авторитетний лік TeleZip.
+        #   tg_sample (вибірка) → самі Post. Суцільного ліку повідомлень чату
+        #     вибірка не робить і ChannelDailyStat для неї порожній НАЗАВЖДИ, а
+        #     «всі повідомлення» тут = всі ВИБРАНІ повідомлення; кожне лежить
+        #     окремим Post із posted_at, тож знаменник рахується на будь-яку
+        #     гранулярність, включно з добовою. Беремо ВСІ пости задачі, а не
+        #     лише ті, що дійшли до прескріну: картка називається «% від усіх
+        #     повідомлень», і фільтр довжини (mon_min_len/mon_max_len) відсіює
+        #     більшість — по кандидатах частка вийшла б удвічі-втричі вищою.
+        #     Паспорти вибірки (MonitorSample) у знаменник НЕ йдуть: вони
+        #     місячні, а Post дає те саме число з точністю до дня.
         coverage = []
         cov_task_ids = list(qs.order_by().values_list("task_id", flat=True).distinct())
         if cov_task_ids:
-            tot_qs = ChannelDailyStat.objects.order_by().filter(task_id__in=cov_task_ids)
-
             def _pd(s):
                 for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
                     try:
@@ -3139,12 +3152,31 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                 return None
             d_gte = _pd(get_clean.get("event_date__range__gte") or get_clean.get("event_date__gte"))
             d_lte = _pd(get_clean.get("event_date__range__lte") or get_clean.get("event_date__lte"))
-            if d_gte:
-                tot_qs = tot_qs.filter(date__gte=d_gte)
-            if d_lte:
-                tot_qs = tot_qs.filter(date__lte=d_lte)
-            tot_rows = list(tot_qs.values("date", "channel__region_subject__name")
-                            .annotate(t=Sum(Coalesce("telezip_total", "total"))))
+            sample_ids = set(AnalysisTask.objects.filter(
+                id__in=cov_task_ids,
+                mon_collect_source=AnalysisTask.MON_SRC_TG_SAMPLE,
+            ).values_list("id", flat=True))
+            tot_rows = []                       # (день, регіон, повідомлень)
+            stream_ids = [i for i in cov_task_ids if i not in sample_ids]
+            if stream_ids:
+                tot_qs = ChannelDailyStat.objects.order_by().filter(task_id__in=stream_ids)
+                if d_gte:
+                    tot_qs = tot_qs.filter(date__gte=d_gte)
+                if d_lte:
+                    tot_qs = tot_qs.filter(date__lte=d_lte)
+                tot_rows += [(r["date"], r["channel__region_subject__name"], r["t"])
+                             for r in tot_qs.values("date", "channel__region_subject__name")
+                             .annotate(t=Sum(Coalesce("telezip_total", "total")))]
+            if sample_ids:
+                p_qs = Post.objects.order_by().filter(task_id__in=sample_ids,
+                                                      posted_at__isnull=False)
+                if d_gte:
+                    p_qs = p_qs.filter(posted_at__date__gte=d_gte)
+                if d_lte:
+                    p_qs = p_qs.filter(posted_at__date__lte=d_lte)
+                tot_rows += [(r["d"], r["region_subject__name"], r["n"])
+                             for r in p_qs.annotate(d=TruncDate("posted_at"))
+                             .values("d", "region_subject__name").annotate(n=Count("id"))]
             if tot_rows:
                 def _bstart(d):
                     if gran == "week":
@@ -3153,9 +3185,9 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                         return d.replace(day=1)
                     return d
                 den = {}
-                for r in tot_rows:
-                    key = (r["channel__region_subject__name"] or "", _bstart(r["date"]))
-                    den[key] = den.get(key, 0) + (r["t"] or 0)
+                for day, reg, total in tot_rows:
+                    key = (reg or "", _bstart(day))
+                    den[key] = den.get(key, 0) + (total or 0)
                 num_rows = (src.qs.exclude(region_subject__isnull=True)
                             .exclude(**{f"{src.date_field}__isnull": True})
                             .annotate(bucket=src.trunc(src.date_field))
