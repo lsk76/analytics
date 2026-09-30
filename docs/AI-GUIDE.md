@@ -278,6 +278,9 @@ docker compose exec -T web python manage.py shell -c \
 
 - `docs/ARCHITECTURE.md` — events-воркери, стадії, watermark, failure-семантика.
 - `docs/comments-analysis-pipeline.md` — monitor-конвеєр критики + Event 1:1.
+- `docs/monitor-sample-study-mcp.md` — **як налаштувати й провести вибіркове
+  monitor-дослідження ЧЕРЕЗ MCP** (порядок викликів від `task_create` до
+  `run_tagging`, знаменник із паспортів вибірки, межі автоматизації, граблі).
 - `docs/ethnic-events-pipeline.md` — ad-hoc конвеєр етно-подій (C2/C3/C4).
 - `docs/econ-events-pipeline.md` — економічні події E1-E4: keyword-регекси, усі промпти.
 - `docs/infospace-monitoring-pipeline.md` — **ДИЗАЙН (не реалізовано)**: конвеєр
