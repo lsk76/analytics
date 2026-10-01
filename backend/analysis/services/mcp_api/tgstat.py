@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 from django.conf import settings
 
+from analysis.models import Setting
 from analysis.services.mcp_api import fmt
 from analysis.services.mcp_api.registry import SCOPE_ADMIN, ToolError, tool
 
@@ -37,7 +38,13 @@ def _base() -> str:
     return str(getattr(settings, "TGSTAT_API_URL", "") or "http://tgstat:8020").rstrip("/")
 
 
-def _explain(status: int, body: dict) -> str:
+def _explain(status: int, body: dict, path: str = "") -> str:
+    if status == 404 and path.startswith("/selftest"):
+        # Саме так виглядає «контейнер старіший за код»: маршруту ще немає.
+        return ("сервіс tgstat не знає про /selftest — контейнер старіший за цю "
+                "перевірку. Пересоздати його з поточного образу: "
+                "`docker compose -f docker-compose.yml -f docker-compose.monitor.yml "
+                "up -d --force-recreate tgstat`.")
     state = (body or {}).get("state")
     msg = (body or {}).get("error") or str(body)[:300]
     if state == "captcha":
@@ -74,7 +81,7 @@ def _api(path: str, params: dict | None = None, method: str = "GET"):
     except ValueError:
         body = {"error": (r.text or "")[:300]}
     if r.status_code >= 400:
-        raise ToolError(_explain(r.status_code, body))
+        raise ToolError(_explain(r.status_code, body, path))
     return body
 
 
@@ -307,3 +314,63 @@ def tgstat_manual_finish():
     out = f"стан: {s.get('state')}" + (f" · {s['user']} ({s.get('plan') or '—'})"
                                        if s.get("user") else "")
     return out + (f"\n{s['detail']}" if s.get("detail") else "")
+
+
+# Останній прогін живого самоконтролю — щоб його було видно і в адмінці, і в
+# service_health, а не лише в логу cron (`deploy/tgstat-canary.sh`).
+SELFTEST_SETTING = "tgstat_selftest_last"
+
+
+def selftest_remember(res: dict) -> None:
+    """Зберегти підсумок прогону в key-value (рядок створюється сам)."""
+    line = (f"{res.get('checked_at') or ''} {res.get('verdict')}: "
+            f"{res.get('summary') or res.get('detail') or ''}").strip()
+    Setting.objects.update_or_create(key=SELFTEST_SETTING, defaults={
+        "value": line,
+        "description": "Останній живий самоконтроль розбору tgstat (пише tgstat_selftest)"})
+
+
+def selftest_last() -> str:
+    return Setting.get(SELFTEST_SETTING, "ще не запускався")
+
+
+# mutates: ходить у tgstat 5 разів (ризик капчі для всіх) і пише Setting — у
+# режимі лише-читання такому запуску не місце.
+@tool("tgstat_selftest", group=GROUP, mutates=True, params={
+      "only": "звузити до перевірок через кому: channels_search, catalog_tags, "
+              "catalog_chats, channel_card, posts_search (порожнє — усі)"})
+def tgstat_selftest(only: str = ""):
+    """Чи ще працює розбір ЖИВОГО tgstat — ловить зміну розмітки, а не наші баги.
+
+    Тести на заготовках стережуть наш код і лишаються зеленими в день, коли
+    tgstat перевіршує сторінки. Цей прогін іде на живий сайт і перевіряє, що
+    поля, на яких тримаються інструменти, досі розбираються: канали знаходяться
+    і мають підписників, підбірки не спорожніли, картка великого каналу дає
+    мільйони й показники, пости мають дати й перегляди.
+
+    УВАГА: 5 запитів до tgstat за прогін. Частіше за раз на добу не ганяти —
+    сам прогін накличе капчу, і сервіс стане для всіх (щоденний cron —
+    `deploy/tgstat-canary.sh`). `verdict`: ok — розмітка на місці, broken —
+    щось розбирається порожньо, unverified — сесія непридатна, тобто НЕ
+    перевірено (це не поломка розбору).
+    """
+    res = _api("/selftest", {"only": only})
+    selftest_remember(res)
+    verdict = res.get("verdict")
+    head = fmt.kv([
+        ("вердикт", {"ok": "✓ розмітка на місці", "broken": "✗ РОЗБІР ЗЛАМАВСЯ",
+                     "unverified": "— не перевірено"}.get(verdict, verdict)),
+        ("підсумок", res.get("summary") or res.get("detail")),
+        ("стан сесії", res.get("state")),
+        ("запитів до tgstat", res.get("requests")),
+        ("перевірено", res.get("checked_at")),
+    ])
+    rows = [[c["name"], "✓" if c["ok"] else "✗", "; ".join(c.get("problems") or []) or "—"]
+            for c in (res.get("checks") or [])]
+    body = fmt.table(["перевірка", "", "що не так"], rows, [20, 1, 110]) if rows else ""
+    tail = ""
+    if verdict == "broken":
+        tail = ("\n\nЩо робити: глянути сиру сторінку (`/raw?path=…` із колонки `raw` "
+                "у відповіді сервісу) і правити парсер у `tgstat_service/app/parse.py`; "
+                "заготовки тестів — `tgstat_service/tests/fixtures/`.")
+    return fmt.joinsec(head, body) + tail

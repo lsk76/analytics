@@ -469,6 +469,7 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `tgstat_channel` | картка каналу/чату зі статистикою, 1 запит | ref, kind='' |
 | `tgstat_posts_search` | пошук ПУБЛІКАЦІЙ (потрібен Premium) | q, date_from, date_to, peer_type='all', sort='date', hide_forwards, strong, extended, minus_words, limit=40, max_pages=2 |
 | `tgstat_links` | посилання tgstat/t.me — БЕЗ запиту до tgstat | ref, post_id=0, kind='' |
+| `tgstat_selftest` **[пише]** | чи ще працює розбір ЖИВОГО tgstat (ловить зміну розмітки, а не наші баги). 5 запитів — раз на добу, щоденний cron `deploy/tgstat-canary.sh` | only='' |
 | `tgstat_manual_login` / `tgstat_manual_finish` **[пише, mcp:admin]** | ручний вхід/капча у VNC: сервіс віддає браузер людині | — |
 
 Грошей tgstat не коштує, але **частота коштує капчею**: на «Подозрение на
