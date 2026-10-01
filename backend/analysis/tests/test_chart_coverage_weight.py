@@ -114,6 +114,24 @@ def test_posts_without_sample_weigh_one(admin_client, task):
     assert cov[0]["pct"] == 4.0
 
 
+def test_point_links_to_its_own_events(admin_client, task):
+    """Клік по точці веде в список подій тієї ж республіки за той же проміжок."""
+    reg = Region.objects.create(name="Татарстан")
+    ch = Channel.objects.create(username="tat_chat", title="Чат", region_subject=reg)
+    smp = _sample(task, ch, date(2026, 8, 1), date(2026, 8, 31), span=200, asked=100)
+    _comments(task, ch, reg, date(2026, 8, 5), 20, sample=smp, critical=3)
+
+    cov = _coverage(admin_client, task=task.id)
+    url = cov[0]["url"]
+    assert f"region_id={reg.id}" in url
+    assert "event_date__range__gte=2026-08-01" in url
+    assert "event_date__range__lte=2026-08-31" in url
+    # і за цим посиланням справді лежать ті самі три події
+    r = admin_client.get(url)
+    assert r.status_code == 200
+    assert r.context["cl"].result_count == 3
+
+
 def test_overlapping_periods_are_refused():
     """Коментар із перекриття потрапив би в знаменник двічі — збір не ставимо."""
     from accounts.models import TelegramAccount

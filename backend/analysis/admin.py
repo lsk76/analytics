@@ -3239,13 +3239,24 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                 # задачі нуль подій має майже половина пар (регіон, день), і
                 # якщо їх не віддати, лінія зшивається (spanGaps) між лише
                 # ненульовими значеннями й завищує рівень удвічі.
+                # Клік по точці веде в список подій, відфільтрований так само,
+                # як точка: та сама республіка, той самий проміжок часу — як на
+                # графіку «Суб'єкти: події по часу».
+                reg_ids = dict(Region.objects.filter(
+                    name__in={r for r, _ in den if r}).values_list("name", "id"))
                 for (reg, bucket), tot in den.items():
                     if not reg or not tot:
                         continue
                     n = num.get((reg, bucket), 0)
+                    d_from, d_to = bucket_range(bucket)
                     coverage.append({"date": bucket.isoformat(), "region": reg,
                                      "pct": round(100.0 * n / tot, 2),
-                                     "n": int(round(n)), "t": int(round(tot))})
+                                     "n": int(round(n)), "t": int(round(tot)),
+                                     "url": (drill_url({
+                                         "region_id": [reg_ids[reg]],
+                                         "event_date__range__gte": d_from.isoformat(),
+                                         "event_date__range__lte": d_to.isoformat(),
+                                     }) if d_from and reg in reg_ids else "")})
                 coverage.sort(key=lambda x: (x["region"], x["date"]))
 
         # Distribution by reach buckets (vertical bar): how many events fall into
