@@ -8,7 +8,7 @@ from .registry import (SCOPE_ADMIN, SCOPE_CREATE, SCOPE_READ, SCOPE_WRITE, TOOLS
                        require_confirmation, tool)
 
 from . import (service, accounts, monitor_try, monitoring, posts, prompts,  # noqa: E402,F401
-               publish, tags, telegram, telezip)  # noqa: E402,F401  (реєструють інструменти)
+               publish, tags, telegram, telezip, tgstat)  # noqa: E402,F401  (реєструють інструменти)
 
 __all__ = ["TOOLS", "Actor", "NeedsConfirmation", "Tool", "ToolError", "actor", "call",
            "manifest", "require_confirmation",

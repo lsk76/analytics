@@ -80,7 +80,29 @@ tgstat має власний антибот: 2026-09-29 уже за ~10 запи
 - **капчу проходить людина**: `POST /auth/manual` → VNC → на tgstat пройти
   reCAPTCHA → закрити вкладку. Автоматично її не обходимо.
 
-## MCP-сервер `tgstat` (окремий)
+## MCP: tgstat у двох місцях
+
+Інструменти `tgstat_*` є В ОБОХ серверах, і це не дубль логіки: уся робота з
+сайтом однаково в сервісі (`http://tgstat:8020`), різниця лише в тому, хто
+викликає.
+
+- **`tg-analytics` (основний шлях)** — `backend/analysis/services/mcp_api/tgstat.py`.
+  Ті самі вісім інструментів, але всередині звичайного MCP-шару: право Django
+  з `mcp_api/perms.py` (читання — `analysis.view_channel`, пошук публікацій —
+  `analysis.view_post`, ручний вхід — `analysis.change_setting` + `mcp:admin`),
+  слід в аудиті, видимість така сама, як в адмінці. Нічого окремо реєструвати
+  не треба: хто бачить `tg-analytics`, той бачить і tgstat. Адреса сервісу —
+  `TGSTAT_API_URL` (дефолт `http://tgstat:8020`), тайм-аут читання
+  `TGSTAT_API_TIMEOUT` (600 с); на з'єднання — завжди 5 с, щоб виклик із
+  мережі, де tgstat не видно, падав одразу, а не через десять хвилин.
+  **У dev-стеку сервісу tgstat немає** (він у профілі `tgstat` на проді, і
+  dev-мережа до прод-контейнера не маршрутизується) — там інструменти
+  відповідають «сервіс tgstat не відповідає», і це нормально.
+- **`tgstat` (окремий stdio)** — запасний шлях для того, хто має ssh на прод і
+  не хоче підіймати Django-шар. Прив'язаний до образу контейнера: якщо
+  контейнер старіший за додавання `app/mcp_server.py`, `python -m app.mcp_server`
+  падає з `No module named app.mcp_server` — лікується пересозданням
+  контейнера з поточного образу.
 
 Власний MCP-сервер, НЕ частина `tg-analytics`: `tgstat_service/app/mcp_server.py`,
 stdio, живе в контейнері `tgstat` і ходить у HTTP-API вище на `127.0.0.1:8020`
@@ -107,7 +129,12 @@ ssh tg-analytics 'cd /opt/tg-event-analytics && docker compose -f docker-compose
 | `tgstat_manual_login` / `tgstat_manual_finish` | ЗМІНЮЄ СТАН: ручний вхід/капча у VNC |
 
 Капча/розлогін повертаються як «⚠ …» з інструкцією для людини, а не як
-порожній результат. Тести: `tgstat_service/tests/test_mcp.py`.
+порожній результат. Тести: `tgstat_service/tests/test_mcp.py` (окремий сервер),
+`backend/analysis/tests/test_mcp_tgstat.py` (шар `tg-analytics`).
+
+Стани сервісу однакові для обох: `captcha` і `login_required` приходять як 503,
+`manual` (іде ручний вхід) — як 409, і кожен перекладається в пораду людині, а
+не в сирий трейсбек.
 
 Доступу через мережевий MCP (OAuth, `mcpauth`) у цього сервера **немає** —
 лише stdio по ssh, тобто тим, хто має ssh на прод.
@@ -248,7 +275,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
 
 ## Наступні етапи (план)
 
-1. MCP-інструменти `tgstat_*` у `backend/analysis/services/mcp_api/` (HTTP до
-   `http://tgstat:8020`, як `tg-gateway`), права — через `mcp_api/perms.py`.
+1. ~~MCP-інструменти `tgstat_*` у `backend/analysis/services/mcp_api/`~~ —
+   зроблено, див. розділ «MCP: tgstat у двох місцях».
 2. Рядок tgstat у `service_health` (стан сесії, капча).
 3. Імпорт знайдених каналів/чатів у довідник `Channel` (з `region_subject`).
