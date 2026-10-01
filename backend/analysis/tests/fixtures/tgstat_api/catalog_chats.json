@@ -1,0 +1,161 @@
+{
+ "url": "/catalog/buratia-region",
+ "params": {
+  "kind": "chat",
+  "max_pages": "1"
+ },
+ "status": 200,
+ "body": {
+  "tag": "buratia-region",
+  "kind": "chat",
+  "tgstat_url": "https://tgstat.ru/tag/buratia-region",
+  "items": [
+   {
+    "kind": "chat",
+    "handle": "antidpsuu03",
+    "ref": "@antidpsuu03",
+    "tgstat_url": "https://tgstat.ru/chat/@antidpsuu03",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@antidpsuu03/stat",
+    "tme_url": "https://t.me/antidpsuu03",
+    "title": "АНТИ ДПС 03 🚔",
+    "description": "Чат дорожной обстановки и помощи на дороге в Улан-Удэ!",
+    "subscribers": 29033,
+    "category": "Транспорт",
+    "last_message": "15 часов"
+   },
+   {
+    "kind": "chat",
+    "handle": "sibircar",
+    "ref": "@sibircar",
+    "tgstat_url": "https://tgstat.ru/chat/@sibircar",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@sibircar/stat",
+    "tme_url": "https://t.me/sibircar",
+    "title": "Автобарахолка АвтоСибирь бензин залив топливо гсм",
+    "description": "Автобарахолка Общесибирская",
+    "subscribers": 8186,
+    "category": "Транспорт",
+    "last_message": "36 мин."
+   },
+   {
+    "kind": "chat",
+    "handle": "darrom03",
+    "ref": "@darrom03",
+    "tgstat_url": "https://tgstat.ru/chat/@darrom03",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@darrom03/stat",
+    "tme_url": "https://t.me/darrom03",
+    "title": "Отдам даром Кабанский район",
+    "description": "Реклама @reviemm",
+    "subscribers": 1691,
+    "category": "Другое",
+    "last_message": "7 часов"
+   },
+   {
+    "kind": "chat",
+    "handle": null,
+    "ref": "uVK0KI5dQewzYzNi",
+    "tgstat_url": "https://tgstat.ru/chat/uVK0KI5dQewzYzNi",
+    "tgstat_stat_url": "https://tgstat.ru/chat/uVK0KI5dQewzYzNi/stat",
+    "tme_url": null,
+    "title": "Улан-Удэ Октябрьский. Здоровье",
+    "description": "Чат создан в рамках реализации федерального проекта «ЗдравКонтроль» для помощи в коммуникации жителей с представителями медорганизаций города, в случаях возникновения сложностей при получении государственной медицинской помощи",
+    "subscribers": 1570,
+    "category": "Медицина",
+    "last_message": "45 дней"
+   },
+   {
+    "kind": "chat",
+    "handle": null,
+    "ref": "v6usfCPPR4AyZjM6",
+    "tgstat_url": "https://tgstat.ru/chat/v6usfCPPR4AyZjM6",
+    "tgstat_stat_url": "https://tgstat.ru/chat/v6usfCPPR4AyZjM6/stat",
+    "tme_url": null,
+    "title": "Улан-Удэ Советский-Железнодорожный.Здоровье",
+    "description": "Чат создан в рамках реализации федерального проекта «ЗдравКонтроль» для помощи в коммуникации жителей с представителями медорганизаций города, в случаях возникновения сложностей при получении государственной медицинской помощи",
+    "subscribers": 1554,
+    "category": "Медицина",
+    "last_message": "45 дней"
+   },
+   {
+    "kind": "chat",
+    "handle": "rabotodatel03",
+    "ref": "@rabotodatel03",
+    "tgstat_url": "https://tgstat.ru/chat/@rabotodatel03",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@rabotodatel03/stat",
+    "tme_url": "https://t.me/rabotodatel03",
+    "title": "РАБОТОДАТЕЛЬ 03",
+    "description": "Вакансий от прямых работодателей Бурятии! ВАХТА! Будем рады видеть Вас в нашей группе!",
+    "subscribers": 749,
+    "category": "Карьера",
+    "last_message": "11 дней"
+   },
+   {
+    "kind": "chat",
+    "handle": "ivolginski",
+    "ref": "@ivolginski",
+    "tgstat_url": "https://tgstat.ru/chat/@ivolginski",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@ivolginski/stat",
+    "tme_url": "https://t.me/ivolginski",
+    "title": "ВЕСЬ ИВОЛГИНСКИЙ РАЙОН",
+    "description": "ОБЪЯВЛЕНИЯ: Сужа, Исток, Поселье, Хойтобэе, Аэропорт, Нижняя Иволга, Иволгинск, Гурульба, Нур-Селение, Тулунжа, Ошурково",
+    "subscribers": 644,
+    "category": "Продажи",
+    "last_message": "3 дня"
+   },
+   {
+    "kind": "chat",
+    "handle": null,
+    "ref": "k-voZlokgRg5Njli",
+    "tgstat_url": "https://tgstat.ru/chat/k-voZlokgRg5Njli",
+    "tgstat_stat_url": "https://tgstat.ru/chat/k-voZlokgRg5Njli/stat",
+    "tme_url": null,
+    "title": "Работа в Улан-Удэ",
+    "description": "Группа для публикаций работы и вакансий в Улан-Удэ и в Бурятии. Можно публиковать резюме по типу «ищу работу».",
+    "subscribers": 279,
+    "category": "Карьера",
+    "last_message": "3 часа"
+   },
+   {
+    "kind": "chat",
+    "handle": "teamnavalny_uu_chat",
+    "ref": "@teamnavalny_uu_chat",
+    "tgstat_url": "https://tgstat.ru/chat/@teamnavalny_uu_chat",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@teamnavalny_uu_chat/stat",
+    "tme_url": "https://t.me/teamnavalny_uu_chat",
+    "title": "Чат сторонников Навального в Улан-Удэ",
+    "description": "‼️Запрещено (бан)‼️",
+    "subscribers": 216,
+    "category": "Политика",
+    "last_message": "49 дней"
+   },
+   {
+    "kind": "chat",
+    "handle": "vessovetski",
+    "ref": "@vessovetski",
+    "tgstat_url": "https://tgstat.ru/chat/@vessovetski",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@vessovetski/stat",
+    "tme_url": "https://t.me/vessovetski",
+    "title": "ВЕСЬ СОВЕТСКИЙ РАЙОН",
+    "description": "",
+    "subscribers": 166,
+    "category": "Продажи",
+    "last_message": "16 дней"
+   },
+   {
+    "kind": "chat",
+    "handle": "oktybrn",
+    "ref": "@oktybrn",
+    "tgstat_url": "https://tgstat.ru/chat/@oktybrn",
+    "tgstat_stat_url": "https://tgstat.ru/chat/@oktybrn/stat",
+    "tme_url": "https://t.me/oktybrn",
+    "title": "ВЕСЬ ОКТЯБРЬСКИЙ РАЙОН",
+    "description": "",
+    "subscribers": 137,
+    "category": "Продажи",
+    "last_message": "7 дней"
+   }
+  ],
+  "count": 11,
+  "pages": 1,
+  "has_more": false
+ }
+}

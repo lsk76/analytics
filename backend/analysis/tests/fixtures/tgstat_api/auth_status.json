@@ -1,0 +1,15 @@
+{
+ "url": "/auth/status",
+ "params": {},
+ "status": 200,
+ "body": {
+  "state": "ok",
+  "user": "ivan",
+  "plan": "Premium",
+  "url": "https://tgstat.ru/",
+  "title": "TGStat",
+  "detail": "",
+  "checked_at": "2026-10-01T07:00:00+00:00",
+  "usable": true
+ }
+}

@@ -129,8 +129,29 @@ ssh tg-analytics 'cd /opt/tg-event-analytics && docker compose -f docker-compose
 | `tgstat_manual_login` / `tgstat_manual_finish` | ЗМІНЮЄ СТАН: ручний вхід/капча у VNC |
 
 Капча/розлогін повертаються як «⚠ …» з інструкцією для людини, а не як
-порожній результат. Тести: `tgstat_service/tests/test_mcp.py` (окремий сервер),
-`backend/analysis/tests/test_mcp_tgstat.py` (шар `tg-analytics`).
+порожній результат.
+
+Тести трьома шарами, кожен про своє:
+
+| що | де | як запустити |
+|---|---|---|
+| розмітка tgstat → структури | `tgstat_service/tests/test_ops.py`, `test_parse.py` | у контейнері сервісу |
+| **ендпоінти HTTP-API** (назви й дефолти query-параметрів, 503 `captcha`/`login_required`, 409 `manual`, 400/404, `/links` без запиту) | `tgstat_service/tests/test_api.py` — справжній aiohttp-застосунок, підставлений лише браузер | у контейнері сервісу |
+| MCP-інструменти | `tgstat_service/tests/test_mcp.py` (окремий сервер), `backend/analysis/tests/test_mcp_tgstat.py` (шар `tg-analytics`) | відповідно в контейнері сервісу / `web` |
+
+У образі сервісу pytest не стоїть (він не потрібен у бою), тож локально —
+одноразовим контейнером, без дотику до робочого:
+
+```bash
+docker run --rm -v "$PWD/tgstat_service:/svc" -w /svc --entrypoint sh \
+  tg-event-analytics-tgstat:latest -c 'pip install -q pytest && python -m pytest tests -q'
+```
+
+Інструменти в `tg-analytics` тестуються моками (у контейнері `web` немає ні
+сервісу, ні Playwright), але **відповіді не вигадані**: знімки справжніх
+маршрутів лежать у `backend/analysis/tests/fixtures/tgstat_api/`, генерує їх
+`tgstat_service/tests/dump_api_fixtures.py` (команда — у його докстрінгу).
+Змінився формат API — перегенеруй, і розбіжність покажуть тести, а не бій.
 
 Стани сервісу однакові для обох: `captcha` і `login_required` приходять як 503,
 `manual` (іде ручний вхід) — як 409, і кожен перекладається в пораду людині, а

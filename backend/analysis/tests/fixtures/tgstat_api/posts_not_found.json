@@ -1,0 +1,17 @@
+{
+ "url": "/posts/search",
+ "params": {
+  "q": "абракадабра",
+  "max_pages": "1"
+ },
+ "status": 200,
+ "body": {
+  "query": "абракадабра",
+  "total": 0,
+  "items": [],
+  "count": 0,
+  "pages": 1,
+  "has_more": false,
+  "tgstat_search_url": "https://tgstat.ru/search"
+ }
+}
