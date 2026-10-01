@@ -1,0 +1,14 @@
+{
+ "url": "/links/@rian_ru",
+ "params": {
+  "post_id": "5"
+ },
+ "status": 200,
+ "body": {
+  "tgstat_url": "https://tgstat.ru/channel/@rian_ru",
+  "tgstat_stat_url": "https://tgstat.ru/channel/@rian_ru/stat",
+  "tme_url": "https://t.me/rian_ru",
+  "tgstat_post_url": "https://tgstat.ru/channel/@rian_ru/5",
+  "tme_post_url": "https://t.me/rian_ru/5"
+ }
+}

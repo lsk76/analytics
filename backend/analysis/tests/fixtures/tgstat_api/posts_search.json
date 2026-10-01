@@ -1,0 +1,52 @@
+{
+ "url": "/posts/search",
+ "params": {
+  "q": "Ds",
+  "max_pages": "1"
+ },
+ "status": 200,
+ "body": {
+  "query": "Ds",
+  "total": 2,
+  "items": [
+   {
+    "kind": "channel",
+    "handle": "indirimvarsa",
+    "ref": "@indirimvarsa",
+    "tgstat_url": "https://tgstat.ru/channel/@indirimvarsa",
+    "tgstat_stat_url": "https://tgstat.ru/channel/@indirimvarsa/stat",
+    "tme_url": "https://t.me/indirimvarsa",
+    "tgstat_post_url": "https://tgstat.ru/channel/@indirimvarsa/122908",
+    "tme_post_url": "https://t.me/indirimvarsa/122908",
+    "post_id": 122908,
+    "channel_title": "İndirim Varsa Anlık Fırsat Alışveriş Kampanya Kupon Haberleri",
+    "date": "14 Sep, 19:50",
+    "text": "🛍 D's Damat Ds Damat Kahverengi Desenli Klasik Deri Ayakkabi 1hf099551081m\n🎯 1399 TL / Sepette 500 TL kuponla 3 adet alımda 1232 TL 🚚 Kargo Bedava\n🛒 https://sl.n11.com/n/vvcPfmG\n#n11 #indirim #reklam #amazon #trendyol #hepsiburada",
+    "views": 49,
+    "shares": 0,
+    "forwards": 1
+   },
+   {
+    "kind": "channel",
+    "handle": "indirimpaylasim",
+    "ref": "@indirimpaylasim",
+    "tgstat_url": "https://tgstat.ru/channel/@indirimpaylasim",
+    "tgstat_stat_url": "https://tgstat.ru/channel/@indirimpaylasim/stat",
+    "tme_url": "https://t.me/indirimpaylasim",
+    "tgstat_post_url": "https://tgstat.ru/channel/@indirimpaylasim/129343",
+    "tme_post_url": "https://t.me/indirimpaylasim/129343",
+    "post_id": 129343,
+    "channel_title": "İNDİRİM PAYLAŞIMLARI 🚨🛒 Trendyol Hepsiburada Çiçeksepeti",
+    "date": "14 Sep, 19:50",
+    "text": "🛍 D's Damat Ds Damat Kahverengi Desenli Klasik Deri Ayakkabi 1hf099551081m\n🎯 1399 TL / Sepette 500 TL kuponla 3 adet alımda 1232 TL 🚚 Kargo Bedava\n🛒 https://sl.n11.com/n/vvcPfmG\n#n11 #indirim #reklam #amazon #trendyol #hepsiburada",
+    "views": 35,
+    "shares": 0,
+    "forwards": 1
+   }
+  ],
+  "count": 2,
+  "pages": 1,
+  "has_more": false,
+  "tgstat_search_url": "https://tgstat.ru/search"
+ }
+}

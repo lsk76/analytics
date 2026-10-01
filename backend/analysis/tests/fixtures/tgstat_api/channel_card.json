@@ -1,0 +1,85 @@
+{
+ "url": "/channel/@rian_ru",
+ "params": {},
+ "status": 200,
+ "body": {
+  "title": "РИА Новости",
+  "verified": true,
+  "kind": "channel",
+  "handle": "rian_ru",
+  "ref": "@rian_ru",
+  "tgstat_url": "https://tgstat.ru/channel/@rian_ru",
+  "tgstat_stat_url": "https://tgstat.ru/channel/@rian_ru/stat",
+  "tme_url": "https://t.me/rian_ru",
+  "geo_lang": "Россия, Русский",
+  "category": "Новости и СМИ",
+  "description": "",
+  "rkn_registered": true,
+  "stats": {
+   "subscribers": {
+    "value": 3039296,
+    "raw": "3 039 296",
+    "details": {
+     "today": -353,
+     "week": -4107,
+     "month": 19623
+    }
+   },
+   "ci": {
+    "value": 20200,
+    "raw": "20 200",
+    "details": {
+     "mentioning_channels": 47739,
+     "mentions": 1071305,
+     "reposts": 1602224
+    }
+   },
+   "avg_post_reach": {
+    "value": 211798,
+    "raw": "211 798",
+    "details": {
+     "err": 7.0,
+     "err24": 6.5
+    }
+   },
+   "avg_ad_reach": {
+    "value": 198511,
+    "raw": "198 511",
+    "details": {
+     "12h": 162500,
+     "24h": 198500,
+     "48h": 228700
+    }
+   },
+   "age": {
+    "value": "9 лет 7 месяцев",
+    "raw": "9 лет 7 месяцев",
+    "details": {
+     "created": "28.02.2017",
+     "added_to_tgstat": "09.05.2017"
+    }
+   },
+   "err_percent": {
+    "value": 7.0,
+    "raw": "7%"
+   },
+   "er_percent": {
+    "value": 0.86,
+    "raw": "0.86%",
+    "details": {
+     "forwards": 301,
+     "comments": null,
+     "reactions": 1500
+    }
+   },
+   "posts": {
+    "value": 344941,
+    "details": {
+     "yesterday": 52,
+     "week": 418,
+     "month": 1837
+    }
+   }
+  }
+ }
+}

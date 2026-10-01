@@ -1,0 +1,10 @@
+{
+ "url": "/health",
+ "params": {},
+ "status": 200,
+ "body": {
+  "ok": true,
+  "browser": true,
+  "manual": false
+ }
+}

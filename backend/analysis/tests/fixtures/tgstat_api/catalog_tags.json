@@ -1,0 +1,21 @@
+{
+ "url": "/catalog/tags",
+ "params": {
+  "kind": "geo"
+ },
+ "status": 200,
+ "body": {
+  "kind": "geo",
+  "items": [
+   {
+    "slug": "buratia-region",
+    "title": "Бурятия"
+   },
+   {
+    "slug": "sakha-region",
+    "title": "Якутия"
+   }
+  ],
+  "count": 2
+ }
+}

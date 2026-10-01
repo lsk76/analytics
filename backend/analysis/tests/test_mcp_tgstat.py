@@ -5,6 +5,9 @@
 машинний стан у пораду людині й чи не падає інструмент сирим трейсбеком, коли
 контейнера немає.
 """
+import json
+from pathlib import Path
+
 import httpx
 import pytest
 import respx
@@ -148,3 +151,90 @@ def test_connect_timeout_is_short_not_the_read_one():
     TOOLS["tgstat_catalog_tags"]({})
     assert captured["timeout"]["connect"] == 5.0
     assert captured["timeout"]["read"] > 60
+
+
+# --- контракт із живим сервісом ------------------------------------------------
+# Мок бреше ровно настільки, наскільки вигадана його відповідь. Нижче відповіді
+# НЕ вигадані: це знімки справжніх маршрутів і парсерів сервісу tgstat, зроблені
+# `tgstat_service/tests/dump_api_fixtures.py` (там же — як перегенерувати).
+# Якщо формат API зміниться, а інструменти — ні, впадуть саме ці тести.
+
+GOLDEN = Path(__file__).parent / "fixtures" / "tgstat_api"
+
+
+def golden(name: str) -> dict:
+    return json.loads((GOLDEN / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def serve(*names):
+    """Підняти на моку ті самі URL, що віддав справжній застосунок."""
+    for name in names:
+        g = golden(name)
+        respx.get(f"{API}{g['url']}").mock(
+            return_value=httpx.Response(g["status"], json=g["body"]))
+
+
+@respx.mock
+def test_golden_status_renders_real_session():
+    serve("health", "auth_status")
+    out = TOOLS["tgstat_status"]({})
+    assert "ivan (Premium)" in out and "браузер" in out
+
+
+@respx.mock
+def test_golden_channel_card_renders_real_stats():
+    serve("channel_card")
+    out = TOOLS["tgstat_channel"]({"ref": "@rian_ru"})
+    assert "РИА Новости" in out and "@rian_ru ✔" in out
+    assert "підписники: 3 039 296" in out          # з приростами в дужках
+    assert "індекс цитування: 20 200" in out
+    assert "Новости и СМИ" in out and "РКН" in out
+    assert "https://tgstat.ru/channel/@rian_ru/stat" in out
+
+
+@respx.mock
+def test_golden_channels_search_renders_every_card():
+    serve("channels_search")
+    g = golden("channels_search")
+    out = TOOLS["tgstat_channels_search"]({"q": "Бурятия", "max_pages": 1})
+    assert f"Канали за «Бурятия»: {g['body']['count']}" in out
+    first = g["body"]["items"][0]
+    assert first["ref"] in out and first["title"] in out
+    # кожен знайдений канал має опинитись у відповіді, а не лише перші рядки
+    assert all(item["ref"] in out for item in g["body"]["items"])
+
+
+@respx.mock
+def test_golden_catalog_chats_and_tags():
+    serve("catalog_tags", "catalog_chats")
+    tags = TOOLS["tgstat_catalog_tags"]({"kind": "geo"})
+    assert "buratia-region — Бурятия" in tags
+
+    out = TOOLS["tgstat_catalog"]({"tag": "buratia-region", "kind": "chat",
+                                   "max_pages": 1})
+    body = golden("catalog_chats")["body"]
+    assert out.startswith(f"Чати підбірки buratia-region ({body['tgstat_url']})")
+    assert body["items"][0]["ref"] in out
+
+
+@respx.mock
+def test_golden_posts_search_found_and_empty():
+    serve("posts_search")
+    body = golden("posts_search")["body"]
+    out = TOOLS["tgstat_posts_search"]({"q": "Ds", "max_pages": 1})
+    assert f"знайдено {body['total']}" in out and "показано" in out
+    assert body["items"][0]["ref"] in out
+    assert body["items"][0]["tme_post_url"] in out
+
+    respx.get(f"{API}/posts/search").mock(return_value=httpx.Response(
+        200, json=golden("posts_not_found")["body"]))
+    empty = TOOLS["tgstat_posts_search"]({"q": "абракадабра"})
+    assert "знайдено 0" in empty and "\n1." not in empty
+
+
+@respx.mock
+def test_golden_links_pass_through():
+    serve("links")
+    out = TOOLS["tgstat_links"]({"ref": "@rian_ru", "post_id": 5})
+    for value in golden("links")["body"].values():
+        assert value in out
