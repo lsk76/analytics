@@ -1,0 +1,16 @@
+{% extends "admin/change_list.html" %}
+
+{% comment %}
+  Кнопка вивантаження довідника. Веде на admin:analysis_channel_export з ТИМ
+  САМИМ query string, що й поточний список, — тому експортується рівно те, що
+  людина відфільтрувала зліва (напр. «Підписники від 10000»), а не сторінка й не
+  виділені галочками рядки.
+{% endcomment %}
+{% block object-tools-items %}
+  <li>
+    <a href="{% url 'admin:analysis_channel_export' %}{{ cl.get_query_string }}"
+       class="addlink" style="background-image:none"
+       title="Вивантажити у CSV усі канали, що підходять під поточні фільтри">⬇ CSV</a>
+  </li>
+  {{ block.super }}
+{% endblock %}
