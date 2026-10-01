@@ -238,3 +238,87 @@ def test_golden_links_pass_through():
     out = TOOLS["tgstat_links"]({"ref": "@rian_ru", "post_id": 5})
     for value in golden("links")["body"].values():
         assert value in out
+
+
+# --- живий самоконтроль розбору ------------------------------------------------
+# Інструмент сам нічого не парсить: прогін робить сервіс на живому tgstat
+# (tgstat_service/app/selftest.py), а тут перевіряємо, що вердикт доходить до
+# людини й лишає слід, за яким видно поломку без читання логів.
+
+@pytest.mark.django_db
+@respx.mock
+def test_selftest_ok_is_rendered_and_remembered():
+    respx.get(f"{API}/selftest").mock(return_value=httpx.Response(200, json={
+        "verdict": "ok", "state": "ok", "requests": 5,
+        "checked_at": "2026-10-01T07:00:00+00:00",
+        "summary": "усі 5 перевірки пройшли",
+        "checks": [{"name": "channels_search", "ok": True, "problems": []},
+                   {"name": "channel_card", "ok": True, "problems": []}]}))
+    out = TOOLS["tgstat_selftest"]({})
+    assert "розмітка на місці" in out and "усі 5 перевірки" in out
+    from analysis.services.mcp_api import tgstat as tgs
+    assert "ok:" in tgs.selftest_last()
+
+
+@pytest.mark.django_db
+@respx.mock
+def test_selftest_broken_names_the_parser_and_what_to_do():
+    respx.get(f"{API}/selftest").mock(return_value=httpx.Response(200, json={
+        "verdict": "broken", "state": "ok", "requests": 5,
+        "checked_at": "2026-10-01T07:00:00+00:00",
+        "summary": "зламалось 1 з 5: channels_search",
+        "checks": [{"name": "channels_search", "ok": False, "raw": "POST /channels/search",
+                    "problems": ["пошук каналів: розібрано 0, а було хоча б 10"]},
+                   {"name": "channel_card", "ok": True, "problems": []}]}))
+    out = TOOLS["tgstat_selftest"]({})
+    assert "РОЗБІР ЗЛАМАВСЯ" in out
+    assert "channels_search" in out and "розібрано 0" in out
+    assert "parse.py" in out
+    from analysis.services.mcp_api import tgstat as tgs
+    assert "broken:" in tgs.selftest_last()
+
+
+@pytest.mark.django_db
+@respx.mock
+def test_selftest_unverified_is_not_a_breakage():
+    respx.get(f"{API}/selftest").mock(return_value=httpx.Response(503, json={
+        "verdict": "unverified", "state": "captcha", "requests": 0,
+        "detail": "tgstat просить капчу"}))
+    # 503 від сервісу — це його стан «потрібна людина», і він приходить порадою
+    with pytest.raises(ToolError) as e:
+        TOOLS["tgstat_selftest"]({})
+    assert "капч" in str(e.value)
+
+
+@pytest.mark.django_db
+def test_service_health_shows_the_last_selftest():
+    from analysis.models import Setting
+    from analysis.services.mcp_api import service as svc
+    rows = dict(svc._tgstat_health())
+    assert rows["самоконтроль розбору"] == "ще не запускався"
+
+    Setting.objects.update_or_create(
+        key="tgstat_selftest_last",
+        defaults={"value": "2026-10-01T07:00:00+00:00 broken: зламалось 1 з 5: channel_card"})
+    rows = dict(svc._tgstat_health())
+    assert "ЗЛАМАВСЯ" in rows["⚠"]
+
+
+@pytest.mark.django_db
+def test_selftest_is_blocked_in_readonly_mode(monkeypatch):
+    """П'ять запитів до tgstat (і ризик капчі для всіх) — не для читача."""
+    monkeypatch.setenv("MCP_READONLY", "1")
+    with pytest.raises(ToolError) as e:
+        TOOLS["tgstat_selftest"]({})
+    assert "лише-читання" in str(e.value)
+
+
+@pytest.mark.django_db
+@respx.mock
+def test_selftest_on_old_container_says_recreate_it():
+    """Контейнер, старіший за код, віддає 404 — це не «немає сервісу»."""
+    respx.get(f"{API}/selftest").mock(return_value=httpx.Response(
+        404, text="404: Not Found"))
+    with pytest.raises(ToolError) as e:
+        TOOLS["tgstat_selftest"]({})
+    assert "старіший" in str(e.value) and "force-recreate" in str(e.value)

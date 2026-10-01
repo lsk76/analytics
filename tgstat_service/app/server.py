@@ -11,6 +11,7 @@
 
 Сесія:
   GET  /health             процес живий, чи піднятий Chrome
+  GET  /selftest           чи ще працює розбір живого tgstat (5 запитів, раз на добу)
   GET  /auth/status        стан сесії (?reload=1 — перезайти на сайт)
   POST /auth/login         вивести tgstat у вікно VNC для ручного входу
   GET  /auth/screenshot    PNG поточної вкладки — глянути без VNC
@@ -27,7 +28,7 @@ import logging
 
 from aiohttp import web
 
-from . import ops
+from . import ops, selftest
 from .browser import Browser, TgstatAuthError
 from .config import Config
 from .parse import Restricted
@@ -130,6 +131,20 @@ async def peer_links(request: web.Request) -> web.Response:
                            base=cfg.base_url))
 
 
+async def selftest_run(request: web.Request) -> web.Response:
+    """Живий самоконтроль розбору: 5 запитів до tgstat, раз на добу (капча!).
+
+    200 + verdict=ok — розмітка на місці; 200 + verdict=broken — щось
+    розбирається порожньо (деталі в checks); 503 + verdict=unverified —
+    сесія непридатна, тобто НЕ перевірено (не плутати з «зламалось»).
+    """
+    res = await selftest.run(request.app["browser"], only=_q(request, "only", ""))
+    status = 503 if res["verdict"] == selftest.VERDICT_UNVERIFIED else 200
+    if status == 503:
+        res["how_to_login"] = LOGIN_HOW
+    return _json(res, status=status)
+
+
 async def health(request: web.Request) -> web.Response:
     browser: Browser = request.app["browser"]
     return _json({"ok": True, "browser": browser.running, "manual": browser.manual})
@@ -223,6 +238,7 @@ def make_app(cfg: Config) -> web.Application:
     app["cfg"] = cfg
     app["browser"] = Browser(cfg)
     app.router.add_get("/health", health)
+    app.router.add_get("/selftest", selftest_run)
     app.router.add_get("/auth/status", auth_status)
     app.router.add_post("/auth/login", auth_login)
     app.router.add_get("/auth/screenshot", auth_screenshot)

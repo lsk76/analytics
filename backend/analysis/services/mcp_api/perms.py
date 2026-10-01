@@ -75,6 +75,8 @@ PERMS = {
     "tgstat_channel": "analysis.view_channel",
     "tgstat_links": "analysis.view_channel",
     "tgstat_posts_search": "analysis.view_post",
+    # живий самоконтроль ходить у tgstat 5 разів і пише Setting — не для читача
+    "tgstat_selftest": "analysis.change_setting",
     "tgstat_manual_login": "analysis.change_setting",
     "tgstat_manual_finish": "analysis.change_setting",
     # --- TeleZip: розвідка для задач

@@ -31,6 +31,20 @@ STAGE_WORKER = {
 }
 
 
+def _tgstat_health() -> list:
+    """Один рядок про tgstat: що показав останній живий самоконтроль розбору."""
+    from analysis.services.mcp_api import tgstat as tgs
+    last = tgs.selftest_last()
+    rows = [("самоконтроль розбору", last)]
+    if last.startswith("ще не"):
+        rows.append(("що зробити", "tgstat_selftest (5 запитів до tgstat) або щоденний "
+                                   "cron deploy/tgstat-canary.sh"))
+    elif " broken:" in last:
+        rows.append(("⚠", "РОЗБІР tgstat ЗЛАМАВСЯ — tgstat_selftest покаже, що саме, "
+                          "парсери в tgstat_service/app/parse.py"))
+    return rows
+
+
 def _gateway_health(acc) -> list:
     """Живий /health gateway + зріз транспортних збоїв за годину з БД."""
     import httpx
@@ -170,6 +184,12 @@ def service_health():
 
     # --- tg-gateway ---------------------------------------------------------
     parts.append(fmt.section("tg-gateway", fmt.kv(_gateway_health(acc))))
+
+    # --- tgstat -------------------------------------------------------------
+    # Сам сервіс тут НЕ опитуємо (кожен зайвий похід у tgstat — ризик капчі):
+    # показуємо останній прогін живого самоконтролю, який раз на добу робить
+    # cron, щоб «розбір зламався» не чекало, поки хтось спитає.
+    parts.append(fmt.section("tgstat", fmt.kv(_tgstat_health())))
 
     # --- джерела інформпростору --------------------------------------------
     # «Прострочений полінг» рахуємо ЛИШЕ по тих, кого воркер реально бере: у
