@@ -1,6 +1,6 @@
 # Окремий stateless-сервіс TGStat (docs/tgstat-service.md). Без Django і БД:
 # Playwright + постійний headed Chrome на Xvfb, вхід руками через noVNC.
-FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.63.0-jammy
 
 # Без noninteractive apt зависає на запитах debconf (розкладка клавіатури тощо).
 ARG DEBIAN_FRONTEND=noninteractive
