@@ -286,7 +286,11 @@ class Command(BaseCommand):
                            rnd, probe=False):
         ids = rnd.sample(range(lo, hi + 1), n)
         ch = mc.channel
-        n_returned = n_text = n_user = 0
+        # n_asked — скільки номерів Telegram нам ФАКТИЧНО віддав на запит. Саме це
+        # число йде в паспорт, а не заплановане n: якщо збір обірвався на FloodWait,
+        # вага коментарів цього чату порахувалась би по n і вийшла б заниженою —
+        # чат виглядав би меншим, ніж він є.
+        n_asked = n_returned = n_text = n_user = 0
         posts = []
         for i in range(0, len(ids), BATCH):
             chunk = ids[i:i + BATCH]
@@ -302,6 +306,7 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(
                     f"    {type(e).__name__}: {str(e)[:70]} — чат обірвано на {n_returned}"))
                 break
+            n_asked += len(chunk)
             for m in msgs:
                 if m is None:            # видалене / службове / неіснуючий id
                     continue
@@ -335,17 +340,21 @@ class Command(BaseCommand):
         # ORM у async-контексті — лише через sync_to_async
         @sync_to_async(thread_sensitive=True)
         def _persist():
-            if posts and not probe:          # у режимі перевірки пости не пишемо
-                Post.objects.bulk_create(posts, batch_size=1000, ignore_conflicts=True)
-            MonitorSample.objects.update_or_create(
+            # Паспорт ПЕРШИМ: з нього коментарі беруть вагу, тож спершу має
+            # існувати рядок, на який вони пошлються.
+            sample, _ = MonitorSample.objects.update_or_create(
                 task=task, channel=ch, period_start=d_from,
                 defaults={"period_end": d_to, "id_lo": lo, "id_hi": hi,
-                          "n_requested": n, "n_returned": n_returned,
+                          "n_requested": n_asked, "n_returned": n_returned,
                           "n_text": n_text, "n_user": n_user})
+            if posts and not probe:          # у режимі перевірки пости не пишемо
+                for p in posts:
+                    p.sample = sample
+                Post.objects.bulk_create(posts, batch_size=1000, ignore_conflicts=True)
 
         await _persist()
-        est_user = int(round((hi - lo) * n_user / n)) if n else 0
+        est_user = int(round((hi - lo) * n_user / n_asked)) if n_asked else 0
         rate = (n_user / n_text * 100) if n_text else 0
         flag = "  ⚠ РУПОР, не чат" if rate < 20 else ""
-        self.stdout.write(f"    {'перевірка' if probe else f'збережено {len(posts):>5,}'} | текст {n_text}/{n} | "
+        self.stdout.write(f"    {'перевірка' if probe else f'збережено {len(posts):>5,}'} | текст {n_text}/{n_asked} | "
                           f"від людей {n_user} ({rate:.0f}%) | людських за період ~{est_user:,}{flag}")

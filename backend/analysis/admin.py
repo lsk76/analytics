@@ -13,8 +13,9 @@ from django.contrib import admin, messages
 from django.contrib.admin.widgets import AdminDateWidget
 from django.core.paginator import Paginator
 from django.db import connection
-from django.db.models import Count, Sum, F, Q
-from django.db.models.functions import TruncDate, TruncWeek, TruncMonth, Coalesce
+from django.db.models import Count, Sum, F, Q, FloatField, ExpressionWrapper, Value
+from django.db.models.functions import (TruncDate, TruncWeek, TruncMonth, Coalesce,
+                                        Cast, NullIf)
 from django.shortcuts import render
 from django.urls import path, reverse
 from django.utils.functional import cached_property
@@ -3123,23 +3124,39 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
 
         # ---- % подій від усіх повідомлень ------------------------------------
         # Є лише для monitor-задач (критика): частка критичних коментарів серед
-        # УСІХ повідомлень чатів. Для подієвих задач знаменника немає — блок
-        # порожній і картка не рендериться.
+        # усіх коментарів у чатах. Для подієвих задач знаменника немає — дані
+        # порожні і графік не рендериться.
         #
-        # ЗНАМЕННИК ЗБЕРІГАЄТЬСЯ ПО-РІЗНОМУ, залежно від способу збору задачі
+        # ЗНАМЕННИК РАХУЄТЬСЯ ПО-РІЗНОМУ, залежно від способу збору задачі
         # (AnalysisTask.mon_collect_source) — звідси дві гілки:
-        #   telezip (суцільний потік) → ChannelDailyStat: денний агрегат по
-        #     (задача, канал, день), у знаменнику авторитетний лік TeleZip.
-        #   tg_sample (вибірка) → самі Post. Суцільного ліку повідомлень чату
-        #     вибірка не робить і ChannelDailyStat для неї порожній НАЗАВЖДИ, а
-        #     «всі повідомлення» тут = всі ВИБРАНІ повідомлення; кожне лежить
-        #     окремим Post із posted_at, тож знаменник рахується на будь-яку
-        #     гранулярність, включно з добовою. Беремо ВСІ пости задачі, а не
-        #     лише ті, що дійшли до прескріну: картка називається «% від усіх
-        #     повідомлень», і фільтр довжини (mon_min_len/mon_max_len) відсіює
-        #     більшість — по кандидатах частка вийшла б удвічі-втричі вищою.
-        #     Паспорти вибірки (MonitorSample) у знаменник НЕ йдуть: вони
-        #     місячні, а Post дає те саме число з точністю до дня.
+        #
+        #   СУЦІЛЬНИЙ ЗБІР (telezip) → ChannelDailyStat: денний лік повідомлень
+        #     від TeleZip, авторитетний. Чисельник — самі події.
+        #
+        #   ЗБІР ВИБІРКОЮ (tg_sample) → коментарі, ЗВАЖЕНІ на паспорт вибірки.
+        #     Суцільного ліку вибірка не робить, ChannelDailyStat для неї
+        #     порожній назавжди. Зібране — лише частина чату, і частина ця в
+        #     різних чатах і періодах РІЗНА: квота збору однакова на кожен
+        #     запуск, а обсяг розмови — ні. Тому кожен коментар іде в суму не
+        #     одиницею, а своєю вагою (MonitorSample.weight):
+        #
+        #         вага = повідомлень у чаті за період ÷ запитано номерів
+        #
+        #     Без ваги тихий тиждень тягне частку нарівні з тижнем виборів, у
+        #     якому розмови втричі більше, і підсумок з'їжджає до рівня тихого.
+        #     Усередині одного чату за один період вага скорочується — там
+        #     число таке саме, як без зважування.
+        #
+        #     Два уточнення: у знаменник ідуть лише коментарі ВІД ЛЮДЕЙ
+        #     (is_channel_repost=False) — автопересилки каналу в групу
+        #     обговорень не є думкою людини, а в групі новинного каналу вони
+        #     бувають більшістю потоку; коментарі без паспорта (зібране до
+        #     запровадження ваг) важать 1, тобто поводяться як раніше.
+        #
+        #     Чисельник тут теж рахується по коментарях, а не по подіях: вага
+        #     лежить на коментарі. У monitor подія і коментар — одне до одного
+        #     (monitor_stages.sync_comment_event), тож число подій не міняється,
+        #     а фільтри списку подій зберігаються через event__in.
         coverage = []
         cov_task_ids = list(qs.order_by().values_list("task_id", flat=True).distinct())
         if cov_task_ids:
@@ -3156,8 +3173,26 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                 id__in=cov_task_ids,
                 mon_collect_source=AnalysisTask.MON_SRC_TG_SAMPLE,
             ).values_list("id", flat=True))
-            tot_rows = []                       # (день, регіон, повідомлень)
             stream_ids = [i for i in cov_task_ids if i not in sample_ids]
+
+            def _by_day(p_qs, agg):
+                """(день, регіон, число) — на будь-яку гранулярність згорне _bstart."""
+                if d_gte:
+                    p_qs = p_qs.filter(posted_at__date__gte=d_gte)
+                if d_lte:
+                    p_qs = p_qs.filter(posted_at__date__lte=d_lte)
+                return [(r["d"], r["region_subject__name"], r["v"] or 0)
+                        for r in p_qs.annotate(d=TruncDate("posted_at"))
+                        .values("d", "region_subject__name").annotate(v=agg)]
+
+            # Вага коментаря. Без паспорта або з нульовим лічильником запитаних
+            # номерів — 1.0: такий коментар рахується поштучно, як до зважування.
+            WEIGHT = Coalesce(
+                Cast(F("sample__id_hi") - F("sample__id_lo"), FloatField())
+                / Cast(NullIf(F("sample__n_requested"), Value(0)), FloatField()),
+                Value(1.0), output_field=FloatField())
+
+            tot_rows, num_rows = [], []      # (день, регіон, знаменник) / (…, чисельник)
             if stream_ids:
                 tot_qs = ChannelDailyStat.objects.order_by().filter(task_id__in=stream_ids)
                 if d_gte:
@@ -3168,15 +3203,12 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                              for r in tot_qs.values("date", "channel__region_subject__name")
                              .annotate(t=Sum(Coalesce("telezip_total", "total")))]
             if sample_ids:
-                p_qs = Post.objects.order_by().filter(task_id__in=sample_ids,
-                                                      posted_at__isnull=False)
-                if d_gte:
-                    p_qs = p_qs.filter(posted_at__date__gte=d_gte)
-                if d_lte:
-                    p_qs = p_qs.filter(posted_at__date__lte=d_lte)
-                tot_rows += [(r["d"], r["region_subject__name"], r["n"])
-                             for r in p_qs.annotate(d=TruncDate("posted_at"))
-                             .values("d", "region_subject__name").annotate(n=Count("id"))]
+                base = Post.objects.order_by().filter(
+                    task_id__in=sample_ids, posted_at__isnull=False,
+                    is_channel_repost=False).annotate(w=WEIGHT)
+                tot_rows += _by_day(base, Sum("w"))
+                num_rows += _by_day(base.filter(event__in=qs.values("id")), Sum("w"))
+
             if tot_rows:
                 def _bstart(d):
                     if gran == "week":
@@ -3184,16 +3216,24 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                     if gran == "month":
                         return d.replace(day=1)
                     return d
-                den = {}
+                den, num = {}, {}
                 for day, reg, total in tot_rows:
                     key = (reg or "", _bstart(day))
                     den[key] = den.get(key, 0) + (total or 0)
-                num_rows = (src.qs.exclude(region_subject__isnull=True)
-                            .exclude(**{f"{src.date_field}__isnull": True})
-                            .annotate(bucket=src.trunc(src.date_field))
-                            .values("bucket", "region_subject__name")
-                            .annotate(n=Count("id", distinct=True)))
-                num = {(r["region_subject__name"], r["bucket"]): r["n"] for r in num_rows}
+                for day, reg, n in num_rows:
+                    key = (reg or "", _bstart(day))
+                    num[key] = num.get(key, 0) + (n or 0)
+                if stream_ids:
+                    # Задачі суцільного збору: чисельник — самі події, ваг там нема.
+                    ev_rows = (src.qs.filter(task_id__in=stream_ids)
+                               .exclude(region_subject__isnull=True)
+                               .exclude(**{f"{src.date_field}__isnull": True})
+                               .annotate(bucket=src.trunc(src.date_field))
+                               .values("bucket", "region_subject__name")
+                               .annotate(n=Count("id", distinct=True)))
+                    for r in ev_rows:
+                        key = (r["region_subject__name"], r["bucket"])
+                        num[key] = num.get(key, 0) + r["n"]
                 # Точки віддаємо ПО ЗНАМЕННИКУ, а не по числителю: період без
                 # критики — це 0%, а не пропуск. На добовій сітці вибіркової
                 # задачі нуль подій має майже половина пар (регіон, день), і
@@ -3204,7 +3244,8 @@ class EventAdmin(ScopedAdminMixin, admin.ModelAdmin):
                         continue
                     n = num.get((reg, bucket), 0)
                     coverage.append({"date": bucket.isoformat(), "region": reg,
-                                     "pct": round(100.0 * n / tot, 2), "n": n, "t": tot})
+                                     "pct": round(100.0 * n / tot, 2),
+                                     "n": int(round(n)), "t": int(round(tot))})
                 coverage.sort(key=lambda x: (x["region"], x["date"]))
 
         # Distribution by reach buckets (vertical bar): how many events fall into

@@ -753,8 +753,9 @@ def sample_collect(task: str, date_from: str, date_to: str, mode: str = "dry_run
     if d_to < d_from:
         raise ToolError("date_to раніше за date_from")
     if (d_to - d_from).days > 366:
-        raise ToolError("вікно >366 днів: вибірку замовляють по місяцях — так вікна "
-                        "не перекриваються і частку можна рахувати по місяцях")
+        raise ToolError("період збору >366 днів: збирають тижнем або місяцем — "
+                        "довжина періоду на частку не впливає (кожен коментар бере "
+                        "вагу свого періоду), але довгий період нічим потім не нарізати")
 
     active = MonitorSampleJob.objects.filter(task=t, status__in=["pending", "running"]).first()
     if active:
@@ -762,6 +763,24 @@ def sample_collect(task: str, date_from: str, date_to: str, mode: str = "dry_run
                         f"{active.date_from}…{active.date_to}): два збори одночасно "
                         "поділили б ті самі акаунти і зіпсували б паспорти вікон. "
                         "Стан — samples_list; зняти — sample_cancel.")
+
+    # Періоди збору не мають перекриватись: коментар із перекриття потрапив би в
+    # знаменник двічі, з різними вагами, і частка поїхала б без жодної ознаки.
+    # Повторний збір за ТОЙ САМИЙ період — це інше, він переписує паспорт (нижче
+    # про це попередження).
+    clash = None
+    if job_mode in (MonitorSampleJob.MODE_COLLECT, MonitorSampleJob.MODE_PROBE):
+        clash = (MonitorSample.objects.filter(task=t, period_start__lte=d_to,
+                                              period_end__gte=d_from)
+                 .exclude(period_start=d_from, period_end=d_to)
+                 .order_by("period_start").first())
+        if clash:
+            raise ToolError(
+                f"період {d_from}…{d_to} перекривається з уже зібраним "
+                f"{clash.period_start}…{clash.period_end}: коментарі з перекриття "
+                "двічі потрапили б у знаменник частки, з різними вагами. Візьми "
+                "період, що не налазить на наявні (їх видно в samples_list), або "
+                "повтори рівно той самий період — тоді паспорти перепишуться.")
 
     chats = list(MonitorChat.objects.filter(task=t, is_active=True)
                  .select_related("channel", "channel__region_subject", "tg_account"))
