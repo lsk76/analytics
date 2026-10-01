@@ -105,30 +105,45 @@ async def check_channel_card(browser) -> tuple[list, str]:
     return out, f"GET /channel/{PROBE_CHANNEL}/stat"
 
 
+def _problems_posts(items: list, total) -> list:
+    """Інваріанти пошуку публікацій — окремо від запиту, щоб перевірятись тестом."""
+    out = []
+    if (total or 0) < MIN_TOTAL:
+        out.append(f"пошук публікацій: «Найдено» = {total}, а за «{PROBE_WORD}» "
+                   f"їх мають бути тисячі — лічильник не розібрався")
+    if len(items) < MIN_POSTS:
+        out.append(f"пошук публікацій: розібрано {len(items)} постів за «{PROBE_WORD}» "
+                   "— пости більше не парсяться або зник Premium")
+        return out
+    for field in ("post_id", "ref", "date"):
+        empty = [i for i in items if not i.get(field)]
+        if empty:
+            out.append(f"пошук публікацій: у {len(empty)} з {len(items)} постів "
+                       f"порожнє «{field}»")
+    # Посилання на t.me є ЛИШЕ в публічних каналів і чатів: у закритого чату
+    # замість @username хеш (напр. 6mfyXsNMdTI0Yjgy), і публічного посилання на
+    # його пост не існує. Вимагати його від усіх — хибна тривога, яку перший же
+    # живий прогін і спіймав.
+    public = [i for i in items if str(i.get("ref") or "").startswith("@")]
+    no_link = [i for i in public if not i.get("tme_post_url")]
+    if no_link:
+        out.append(f"пошук публікацій: у {len(no_link)} з {len(public)} ПУБЛІЧНИХ "
+                   "постів не склалось посилання на t.me")
+    if not any(i.get("text") for i in items):
+        out.append("пошук публікацій: ні в одного поста немає тексту")
+    # Перегляди бувають не скрізь (у чатах їх немає) — тому «хоч в одного»,
+    # а не «в усіх»: живі дані дають приблизно 7 із 20.
+    if not any(i.get("views") for i in items):
+        out.append("пошук публікацій: ні в одного поста немає переглядів")
+    return out
+
+
 async def check_posts_search(browser) -> tuple[list, str]:
     """Пошук публікацій — Premium: тут ламається і розмітка, і тариф."""
     since = (date.today() - timedelta(days=3)).isoformat()
     res = await ops.search_posts(browser, PROBE_WORD, date_from=since, limit=20,
                                  max_pages=1)
-    items = res.get("items") or []
-    out = []
-    if (res.get("total") or 0) < MIN_TOTAL:
-        out.append(f"пошук публікацій: «Найдено» = {res.get('total')}, а за «{PROBE_WORD}» "
-                   f"їх мають бути тисячі — лічильник не розібрався")
-    if len(items) < MIN_POSTS:
-        out.append(f"пошук публікацій: розібрано {len(items)} постів за «{PROBE_WORD}» "
-                   f"з {since} — пости більше не парсяться або зник Premium")
-        return out, "POST /search"
-    for field in ("post_id", "ref", "date", "tme_post_url"):
-        empty = [i for i in items if not i.get(field)]
-        if empty:
-            out.append(f"пошук публікацій: у {len(empty)} з {len(items)} постів "
-                       f"порожнє «{field}»")
-    if not any(i.get("text") for i in items):
-        out.append("пошук публікацій: ні в одного поста немає тексту")
-    if not any(i.get("views") for i in items):
-        out.append("пошук публікацій: ні в одного поста немає переглядів")
-    return out, "POST /search"
+    return _problems_posts(res.get("items") or [], res.get("total")), "POST /search"
 
 
 # Порядок має значення: найдешевша й найпоказовіша перевірка перша, щоб у разі

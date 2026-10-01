@@ -169,3 +169,24 @@ def test_endpoint_is_503_when_session_cannot_be_used():
         assert "vnc" in body["how_to_login"].lower()
     finally:
         client.run(client.close())
+
+
+def test_closed_chat_without_tme_link_is_not_a_breakage():
+    """У закритого чату замість @username хеш — публічного t.me-посилання немає.
+
+    Перший же живий прогін (01.10.2026) назвав це поломкою: з 20 постів один був
+    із «Чат ЧП Краснодара» (ref 6mfyXsNMdTI0Yjgy). Стеля була хибна, не tgstat.
+    """
+    items = [{"post_id": i, "ref": "@public", "date": "1 окт", "views": 10,
+              "text": "t", "tme_post_url": "https://t.me/public/1"} for i in range(1, 20)]
+    items.append({"post_id": 99, "ref": "6mfyXsNMdTI0Yjgy", "date": "1 окт",
+                  "text": "t", "tme_post_url": ""})
+    problems = selftest._problems_posts(items, total=949397)
+    assert problems == [], problems
+
+
+def test_public_post_without_tme_link_is_still_caught():
+    items = [{"post_id": i, "ref": "@public", "date": "1 окт", "views": 10,
+              "text": "t", "tme_post_url": ""} for i in range(1, 11)]
+    problems = selftest._problems_posts(items, total=949397)
+    assert any("ПУБЛІЧНИХ" in p for p in problems), problems
