@@ -24,7 +24,8 @@ Claude Code ──stdio──> mcp_server/server.py ──docker compose exec -T
 
 - **`backend/analysis/services/mcp_api/`** — УСЯ предметна логіка: реєстр
   інструментів, резолви посилань, форматери; `telezip.py` — повний пошуковий
-  API TeleZip (контракт — `docs/telezip-api.md`). Хендлер повертає ГОТОВИЙ ТЕКСТ
+  API TeleZip (контракт — `docs/telezip-api.md`); `tgstat.py` — тонкий транспорт
+  до сервісу tgstat (`docs/tgstat-service.md`). Хендлер повертає ГОТОВИЙ ТЕКСТ
   (таблицю), бо це кінцева відповідь моделі, а не проміжна структура.
 - **`backend/analysis/management/commands/mcp_rpc.py`** — транспорт у контейнер:
   читає JSON зі stdin, друкує результат між маркерами `<<<MCP-RESULT-*>>>`
@@ -451,6 +452,34 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `channels_find` | знайти канал/чат у довіднику; **кілька через кому за один виклик** (`"sotavision, @theins"`) — із розбивкою «знайдено / немає» | query, limit=20 |
 | `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language |
 | `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус, **аудиторія** | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems, subscribers, audience_note |
+
+### TGStat — `tgstat_*` (`docs/tgstat-service.md`)
+
+Чужа статистика Telegram (підписники, охоплення, ІЦ, ERR/ER) і єдиний спосіб
+знайти ЧАТИ за регіоном — підбірки tgstat. Логіки тут немає: інструменти ходять
+по HTTP у сервіс `tgstat` (`TGSTAT_API_URL`, дефолт `http://tgstat:8020`), де
+живе один залогінений headed Chrome.
+
+| інструмент | що | параметри |
+|---|---|---|
+| `tgstat_status` | стан сесії: акаунт, тариф, капча/ручний вхід, що робити | reload=False |
+| `tgstat_channels_search` | пошук КАНАЛІВ за словами в назві (+описі) і фільтрами | q, in_about, min_subs, max_subs, country='Россия', category, language, sort, limit=50, max_pages=2 |
+| `tgstat_catalog_tags` | список підбірок: `geo` (регіони) / `theme` | kind='geo' |
+| `tgstat_catalog` | канали або ЧАТИ підбірки — єдиний шлях до чатів | tag, kind='chat', limit=100, max_pages=3 |
+| `tgstat_channel` | картка каналу/чату зі статистикою, 1 запит | ref, kind='' |
+| `tgstat_posts_search` | пошук ПУБЛІКАЦІЙ (потрібен Premium) | q, date_from, date_to, peer_type='all', sort='date', hide_forwards, strong, extended, minus_words, limit=40, max_pages=2 |
+| `tgstat_links` | посилання tgstat/t.me — БЕЗ запиту до tgstat | ref, post_id=0, kind='' |
+| `tgstat_manual_login` / `tgstat_manual_finish` **[пише, mcp:admin]** | ручний вхід/капча у VNC: сервіс віддає браузер людині | — |
+
+Грошей tgstat не коштує, але **частота коштує капчею**: на «Подозрение на
+робота» сервіс відповідає 503 `state=captcha`, і тоді стоять ВСІ запити, доки
+людина не пройде її у VNC. Тому `max_pages` тримати малим (1–3), один і той
+самий пошук по колу не ганяти, посилання брати `tgstat_links`. Поки йде ручний
+вхід, сервіс віддає 409 `state=manual` — це не помилка інструмента.
+
+Ті самі вісім інструментів є в окремому stdio-сервері `tgstat` у `.mcp.json`
+(він у контейнері сервісу). Шлях через `tg-analytics` кращий тим, що має права
+Django й аудит; окремий — тим, що не потребує Django-шару.
 
 ### Унікальність джерел
 

@@ -64,6 +64,19 @@ PERMS = {
     "tag_delete": "analysis.delete_tag",
     "channels_find": "analysis.view_channel", "channel_add": "analysis.add_channel",
     "channel_update": "analysis.change_channel",
+    # --- TGStat: розвідка каналів/чатів через сервіс tgstat.
+    # Читання — те саме право, що й довідник каналів (це він і є, лише чужими
+    # очима); пошук публікацій — право на пости. Ручний вхід у VNC чіпає сам
+    # сервіс (відпускає браузер і спиняє всі запити), тож планка адмінська.
+    "tgstat_status": "analysis.view_channel",
+    "tgstat_channels_search": "analysis.view_channel",
+    "tgstat_catalog_tags": "analysis.view_channel",
+    "tgstat_catalog": "analysis.view_channel",
+    "tgstat_channel": "analysis.view_channel",
+    "tgstat_links": "analysis.view_channel",
+    "tgstat_posts_search": "analysis.view_post",
+    "tgstat_manual_login": "analysis.change_setting",
+    "tgstat_manual_finish": "analysis.change_setting",
     # --- TeleZip: розвідка для задач
     "tz_status": V_TASK, "tz_find": V_TASK, "tz_channels": V_TASK, "tz_users": V_TASK,
 }

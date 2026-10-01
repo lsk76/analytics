@@ -169,6 +169,14 @@ TELEZIP_BASE_URL = os.getenv("TELEZIP_BASE_URL", "https://api.telezip.net/v3")
 # Max CONCURRENT TeleZip requests (API allows very few). Enforced in TelezipClient.
 TELEZIP_MAX_CONCURRENCY = int(os.getenv("TELEZIP_MAX_CONCURRENCY", "2"))
 
+# --- TGStat (tgstat.ru) через сервіс tgstat_service (один headed Chrome) ---
+# Сервіс живе окремим контейнером у тому ж compose-проєкті; MCP-інструменти
+# tgstat_* ходять до нього по HTTP (docs/tgstat-service.md).
+TGSTAT_API_URL = os.getenv("TGSTAT_API_URL", "http://tgstat:8020")
+# Пошук на кілька сторінок іде хвилинами (сервіс сам тримає паузу 4–6 с між
+# запитами до tgstat, щоб не викликати капчу) — тайм-аут мусить це переживати.
+TGSTAT_API_TIMEOUT = float(os.getenv("TGSTAT_API_TIMEOUT", "600"))
+
 # --- Telemetr.io Public API (кандидат на заміну/дубль TeleZip) ---
 # Auth: header x-api-key. Квота ДВОвимірна: окремо запити, окремо УНІКАЛЬНІ
 # пошукові терміни та унікальні канали — див. docstring services/telemetrio.py.
