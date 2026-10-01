@@ -64,6 +64,8 @@ PERMS = {
     "tag_delete": "analysis.delete_tag",
     "channels_find": "analysis.view_channel", "channel_add": "analysis.add_channel",
     "channel_update": "analysis.change_channel",
+    # зведення «що з парсингів зламалось» — те саме право, що й список джерел
+    "parsers_health": "analysis.view_source",
     # --- TGStat: розвідка каналів/чатів через сервіс tgstat.
     # Читання — те саме право, що й довідник каналів (це він і є, лише чужими
     # очима); пошук публікацій — право на пости. Ручний вхід у VNC чіпає сам
