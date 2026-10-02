@@ -321,6 +321,45 @@ def _chunk_failure(chunk, e):
             _maybe_finish_job(chunk.job)
 
 
+def _vk_collect_chunk(task, chunk):
+    """Той самий чанк, але джерело коментарів — VK (mon_collect_source=vk_comments).
+
+    Відрізняється лише мережа: запити безкоштовні, тож «отруйний день» тут не
+    про гроші, а про час. Темп (`VkRateLimited`) — не збій дня: лишаємо чанк
+    pending із паузою, яку просить сам VK; решта помилок іде спільною політикою
+    `_chunk_failure` (дроблення вікна, backoff, failed після ліміту спроб).
+    """
+    from analysis.services import vk, vk_monitor
+
+    dfrom = datetime.combine(chunk.date_from, dtime.min, tzinfo=timezone.utc)
+    dto = datetime.combine(chunk.date_to, dtime.max, tzinfo=timezone.utc)
+    try:
+        created = vk_monitor.collect_window(task, dfrom, dto)
+    except vk.VkRateLimited as e:
+        chunk.status = "pending"
+        chunk.locked_at = None
+        chunk.error = str(e)[:1000]
+        chunk.next_retry_at = djtz.now() + timedelta(seconds=max(5, int(e.retry_after)))
+        chunk.save(update_fields=["status", "locked_at", "error", "next_retry_at"])
+        logger.info("vk_comments %s: VK просить паузу %.0fс", chunk.date_from, e.retry_after)
+        return True
+    except Exception as e:  # noqa: BLE001
+        _chunk_failure(chunk, e)
+        return True
+
+    chunk.status = "done"
+    chunk.posts_collected = created
+    chunk.locked_at = None
+    chunk.next_retry_at = None
+    chunk.finished_at = djtz.now()
+    chunk.save(update_fields=["status", "posts_collected", "locked_at",
+                              "next_retry_at", "finished_at"])
+    logger.info("vk_comments %s..%s: +%d коментарів",
+                chunk.date_from, chunk.date_to, created)
+    _maybe_finish_job(chunk.job)
+    return True
+
+
 def mon_collect_once(task):
     """Обробити ОДИН pending CollectChunk задачі-монітора. True якщо була робота."""
     # Задача, перемкнена на вибірковий збір акаунтами, могла лишити в черзі старі
@@ -331,6 +370,8 @@ def mon_collect_once(task):
     chunk = _claim_chunk(task)
     if not chunk:
         return False
+    if task.mon_collect_source == task.MON_SRC_VK:
+        return _vk_collect_chunk(task, chunk)
 
     enrolled = (MonitorChat.objects.filter(task=task, is_active=True)
                 .select_related("channel"))

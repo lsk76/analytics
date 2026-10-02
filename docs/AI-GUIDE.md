@@ -78,7 +78,7 @@ collect(TeleZip) → enrich(Telethon) → precluster(fuzzy) → classify(LLM) �
 `analysis/pilot/prompts.py` — тож існуючі задачі працюють як раніше.
 
 ### monitor (критика; збір воркерами, тегування оркеструється Claude-агентами)
-**ДВА СПОСОБИ ЗБОРУ — дивись поле `AnalysisTask.mon_collect_source`, не вгадуй:**
+**ТРИ СПОСОБИ ЗБОРУ — дивись поле `AnalysisTask.mon_collect_source`, не вгадуй:**
 - `telezip` — суцільний потік за `telezip_query` (воркер `mon_collect`, ~$0.10 за чанк,
   запускається через адмінку «Збори» / `run_create`). Так збирає задача #3.
 - `tg_sample` — **випадкова вибірка id повідомлень Telegram-акаунтами**, TeleZip не
@@ -92,6 +92,11 @@ collect(TeleZip) → enrich(Telethon) → precluster(fuzzy) → classify(LLM) �
   У цьому режимі `telezip_query`/`collect_chunk_days` НЕ читаються — картка задачі їх
   і не показує, `enqueue_collection` для такої задачі падає, а `mon_collect` не бере
   її чанки (щоб вибірку не змішало зі суцільним потоком за гроші).
+- `vk_comments` — **коментарі під постами спільнот VK** (з 2026-10-01). Ті самі
+  «Збори»/чанки, що й TeleZip (воркер `mon_collect`), але джерело — VK API і
+  БЕЗКОШТОВНО: за період читаються пости стіни кожної спільноти з «Чатів»
+  (рядок довідника з `platform=vk`), під кожним — усі коментарі з гілками.
+  Код — `analysis/services/vk_monitor.py`, контракт — **docs/vk-integration.md**.
 
 Далі обидва шляхи однакові:
 ```
@@ -192,6 +197,8 @@ backend/analysis/
   services/monitor_stages.py# monitor-стадії + sync_comment_event (Event 1:1)
   services/stages.py        # events-стадії воркерів
   services/telezip.py       # TeleZip-клієнт + TelezipSlot (глобальний семафор)
+  services/vk.py            # VK API — ЄДИНЕ місце мережі з VK (токен, темп, помилки)
+  services/vk_monitor.py    # збір коментарів спільнот VK у monitor-конвеєр
   services/normalize.py     # канонізація тегів/регіонів через аліаси
   pilot/prompts.py          # промпти monitor-конвеєра (single source of truth)
   services/mcp_api/         # MCP-шар керування сервісом (акаунти/моніторинги/черги)
@@ -234,6 +241,10 @@ watermark + регулярки + медіа-форвард тим самим а�
 - **Дев-БД — копія прод-акаунтів.** Будь-який вхід у Telegram з локалі
   (у т.ч. `gateway_repair_proactive=1`) паралельно з продом ризикує вбити сесію.
 
+- **VK — не TeleZip:** `newsfeed.search` бачить лише кілька останніх тижнів і
+  ~1000 записів, а мова запиту проста (кілька слів = І, ні `|`, ні `+`, ні
+  негації). Історія є лише у стіни конкретної спільноти (`vk_wall`). Запити
+  безкоштовні, межа — темп ~3/сек на токен.
 - **TeleZip має ГЛИБИНУ індексу** (`/v4/stats` → `searchDateLimit`; 2026-09-18 —
   з 2025-10-01, 352 дні): старіше НЕ шукається зовсім, відповідь просто порожня.
   Вікно повзе — що зібрано торік, перезібрати вже не можна. Повний контракт API
@@ -283,6 +294,8 @@ docker compose exec -T web python manage.py shell -c \
   `run_tagging`, знаменник із паспортів вибірки, межі автоматизації, граблі).
 - `docs/ethnic-events-pipeline.md` — ad-hoc конвеєр етно-подій (C2/C3/C4).
 - `docs/econ-events-pipeline.md` — економічні події E1-E4: keyword-регекси, усі промпти.
+- `docs/vk-integration.md` — **VK**: токен, межі API, адаптер спільнот,
+  збір коментарів у критику, інструменти `vk_*` у чаті.
 - `docs/infospace-monitoring-pipeline.md` — **ДИЗАЙН (не реалізовано)**: конвеєр
   «моніторинг інформпростору» (RSS/сайти/TG-акаунти → Post → AI-скрін → живі Event).
 - `docs/telezip-api.md` — **повний контракт TeleZip API** (v3+v4): ендпоінти,

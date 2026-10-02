@@ -228,20 +228,25 @@ class AnalysisTask(models.Model):
     # --- згруповано по етапах у формі; порожнє поле = дефолт із коду) ---
     MON_SRC_TELEZIP = "telezip"
     MON_SRC_TG_SAMPLE = "tg_sample"
+    MON_SRC_VK = "vk_comments"
     MON_COLLECT_SOURCE_CHOICES = [
         (MON_SRC_TELEZIP, "TeleZip — суцільний потік за запитом (воркер mon_collect)"),
         (MON_SRC_TG_SAMPLE, "Telegram-акаунти — випадкова вибірка (monitor_sample_collect)"),
+        (MON_SRC_VK, "VK — коментарі під постами спільнот (воркер mon_collect)"),
     ]
     mon_collect_source = models.CharField(
         max_length=12, choices=MON_COLLECT_SOURCE_CHOICES, default=MON_SRC_TELEZIP,
         db_default=MON_SRC_TELEZIP, verbose_name="Спосіб збору коментарів",
-        help_text="ЗВІДКИ беруться коментарі — далі обидва шляхи йдуть тими самими "
+        help_text="ЗВІДКИ беруться коментарі — далі всі шляхи йдуть тими самими "
                   "стадіями filter→prescreen→tag. telezip: суцільний потік, платний "
                   "(~$0.10/чанк), читає «Пошуковий запит TeleZip» і «Розмір чанка», "
                   "запускається через «Збори». tg_sample: випадкова вибірка id "
                   "повідомлень Telegram-акаунтами (команда monitor_sample_collect, "
                   "паспорт вибірки — «Вибірки (вікна)»); запит TeleZip і чанк у цьому "
-                  "режимі НЕ читаються, натомість кожному чату потрібен акаунт.",
+                  "режимі НЕ читаються, натомість кожному чату потрібен акаунт. "
+                  "vk_comments: коментарі під постами спільнот VK (у «Чатах» мають "
+                  "бути рядки довідника vk.com/…), збір безкоштовний і запускається "
+                  "через «Збори», як TeleZip-потік; запит TeleZip не читається.",
     )
     mon_min_len = models.PositiveSmallIntegerField(
         default=25, verbose_name="Фільтр: мін. довжина коментаря",
@@ -842,11 +847,16 @@ class MonitorSample(models.Model):
     Цей рядок — паспорт вибірки: межі id, скільки id запитали, скільки повернулось
     і скільки з них із текстом. З нього рахується ЗНАМЕННИК метрики:
 
-        оцінка обсягу чату за період = (id_hi - id_lo) × (n_text / n_requested)
+        оцінка обсягу чату за період = (id_hi - id_lo) × (n_user / n_requested)
 
     (частина id витрачається на службові події, видалені й медіа без тексту, тому
     сирий діапазон id — лише верхня межа). Без цього рядка вибірка невідтворювана
     і частку порахувати неможливо.
+
+    Звідси ж береться ВАГА коментаря (`weight`) — скільки реальних коментарів
+    стоїть за одним зібраним. Вага потрібна тому, що квота збору однакова на
+    кожен період, а обсяг розмови — ні: без неї тихий тиждень тягне підсумкову
+    частку нарівні з тижнем виборів, у якому розмови втричі більше.
     """
     task = models.ForeignKey(AnalysisTask, on_delete=models.CASCADE,
                              related_name="samples", verbose_name="Задача")
@@ -856,11 +866,15 @@ class MonitorSample(models.Model):
     period_end = models.DateField(verbose_name="Кінець періоду")
     id_lo = models.BigIntegerField(verbose_name="id на початку періоду")
     id_hi = models.BigIntegerField(verbose_name="id у кінці періоду")
-    n_requested = models.PositiveIntegerField(default=0, verbose_name="Запитано id")
+    n_requested = models.PositiveIntegerField(
+        default=0, verbose_name="Запитано номерів",
+        help_text="Скільки номерів повідомлень ФАКТИЧНО запитали в Telegram. Якщо "
+                  "збір обірвався на обмеженні Telegram, тут менше, ніж планувалось, "
+                  "— інакше вага коментаря такого чату вийшла б заниженою.")
     n_returned = models.PositiveIntegerField(default=0, verbose_name="Повернуто повідомлень")
     n_text = models.PositiveIntegerField(default=0, verbose_name="З них із текстом")
     n_user = models.PositiveIntegerField(
-        default=0, verbose_name="З них написані людьми",
+        default=0, verbose_name="З них повідомлень від людей",
         help_text="Решта — автопересилки постів каналу в групу обговорень (анкери, "
                   "під якими пишуть коментарі). У групі новинного каналу вони можуть "
                   "давати 99% потоку, тому «повідомлень на добу» без цієї поправки "
@@ -869,8 +883,8 @@ class MonitorSample(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Створено")
 
     class Meta:
-        verbose_name = "Вибірка (вікно)"
-        verbose_name_plural = "Вибірки (вікна)"
+        verbose_name = "Паспорт вибірки"
+        verbose_name_plural = "Паспорти вибірки (чат × період збору)"
         ordering = ["-period_start", "channel_id"]
         constraints = [
             models.UniqueConstraint(fields=["task", "channel", "period_start"],
@@ -881,6 +895,17 @@ class MonitorSample(models.Model):
     def span(self) -> int:
         """Сирий діапазон id — верхня межа обсягу за період."""
         return max(0, self.id_hi - self.id_lo)
+
+    @property
+    def weight(self) -> float:
+        """Вага коментаря: скільки реальних стоїть за одним зібраним.
+
+        Оцінка обсягу чату поділена на кількість зібраних коментарів від людей —
+        після скорочення лишається «повідомлень у чаті за період ÷ запитано
+        номерів». Частка живих текстів у формулу не входить, тому вага не
+        залежить від того, скільки сміття трапилось у вибірці.
+        """
+        return (self.span / self.n_requested) if self.n_requested else 0.0
 
     @property
     def estimated_total(self) -> int:
@@ -1109,6 +1134,14 @@ class Post(models.Model):
                   "(rescreen_task_now) чистить classification, і медіа зникало б.")
     date_enriched = models.BooleanField(default=False, verbose_name="Дату збагачено")
 
+    sample = models.ForeignKey(
+        "MonitorSample", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="posts", verbose_name="Паспорт вибірки",
+        help_text="Для збору вибіркою: з якого чату за який період узято цей "
+                  "коментар. Звідси береться вага коментаря для графіка частки. "
+                  "Порожньо = суцільний збір або зібране до запровадження ваг "
+                  "(такі коментарі важать 1).",
+    )
     event = models.ForeignKey(
         "Event", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="posts", verbose_name="Подія",
@@ -1305,7 +1338,7 @@ class Source(models.Model):
         (KIND_TELEGRAM, "Telegram-канал (акаунт)"),
         (KIND_RSS, "RSS-стрічка"),
         (KIND_WEB, "Сайт (скрапінг)"),
-        (KIND_VK, "VK (згодом)"),
+        (KIND_VK, "VK-спільнота (API)"),
     ]
 
     kind = models.CharField(max_length=12, choices=KIND_CHOICES, db_index=True,

@@ -191,6 +191,16 @@ TELEMETRIO_TERMS_FILE = os.getenv("TELEMETRIO_TERMS_FILE",
 # явний рядок у config.proxy має пріоритет. Формат: http://user:pass@host:port
 INFOSPACE_PROXY_URL = os.getenv("INFOSPACE_PROXY_URL", "")
 
+# VK (api.vk.com): пошук, стіни спільнот, коментарі — analysis/services/vk.py.
+# Потрібен токен КОРИСТУВАЧА (Kate Mobile тощо): сервісний токен застосунку не
+# бачить ні newsfeed.search, ні wall.getComments. Те саме можна тримати в
+# «Налаштуваннях» (ключі vk_api_token / vk_api_version / vk_proxy_url /
+# vk_min_interval_sec) — вони мають пріоритет і міняються без деплою.
+VK_API_TOKEN = os.getenv("VK_API_TOKEN", "")
+VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
+VK_PROXY_URL = os.getenv("VK_PROXY_URL", "")
+VK_MIN_INTERVAL_SEC = os.getenv("VK_MIN_INTERVAL_SEC", "")
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_API_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL", "https://openrouter.ai/api/v1")
 # Дефолтна модель усіх стадій, де задача не вказала свою. Flash-Lite, а не Flash,

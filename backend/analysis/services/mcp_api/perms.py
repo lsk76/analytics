@@ -83,6 +83,11 @@ PERMS = {
     "tgstat_manual_finish": "analysis.change_setting",
     # --- TeleZip: розвідка для задач
     "tz_status": V_TASK, "tz_find": V_TASK, "tz_channels": V_TASK, "tz_users": V_TASK,
+    # --- VK: та сама планка, що й у tgstat — читання чужого майданчика.
+    # Спільноти = довідник каналів, пости й коментарі = пости.
+    "vk_status": "analysis.view_channel", "vk_groups": "analysis.view_channel",
+    "vk_find": "analysis.view_post", "vk_wall": "analysis.view_post",
+    "vk_comments": "analysis.view_post",
 }
 
 # --- Telegram «руками» акаунтів: читання = бачити акаунти, дії = правити їх

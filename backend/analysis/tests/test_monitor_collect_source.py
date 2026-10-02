@@ -91,3 +91,18 @@ def test_admin_form_of_sampled_task_has_no_telezip_query():
     assert "telezip_query" not in fields_sampled
     assert "collect_chunk_days" not in fields_sampled
     assert "telezip_query" in fields_telezip
+
+
+def test_card_of_vk_task_hides_telezip_query():
+    """Третій спосіб: коментарі спільнот VK. Запит TeleZip тут теж не читається."""
+    card = _task_config(_task(AnalysisTask.MON_SRC_VK))
+    assert "vk_comments" in card
+    assert "VK" in card
+    assert "Пошуковий запит TeleZip" not in card
+
+
+def test_vk_task_enqueues_chunks_like_telezip():
+    """Збір VK іде тими самими «Зборами» і чанками — лише безкоштовно."""
+    from datetime import date
+    t = _task(AnalysisTask.MON_SRC_VK)
+    assert stages.enqueue_collection(t, date(2026, 9, 1), date(2026, 9, 2)) == 2

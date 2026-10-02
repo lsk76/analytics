@@ -985,7 +985,7 @@
    {
     "name": "channel",
     "type": "str",
-    "doc": "@username каналу/джерела, який писав про подію (фільтр «Канал/Джерело»).",
+    "doc": "Канал/джерело, який писав про подію: @username, домен, частина назви або #id довідника (для rss/web теж, не лише Telegram).",
     "default": "",
     "required": false
    },
@@ -1001,6 +1001,20 @@
     "type": "int",
     "doc": "Мінімальне охоплення. 0 = без обмеження.",
     "default": 0,
+    "required": false
+   },
+   {
+    "name": "source",
+    "type": "str",
+    "doc": "Джерело інформпростору (`Source`): id, посилання або частина назви. Точніше за channel, коли джерел кілька на один домен.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "uniq",
+    "type": "str",
+    "doc": "Унікальність (порожньо = не фільтрувати): sole_post — подія з одного поста; sole_channel — один канал; sole_source — усі пости з ОДНОГО джерела.",
+    "default": "",
     "required": false
    },
    {
@@ -1020,7 +1034,7 @@
    {
     "name": "full",
     "type": "bool",
-    "doc": "true — картки з ПОВНИМ описом, усіма тегами й посиланням на пост замість таблиці з обрізаними полями (не треба потім кликати event_show на кожну).",
+    "doc": "true — картки з ПОВНИМ описом, усіма тегами й ПОСИЛАННЯМИ на пости замість таблиці з обрізаними полями (не треба потім кликати event_show на кожну).",
     "default": false,
     "required": false
    },
@@ -1029,6 +1043,13 @@
     "type": "int",
     "doc": "У режимі full: скільки символів опису на подію (0 = без обрізання). Дефолт 1200 — щоб 30 подій не з'їли весь контекст.",
     "default": 1200,
+    "required": false
+   },
+   {
+    "name": "post_links",
+    "type": "int",
+    "doc": "У режимі full: скільки посилань на пости показати під кожною подією (0 = без посилань). Дефолт 5, решта — в event_show.",
+    "default": 5,
     "required": false
    }
   ]
@@ -1082,6 +1103,80 @@
     "type": "str",
     "doc": "Статус аудиту подій: approved (дефолт) | pending | rejected | all.",
     "default": "approved",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "monitor_prompt_try",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_analysistask",
+  "doc": "Прогнати чернетку прескрін- або тегер-промпта на кількох зібраних коментарях.\n\nПоказує вердикт по кожному коментарю І підсумок, за яким видно, чи промпт\nпрацює як методика: частку коментарів з адресатом критики та розкладку тегів.\nКанон v4 — близько 41.7% і домінування `крит_рег_правит`; пласка розкладка\nпри ~51% означає, що ворота промпта не працюють.\n\nНічого не зберігає: ні теги, ні позначку прескріну, ні самі чернетки.\nПозначений як такий, що змінює стан, бо кличе LLM (і тому недоступний у\nрежимі лише-читання). Зберегти те, що сподобалось: task_update\nprescreen_prompt=… / tagger_prompt=…\n\nВАЖЛИВО про тегувальника: у конвеєрі його виконують Claude-агенти (файлові\nпачки, воркер mon_agent_tag), а тут промпт іде в LLM через OpenRouter тим\nсамим кодом, що й стадія mon_tag. Тобто перевіряється ПРОМПТ, а не виконавець;\nдля звірки самого виконавця дивись docs/agent-runner-plan.md.",
+  "summary": "Прогнати чернетку прескрін- або тегер-промпта на кількох зібраних коментарях.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача monitor: id, slug або частина назви.",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "stage",
+    "type": "str",
+    "doc": "Що перевіряємо: tagger (дефолт) | prescreen | both.",
+    "default": "tagger",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки коментарів узяти (1..30). Прескрін кладе 50 в один виклик, тегувальник 10 — звідси й ціна перевірки.",
+    "default": 10,
+    "required": false
+   },
+   {
+    "name": "posts",
+    "type": "str",
+    "doc": "Id постів через кому — коли треба саме ці коментарі (напр. ті, на яких промпт раніше помилявся). Порожньо = випадкова вибірка.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Нижня межа дати коментаря, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Верхня межа дати коментаря, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "prescreen_prompt",
+    "type": "str",
+    "doc": "Чернетка прескрін-промпта на цей виклик. Порожньо = те, що в задачі. Не зберігається.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "tagger_prompt",
+    "type": "str",
+    "doc": "Чернетка промпта тегувальника на цей виклик. Порожньо = те, що в задачі. Не зберігається.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "model",
+    "type": "str",
+    "doc": "Модель на цей виклик. Порожньо = як у задачі (прескрін — prescreen_model, тегувальник — llm_model).",
+    "default": "",
     "required": false
    }
   ]
@@ -1653,6 +1748,45 @@
   ]
  },
  {
+  "name": "run_tagging",
+  "group": "monitoring",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.add_researchrun",
+  "doc": "Тегування ВЖЕ ЗІБРАНОЇ вибірки: прескрін-позитиви → батчі агентам → події.\n\nДля monitor-задач із mon_collect_source=tg_sample, де збір веде\nsample_collect і ResearchRun не виникає сам собою. TeleZip не задіяний,\nчанки збору не плануються — за збір гроші не йдуть.\n\nСаму роботу веде worker-mon-runs: готує батчі у backend/_dir/runs/run_<id>/\n(+ SYSTEM_PROMPT.md), чекає на *_done.json від агентів і сам робить інжест —\nподії 1:1 на коментар, без дедупу. Прогрес і шлях до батчів — run_show.",
+  "summary": "Тегування ВЖЕ ЗІБРАНОЇ вибірки: прескрін-позитиви → батчі агентам → події.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача: числовий id, slug або частина назви. Лише monitor із вибірковим збором (mon_collect_source=tg_sample).",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Перший день періоду, YYYY-MM-DD. Порожньо = від найранішого зібраного вікна вибірки.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Останній день періоду, YYYY-MM-DD, ВКЛЮЧНО. Порожньо = до найпізнішого зібраного вікна.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "title",
+    "type": "str",
+    "doc": "Необовʼязкова назва для списку зборів.",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "runs_list",
   "group": "monitoring",
   "mutates": false,
@@ -1883,18 +2017,92 @@
   ]
  },
  {
+  "name": "source_stats",
+  "group": "monitoring",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_source",
+  "doc": "Внесок КОЖНОГО джерела за період: постів зібрано, скільки з них дали подію,\nскільки подій, і скільки з тих подій тримається ЛИШЕ на ньому.\n\nВідповідає на «чи варте це джерело полінгу» без читання карток руками.\n«лише його» = подія, у якої ВСІ пости з цього джерела (і жодного поста без\nджерела) — рахується по всіх постах події, а не лише по тих, що у вікні.\nПрацює для будь-якого типу (rss/web/telegram), бо групує по `Post.source`,\nа не по @юзернейму каналу.",
+  "summary": "Внесок КОЖНОГО джерела за період: постів зібрано, скільки з них дали подію, скільки подій, і скільки з тих подій тримається ЛИШЕ на ньому.",
+  "params": [
+   {
+    "name": "task",
+    "type": "str",
+    "doc": "Задача (id/slug/назва — лише своя). Порожньо = усі свої.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "days",
+    "type": "int",
+    "doc": "Останні N днів за датою поста. Ігнорується, якщо задано date_from/date_to.",
+    "default": 30,
+    "required": false
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "Пости від, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "Пости до, YYYY-MM-DD.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "Тип джерела: telegram | rss | web | vk. Порожньо = усі.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "source",
+    "type": "str",
+    "doc": "Один конкретний ref джерела (id/посилання/назва) — решту не рахувати.",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "min_posts",
+    "type": "int",
+    "doc": "Не показувати джерела, де постів менше за це.",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "order",
+    "type": "str",
+    "doc": "posts (дефолт) | events | sole | name.",
+    "default": "posts",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "Скільки джерел показати.",
+    "default": 40,
+    "required": false
+   }
+  ]
+ },
+ {
   "name": "source_subscribe",
   "group": "monitoring",
   "mutates": true,
   "scope": "mcp:write",
   "perm": "analysis.add_sourcesubscription",
-  "doc": "Підписати infospace-задачу на джерело (або вимкнути підписку).\n\nЛише конвеєр infospace. Підписка робить джерело «робочим» для info_collect.\nВимкнення не видаляє ні джерело, ні зібране.",
-  "summary": "Підписати infospace-задачу на джерело (або вимкнути підписку).",
+  "doc": "Підписати infospace-задачу на джерело (або вимкнути підписку) — одне або ПАКЕТ.\n\nЛише конвеєр infospace. Підписка робить джерело «робочим» для info_collect.\nВимкнення не видаляє ні джерело, ні зібране. `ref` приймає список через кому:\n«відключити ці 20 джерел від задачі» = один виклик.",
+  "summary": "Підписати infospace-задачу на джерело (або вимкнути підписку) — одне або ПАКЕТ.",
   "params": [
    {
     "name": "ref",
     "type": "str",
-    "doc": "Джерело: id, посилання або частина назви.",
+    "doc": "Джерело: id, посилання або частина назви. КІЛЬКА ЧЕРЕЗ КОМУ — одна дія на всіх, стеля 200. Нерозпізнана назва скасовує весь пакет.",
     "default": null,
     "required": true
    },
@@ -1927,13 +2135,13 @@
   "mutates": true,
   "scope": "mcp:write",
   "perm": "analysis.change_source",
-  "doc": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
-  "summary": "Змінити джерело: активність, інтервал, «опитати зараз», скидання курсора (backfill).",
+  "doc": "Змінити джерело (або ПАКЕТ джерел): активність, інтервал, «опитати зараз»,\nскидання курсора (backfill).\n\n`ref` приймає список через кому — «вимкнути ці 20 джерел» це один виклик,\nа не двадцять. Спершу резолвиться весь список (крива назва = нічого не\nзмінено), потім застосовується однакова правка.",
+  "summary": "Змінити джерело (або ПАКЕТ джерел): активність, інтервал, «опитати зараз», скидання курсора (backfill).",
   "params": [
    {
     "name": "ref",
     "type": "str",
-    "doc": "Джерело: числовий id, частина URL або назви.",
+    "doc": "Джерело: числовий id, частина URL або назви. КІЛЬКА ЧЕРЕЗ КОМУ — одна правка на всіх ('12, 13, sfgate'), стеля 200. Нерозпізнана назва скасовує весь пакет.",
     "default": null,
     "required": true
    },
@@ -1961,7 +2169,7 @@
    {
     "name": "reset_cursor",
     "type": "bool",
-    "doc": "true — забути, докуди вже прочитано, і перечитати заново. Може дати вал постів.",
+    "doc": "true — забути, докуди вже прочитано, і перечитати заново. Може дати вал постів; на пакеті (>1 джерела) лише з confirm=true.",
     "default": false,
     "required": false
    },
@@ -1970,6 +2178,13 @@
     "type": "str",
     "doc": "Telegram-акаунт для полінгу (для kind=telegram): id/номер/назва або '-'.",
     "default": "",
+    "required": false
+   },
+   {
+    "name": "confirm",
+    "type": "bool",
+    "doc": "Підтвердити скидання курсора на пакеті джерел.",
+    "default": false,
     "required": false
    }
   ]
@@ -3031,6 +3246,24 @@
     "type": "bool",
     "doc": "true — лише активні задачі.",
     "default": false,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "parsers_health",
+  "group": "parsers",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_source",
+  "doc": "Що з парсингів тихо зламалось: джерела, TeleZip, tgstat — одним вердиктом.\n\n«Тихий злам» — це успіх без користі: сторінка відкривається, а елементів\nнуль. Такі сигнали в сервісі вже збираються (детектор якості джерел раз на\nгодину, живий прогін розбору tgstat раз на добу); тут вони зводяться разом,\nщоб одного виклику хватало на щоденну перевірку.\n\nУ мережу НЕ ходить і грошей не витрачає — усе з БД, тож викликати можна\nскільки завгодно. Вердикт: ok — усе розбирається; warn — поодинокі джерела\nабо застарілий прогін; broken — зламався адаптер, збір стоїть або розбір\ntgstat поїхав (у кожному рядку сказано, що робити).",
+  "summary": "Що з парсингів тихо зламалось: джерела, TeleZip, tgstat — одним вердиктом.",
+  "params": [
+   {
+    "name": "examples",
+    "type": "bool",
+    "doc": "true — додати конкретні джерела з нотаткою якості",
+    "default": true,
     "required": false
    }
   ]
@@ -5694,6 +5927,345 @@
     "type": "int",
     "doc": "Скільки секунд чекати відповідь TeleZip (важкі запити — до 180+).",
     "default": 120,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_catalog",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_channel",
+  "doc": "Канали або ЧАТИ підбірки tgstat (регіональної/тематичної).\n\nЄдиний спосіб знайти ЧАТИ через tgstat: пошуку чатів там немає, лише\nпідбірки.",
+  "summary": "Канали або ЧАТИ підбірки tgstat (регіональної/тематичної).",
+  "params": [
+   {
+    "name": "tag",
+    "type": "str",
+    "doc": "slug підбірки з tgstat_catalog_tags, напр. buratia-region",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "channel або chat",
+    "default": "chat",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "скільки записів повернути",
+    "default": 100,
+    "required": false
+   },
+   {
+    "name": "max_pages",
+    "type": "int",
+    "doc": "скільки сторінок (запитів до tgstat) читати; тримай малим",
+    "default": 3,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_catalog_tags",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_channel",
+  "doc": "Список підбірок tgstat: slug звідси йде в `tgstat_catalog`.\n\ngeo — регіональні (напр. buratia-region), theme — тематичні.",
+  "summary": "Список підбірок tgstat: slug звідси йде в `tgstat_catalog`.",
+  "params": [
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "geo — регіональні підбірки, theme — тематичні",
+    "default": "geo",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_channel",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_channel",
+  "doc": "Картка каналу/чату з tgstat: підписники і приріст, ІЦ, охоплення, ERR/ER,\nвік, кількість публікацій, категорія, гео/мова, РКН + посилання. 1 запит.",
+  "summary": "Картка каналу/чату з tgstat: підписники і приріст, ІЦ, охоплення, ERR/ER, вік, кількість публікацій, категорія, гео/мова, РКН + посилання. 1 запит.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "@handle, handle, t.me/handle або URL tgstat",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "channel або chat; порожнє — визначити з посилання (дефолт channel)",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_channels_search",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_channel",
+  "doc": "Пошук КАНАЛІВ tgstat за словами в назві (in_about=true — і в описі).\n\nКожна сторінка (~30 каналів) — окремий запит до tgstat. ЧАТИ цим не\nшукаються: пошуку чатів у tgstat немає, для них — `tgstat_catalog`.",
+  "summary": "Пошук КАНАЛІВ tgstat за словами в назві (in_about=true — і в описі).",
+  "params": [
+   {
+    "name": "q",
+    "type": "str",
+    "doc": "слова для пошуку в назві каналу, напр. «Бурятия»",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "in_about",
+    "type": "bool",
+    "doc": "шукати й в описі каналу",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "min_subs",
+    "type": "int",
+    "doc": "мінімум підписників",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "max_subs",
+    "type": "int",
+    "doc": "максимум підписників",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "country",
+    "type": "str",
+    "doc": "країна (назва рос. або id); '' — будь-яка",
+    "default": "Россия",
+    "required": false
+   },
+   {
+    "name": "category",
+    "type": "str",
+    "doc": "категорія tgstat рос., напр. «Политика», «Новости и СМИ»",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "language",
+    "type": "str",
+    "doc": "мова рос., напр. «Русский», «Башкирский»",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "sort",
+    "type": "str",
+    "doc": "participants | avg_reach | ci_index | members_7d | members_30d",
+    "default": "participants",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "скільки каналів повернути",
+    "default": 50,
+    "required": false
+   },
+   {
+    "name": "max_pages",
+    "type": "int",
+    "doc": "скільки сторінок (запитів до tgstat) читати, 1–20; тримай малим",
+    "default": 2,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_links",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_channel",
+  "doc": "Посилання на tgstat (сторінка, статистика, пост) і t.me — БЕЗ запиту до tgstat.\n\nБезкоштовно й без ризику капчі: лише складає URL за правилами сайту.",
+  "summary": "Посилання на tgstat (сторінка, статистика, пост) і t.me — БЕЗ запиту до tgstat.",
+  "params": [
+   {
+    "name": "ref",
+    "type": "str",
+    "doc": "@handle, handle, t.me/handle або URL tgstat",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "post_id",
+    "type": "int",
+    "doc": "номер поста — тоді ще й посилання на сам пост",
+    "default": 0,
+    "required": false
+   },
+   {
+    "name": "kind",
+    "type": "str",
+    "doc": "channel або chat; порожнє — визначити з посилання",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_manual_finish",
+  "group": "tgstat",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "perm": "analysis.change_setting",
+  "doc": "Завершити ручний вхід: закрити звичайний Chrome (cookies лишаються) і\nповернути браузер сервісу. Повертає стан сесії.",
+  "summary": "Завершити ручний вхід: закрити звичайний Chrome (cookies лишаються) і повернути браузер сервісу. Повертає стан сесії.",
+  "params": []
+ },
+ {
+  "name": "tgstat_manual_login",
+  "group": "tgstat",
+  "mutates": true,
+  "scope": "mcp:admin",
+  "perm": "analysis.change_setting",
+  "doc": "Ручний вхід/капча: сервіс відпускає свій браузер і відкриває звичайний Chrome у VNC.\n\nДалі працює ЛЮДИНА: інші запити до tgstat до завершення стоять, тож не\nзапускай це «про запас».",
+  "summary": "Ручний вхід/капча: сервіс відпускає свій браузер і відкриває звичайний Chrome у VNC.",
+  "params": []
+ },
+ {
+  "name": "tgstat_posts_search",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_post",
+  "doc": "Пошук ПУБЛІКАЦІЙ у tgstat (потрібен Premium) — у каналах і чатах.\n\nПерша сторінка ~20 постів, кожна наступна — ще один запит до tgstat. Це\nрозвідка, а не збір: у БД нічого не осідає.",
+  "summary": "Пошук ПУБЛІКАЦІЙ у tgstat (потрібен Premium) — у каналах і чатах.",
+  "params": [
+   {
+    "name": "q",
+    "type": "str",
+    "doc": "запит, як у пошуку tgstat",
+    "default": null,
+    "required": true
+   },
+   {
+    "name": "date_from",
+    "type": "str",
+    "doc": "YYYY-MM-DD",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "date_to",
+    "type": "str",
+    "doc": "YYYY-MM-DD",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "peer_type",
+    "type": "str",
+    "doc": "all | channel | chat",
+    "default": "all",
+    "required": false
+   },
+   {
+    "name": "sort",
+    "type": "str",
+    "doc": "date | views",
+    "default": "date",
+    "required": false
+   },
+   {
+    "name": "hide_forwards",
+    "type": "bool",
+    "doc": "не показувати репости",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "strong",
+    "type": "bool",
+    "doc": "точний збіг форми слова",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "extended",
+    "type": "bool",
+    "doc": "розширений синтаксис tgstat",
+    "default": false,
+    "required": false
+   },
+   {
+    "name": "minus_words",
+    "type": "str",
+    "doc": "слова-виключення",
+    "default": "",
+    "required": false
+   },
+   {
+    "name": "limit",
+    "type": "int",
+    "doc": "скільки постів повернути",
+    "default": 40,
+    "required": false
+   },
+   {
+    "name": "max_pages",
+    "type": "int",
+    "doc": "скільки сторінок (запитів до tgstat) читати; тримай малим",
+    "default": 2,
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_selftest",
+  "group": "tgstat",
+  "mutates": true,
+  "scope": "mcp:write",
+  "perm": "analysis.change_setting",
+  "doc": "Чи ще працює розбір ЖИВОГО tgstat — ловить зміну розмітки, а не наші баги.\n\nТести на заготовках стережуть наш код і лишаються зеленими в день, коли\ntgstat перевіршує сторінки. Цей прогін іде на живий сайт і перевіряє, що\nполя, на яких тримаються інструменти, досі розбираються: канали знаходяться\nі мають підписників, підбірки не спорожніли, картка великого каналу дає\nмільйони й показники, пости мають дати й перегляди.\n\nУВАГА: 5 запитів до tgstat за прогін. Частіше за раз на добу не ганяти —\nсам прогін накличе капчу, і сервіс стане для всіх (щоденний cron —\n`deploy/tgstat-canary.sh`). `verdict`: ok — розмітка на місці, broken —\nщось розбирається порожньо, unverified — сесія непридатна, тобто НЕ\nперевірено (це не поломка розбору).",
+  "summary": "Чи ще працює розбір ЖИВОГО tgstat — ловить зміну розмітки, а не наші баги.",
+  "params": [
+   {
+    "name": "only",
+    "type": "str",
+    "doc": "звузити до перевірок через кому: channels_search, catalog_tags, catalog_chats, channel_card, posts_search (порожнє — усі)",
+    "default": "",
+    "required": false
+   }
+  ]
+ },
+ {
+  "name": "tgstat_status",
+  "group": "tgstat",
+  "mutates": false,
+  "scope": "mcp:read",
+  "perm": "analysis.view_channel",
+  "doc": "Стан сесії tgstat: залогінений акаунт і тариф, капча/Cloudflare, ручний вхід.\n\nЗ цього починають: усі інші tgstat-інструменти працюють лише поки сесія\nпридатна (`usable`), а зламану сесію чи капчу лікує ЛИШЕ людина у VNC.",
+  "summary": "Стан сесії tgstat: залогінений акаунт і тариф, капча/Cloudflare, ручний вхід.",
+  "params": [
+   {
+    "name": "reload",
+    "type": "bool",
+    "doc": "true — перезайти на сайт і перепитати, хто залогінений (1 запит до tgstat)",
+    "default": false,
     "required": false
    }
   ]

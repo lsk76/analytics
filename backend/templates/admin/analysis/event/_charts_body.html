@@ -148,8 +148,9 @@
       <div class="chart-card full" id="coverage-card" style="display:none">
         <h3>% від усіх повідомлень — по республіках
           <small style="font-weight:normal;color:var(--body-quiet-color)">
-            (події ÷ всі повідомлення чатів за період; у задачах на вибірці —
-            ÷ всі вибрані повідомлення; є лише для критики)</small></h3>
+            (події ÷ всі повідомлення чатів за період; при зборі вибіркою —
+            ÷ оцінка всіх коментарів від людей, зважена на паспорти вибірки;
+            є лише для критики)</small></h3>
         <div class="chart-canvas-wrap tall"><canvas></canvas></div>
       </div>
     </div>
@@ -718,11 +719,18 @@ function initCharts() {
     covCard.style.display = '';
     const dates = [...new Set(DATA.coverage.map(r => r.date))].sort();
     const regs = [...new Set(DATA.coverage.map(r => r.region))];
-    const cell = {};
-    DATA.coverage.forEach(r => { cell[r.region + K + r.date] = r.pct; });
+    const cell = {}, covUrl = {}, covNum = {};
+    DATA.coverage.forEach(r => {
+      cell[r.region + K + r.date] = r.pct;
+      covUrl[r.region + K + r.date] = r.url || '';
+      covNum[r.region + K + r.date] = [r.n, r.t];
+    });
     const datasets = regs.map((g, i) => ({
       label: g,
       data: dates.map(d => { const v = cell[g + K + d]; return v == null ? null : v; }),
+      // клік по точці відкриває ті самі події: республіка + проміжок бакета
+      _urls: dates.map(d => covUrl[g + K + d] || ''),
+      _counts: dates.map(d => covNum[g + K + d] || null),
       borderColor: PALETTE[i % PALETTE.length],
       backgroundColor: PALETTE[i % PALETTE.length] + '20',
       borderWidth: 2, pointRadius: 1.5, pointHoverRadius: 5,
@@ -735,8 +743,13 @@ function initCharts() {
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { font: { size: 11 }, color: text } },
-          tooltip: { callbacks: { label: (it) => ` ${it.dataset.label}: ${it.formattedValue}%` } },
+          tooltip: { callbacks: { label: (it) => {
+            const c = it.dataset._counts ? it.dataset._counts[it.dataIndex] : null;
+            const tail = c ? ` (${c[0].toLocaleString('uk')} з ${c[1].toLocaleString('uk')})` : '';
+            return ` ${it.dataset.label}: ${it.formattedValue}%${tail}`;
+          } } },
         },
+        onClick: dsNav, onHover: hoverCursor,
         scales: { x: { ticks: { maxRotation: 0, autoSkip: true } },
                   y: { beginAtZero: true, ticks: { callback: (v) => v + '%' } } },
       },

@@ -15,7 +15,6 @@
         "TGA_SSH": "${TGA_PROD_SSH:-tg-analytics}",
         "TGA_DIR": "/opt/tg-event-analytics",
         "TGA_COMPOSE_FILES": "docker-compose.yml:docker-compose.monitor.yml",
-        "TGA_READONLY": "1",
         "TGA_TIMEOUT": "300"
       }
     },

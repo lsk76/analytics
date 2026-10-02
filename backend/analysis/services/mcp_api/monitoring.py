@@ -18,9 +18,10 @@ _PIPELINE_HOW = {
               "з іменами з task_show (classify_prompt = classify_system_prompt).",
     "monitor": "monitor — критика в чатах, не інформпростір. Чати: chat_add. "
                "Промпти: task_update prescreen_prompt, tagger_prompt. Спосіб збору — "
-               "поле mon_collect_source у картці: telezip (run_create, платно) або "
+               "поле mon_collect_source у картці: telezip (run_create, платно), "
                "tg_sample (вибірка акаунтами: збір sample_collect, далі тегування "
-               "run_tagging).",
+               "run_tagging) або vk_comments (коментарі спільнот VK: run_create, "
+               "безкоштовно, у «Чатах» мають бути рядки vk.com/…).",
     "research": "research — тематичне дослідження каналів. Чати: chat_add. "
                 "Рубрики: rubric_create. Промпт агента: task_update tagger_prompt.",
     "infospace": "infospace — полінг джерел, не TeleZip. Джерела: source_add. "
@@ -83,6 +84,12 @@ _TASK_GROUPS = {
 # сказати агенту, що задача шукає коментарі за гроші, коли вона цього не робить.
 _MON_COLLECT_SAMPLE_GROUP = (
     "Збір — випадкова вибірка Telegram-акаунтами (TeleZip не використовується)",
+    ("mon_collect_source", "languages"),
+)
+# Третій спосіб: коментарі під постами спільнот VK. Запит TeleZip тут теж не
+# читається — збирає VK API по спільнотах із «Чатів» (platform=vk).
+_MON_COLLECT_VK_GROUP = (
+    "Збір — коментарі спільнот VK (безкоштовно, TeleZip не використовується)",
     ("mon_collect_source", "languages"),
 )
 _LONG_FIELDS = {
@@ -260,11 +267,17 @@ def _short_value(task, name):
     if name == "pipeline":
         return f"{task.pipeline} — {task.get_pipeline_display()}"
     if name == "mon_collect_source":
-        how = ("збір sample_collect, далі тегування run_tagging; "
-               "TeleZip НЕ використовується, кожному чату потрібен акаунт, "
-               "паспорти вікон — MonitorSample"
-               if task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE
-               else "run_create → воркер mon_collect, ~$0.10 за чанк TeleZip")
+        how = {
+            AnalysisTask.MON_SRC_TG_SAMPLE:
+                "збір sample_collect, далі тегування run_tagging; "
+                "TeleZip НЕ використовується, кожному чату потрібен акаунт, "
+                "паспорти вікон — MonitorSample",
+            AnalysisTask.MON_SRC_VK:
+                "run_create → воркер mon_collect, але джерело — VK API: "
+                "коментарі під постами спільнот із «Чатів», безкоштовно "
+                "(ліміт — темп ~3 запити/сек)",
+        }.get(task.mon_collect_source,
+              "run_create → воркер mon_collect, ~$0.10 за чанк TeleZip")
         return f"{task.mon_collect_source} — {task.get_mon_collect_source_display()} ({how})"
     if name in ("created_at", "updated_at"):
         dt = getattr(task, name)
@@ -368,9 +381,11 @@ def _effective_llm_section(task):
 def _task_groups(task):
     """Розділи картки для конвеєра задачі; monitor — з блоком свого способу збору."""
     groups = _TASK_GROUPS.get(task.pipeline, _TASK_GROUPS["events"])
-    if (task.pipeline == AnalysisTask.PIPELINE_MONITOR
-            and task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE):
-        groups = (_MON_COLLECT_SAMPLE_GROUP,) + tuple(groups[1:])
+    if task.pipeline == AnalysisTask.PIPELINE_MONITOR:
+        head = {AnalysisTask.MON_SRC_TG_SAMPLE: _MON_COLLECT_SAMPLE_GROUP,
+                AnalysisTask.MON_SRC_VK: _MON_COLLECT_VK_GROUP}.get(task.mon_collect_source)
+        if head:
+            groups = (head,) + tuple(groups[1:])
     return groups
 
 
@@ -443,7 +458,13 @@ def _task_gaps(task):
     pipe = task.pipeline
     sampled = (pipe == AnalysisTask.PIPELINE_MONITOR
                and task.mon_collect_source == AnalysisTask.MON_SRC_TG_SAMPLE)
-    if pipe in ("events", "monitor") and not sampled \
+    vk_mode = (pipe == AnalysisTask.PIPELINE_MONITOR
+               and task.mon_collect_source == AnalysisTask.MON_SRC_VK)
+    if vk_mode and not task.monitor_chats.filter(
+            is_active=True, channel__platform="vk").exists():
+        gaps.append("збір — коментарі VK, але в чатах немає жодної спільноти VK "
+                    "(chat_add task=" + task.slug + " channel=https://vk.com/…)")
+    if pipe in ("events", "monitor") and not sampled and not vk_mode \
             and not (task.telezip_query or "").strip():
         gaps.append("немає telezip_query — task_update telezip_query=… "
                     "(діалект v3: пробіл = АБО, І — це +)")
@@ -623,10 +644,14 @@ def run_show(run_id: int):
       "title": "Необовʼязкова назва збору для списку."})
 def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
                title: str = ""):
-    """Збір TeleZip за період для конвеєрів events, monitor, research. Не для infospace і tgsearch.
+    """Збір за період для конвеєрів events, monitor, research. Не для infospace і tgsearch.
 
     Створює ResearchRun і планує чанки (як «Збори → Додати»). Далі все ведуть
     воркери. Ідемпотентно за діапазонами: вже покриті чанки не дублюються.
+
+    Джерело чанків задає сама задача: зазвичай TeleZip (~$0.10 за чанк), а
+    monitor із `mon_collect_source=vk_comments` збирає ті самі чанки
+    БЕЗКОШТОВНО через VK API (коментарі спільнот із «Чатів»).
     """
     from analysis.services import stages as _stages
     t = common.resolve_task(task)
@@ -658,12 +683,17 @@ def run_create(task: str, date_from: str, date_to: str, chunk_days: int = 0,
     # ціну показуємо ДО того, як воркери почнуть платити: 1 запит TeleZip на
     # чанк, а важкий чанк ще й ділиться навпіл (див. find_posts_range)
     from analysis.services.mcp_api.telezip import REQUEST_COST_USD
+    if t.mon_collect_source == AnalysisTask.MON_SRC_VK:
+        price = ("Ціна: $0 — джерело VK API (коментарі спільнот із «Чатів»), платять "
+                 "лише часом: VK тримає ~3 запити/сек, тож жвава спільнота за день "
+                 "збирається хвилинами.")
+    else:
+        price = (f"Ціна: ~${made * REQUEST_COST_USD:.2f} (1 запит TeleZip на чанк; важкий "
+                 f"чанк ділиться навпіл — тоді більше). Більший chunk_days = дешевше, "
+                 f"але вищий ризик відлупу.")
     return (f"Збір #{run.id} для {t.slug}: {d_from}…{d_to}, заплановано {made} чанків "
             f"(по {run.chunk_days} дн). Воркери підхоплять самі — прогрес: run_show "
-            f"run_id={run.id}.\n"
-            f"Ціна: ~${made * REQUEST_COST_USD:.2f} (1 запит TeleZip на чанк; важкий "
-            f"чанк ділиться навпіл — тоді більше). Більший chunk_days = дешевше, "
-            f"але вищий ризик відлупу."
+            f"run_id={run.id}.\n" + price
             + ("\n⚠ 0 нових чанків: період уже покрито попередніми зборами." if not made else ""))
 
 
@@ -753,8 +783,9 @@ def sample_collect(task: str, date_from: str, date_to: str, mode: str = "dry_run
     if d_to < d_from:
         raise ToolError("date_to раніше за date_from")
     if (d_to - d_from).days > 366:
-        raise ToolError("вікно >366 днів: вибірку замовляють по місяцях — так вікна "
-                        "не перекриваються і частку можна рахувати по місяцях")
+        raise ToolError("період збору >366 днів: збирають тижнем або місяцем — "
+                        "довжина періоду на частку не впливає (кожен коментар бере "
+                        "вагу свого періоду), але довгий період нічим потім не нарізати")
 
     active = MonitorSampleJob.objects.filter(task=t, status__in=["pending", "running"]).first()
     if active:
@@ -762,6 +793,24 @@ def sample_collect(task: str, date_from: str, date_to: str, mode: str = "dry_run
                         f"{active.date_from}…{active.date_to}): два збори одночасно "
                         "поділили б ті самі акаунти і зіпсували б паспорти вікон. "
                         "Стан — samples_list; зняти — sample_cancel.")
+
+    # Періоди збору не мають перекриватись: коментар із перекриття потрапив би в
+    # знаменник двічі, з різними вагами, і частка поїхала б без жодної ознаки.
+    # Повторний збір за ТОЙ САМИЙ період — це інше, він переписує паспорт (нижче
+    # про це попередження).
+    clash = None
+    if job_mode in (MonitorSampleJob.MODE_COLLECT, MonitorSampleJob.MODE_PROBE):
+        clash = (MonitorSample.objects.filter(task=t, period_start__lte=d_to,
+                                              period_end__gte=d_from)
+                 .exclude(period_start=d_from, period_end=d_to)
+                 .order_by("period_start").first())
+        if clash:
+            raise ToolError(
+                f"період {d_from}…{d_to} перекривається з уже зібраним "
+                f"{clash.period_start}…{clash.period_end}: коментарі з перекриття "
+                "двічі потрапили б у знаменник частки, з різними вагами. Візьми "
+                "період, що не налазить на наявні (їх видно в samples_list), або "
+                "повтори рівно той самий період — тоді паспорти перепишуться.")
 
     chats = list(MonitorChat.objects.filter(task=t, is_active=True)
                  .select_related("channel", "channel__region_subject", "tg_account"))
@@ -1117,7 +1166,8 @@ def _whitelist_channel(ref: str):
     ref = (ref or "").strip()
     if not ref:
         raise ToolError("дай channel: @username, посилання або id довідника")
-    looks_new = ref.startswith("@") or "://" in ref or "t.me/" in ref
+    looks_new = (ref.startswith("@") or "://" in ref or "t.me/" in ref
+                 or "vk.com/" in ref)
     if looks_new:
         try:
             return common.resolve_channel(ref)
@@ -2548,7 +2598,7 @@ def task_create(slug: str, name: str, pipeline: str = "events", description: str
       "info_tagger_prompt": "Лише infospace: додаткові правила тегів, доклеюються до скрін-промпта. Порожньо = не змінювати; '-' = очистити (лишаться підказки категорій). Це НЕ підказка категорії (hint).",
       "info_judge_prompt": "Лише infospace: промпт судді зіставлення. Порожньо = не змінювати; '-' = очистити (дефолт із коду).",
       "tag_categories": "Ключі категорій тегів через кому — замінити набір задачі. Порожньо = не змінювати; '-' = відв'язати всі.",
-      "mon_collect_source": "Лише monitor: ЗВІДКИ беруться коментарі. telezip — суцільний потік за telezip_query (run_create, ~$0.10/чанк); tg_sample — випадкова вибірка id повідомлень Telegram-акаунтами (команда monitor_sample_collect, TeleZip не чіпається, кожному чату потрібен акаунт). Порожньо = не змінювати.",
+      "mon_collect_source": "Лише monitor: ЗВІДКИ беруться коментарі. telezip — суцільний потік за telezip_query (run_create, ~$0.10/чанк); tg_sample — випадкова вибірка id повідомлень Telegram-акаунтами (команда monitor_sample_collect, TeleZip не чіпається, кожному чату потрібен акаунт); vk_comments — коментарі під постами спільнот VK (run_create, безкоштовно, у «Чатах» мають бути рядки vk.com/…). Порожньо = не змінювати.",
       **_EXTRA_PARAM_DOCS})
 def task_update(ref: str, telezip_query: str = "", languages: str = "",
                 unique: bool = None, chunk_days: int = 0, is_active: bool = None,
