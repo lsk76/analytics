@@ -3,10 +3,9 @@
 у gateway.
 
 Ролі:
-  collector — полінг джерел infospace з пулу; НЕ дає акаунти, привʼязані до
-              стріму (MonitorChat.tg_account) чи публікації
-              (PublishConfig.forward_account): той самий auth key у двох
-              споживачів — це і є вбиті сесії
+  collector — полінг джерел infospace з пулу без публікаторів. Привʼязка до
+              MonitorChat не резервує акаунт: читання різних споживачів
+              серіалізує один клієнт і замок у tg-gateway.
   stream    — читання чатів tgsearch; пул без публікаторів
   publisher — лише привʼязаний (PublishConfig.forward_account), з пулу не дається
   service   — warm-up/spam-status/test-bot/адмінка/MCP: будь-який конкретний
@@ -52,12 +51,9 @@ def _role_cfg(role: str) -> dict:
 
 
 def _busy_ids(role: str) -> set[int]:
-    from analysis.models import MonitorChat, PublishConfig
+    from analysis.models import PublishConfig
     busy: set[int] = set(PublishConfig.objects.exclude(forward_account=None)
                          .values_list("forward_account_id", flat=True))
-    if role == "collector":
-        busy |= set(MonitorChat.objects.exclude(tg_account=None)
-                    .values_list("tg_account_id", flat=True))
     return busy
 
 

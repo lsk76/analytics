@@ -130,8 +130,9 @@ registry.pinned_for(obj) -> ManagedAccount | None    # obj: Source / MonitorChat
 - кандидати: `is_active`, `is_authenticated`, `state == ready`,
   `cooldown_until < now`, `resolve_exhausted_until < now` (для операцій з резолвом),
   `proxy.is_working`;
-- виключити акаунти, привʼязані до несумісних ролей: `stream`
-  (`MonitorChat.tg_account`), `publisher` (`PublishConfig.forward_account`);
+- виключити акаунти публікації (`PublishConfig.forward_account`);
+  привʼязка до `MonitorChat` не виключає акаунт із пулу: різні споживачі
+  читають через один клієнт і замок у tg-gateway;
 - стабільний вибір `(key + shift) % N`, `shift` зберігає споживач (як зараз
   `poll_cursor.acc_shift`), збільшує на `AccountUnavailable`/`RateLimited`;
 - ролі та виключення — у `Setting` (`registry_roles_json`), щоб оператор міг

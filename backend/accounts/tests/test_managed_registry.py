@@ -145,16 +145,21 @@ def test_candidates_filters_state_proxy_and_roles(pool):
     assert a2.id not in registry.candidates("collector")     # state != ready
     a2.state = "ready"; a2.save()
     assert registry.candidates("collector") == [a1.id, a2.id, a4.id]
-    # привʼязаний до стріму — не для збирача, але для стріму годиться
+    # Привʼязка до чату не резервує акаунт ні для активної, ні для вимкненої задачі.
     task = TaskFactory()
     from analysis.models import Channel
     ch = Channel.objects.create(username="c1", title="c1")
-    MonitorChat.objects.create(task=task, channel=ch, tg_account=a1)
-    assert registry.candidates("collector") == [a2.id, a4.id]
+    chat = MonitorChat.objects.create(task=task, channel=ch, tg_account=a1)
+    assert registry.candidates("collector") == [a1.id, a2.id, a4.id]
     assert a1.id in registry.candidates("stream")
+    task.is_active = False
+    task.save()
+    assert registry.candidates("collector") == [a1.id, a2.id, a4.id]
+    chat.refresh_from_db()
+    assert chat.tg_account_id == a1.id
     # публікатор — ні для кого
     PublishConfig.objects.create(task=task, forward_account=a4, chat_id="-1", name="p")
-    assert registry.candidates("collector") == [a2.id]
+    assert registry.candidates("collector") == [a1.id, a2.id]
     assert registry.candidates("stream") == [a1.id, a2.id]
     assert registry.candidates("publisher") == []
 
