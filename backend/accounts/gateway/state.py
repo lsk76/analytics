@@ -43,6 +43,7 @@ class Outcome(str, Enum):
     RESOLVE = "resolve"          # вичерпано добовий ліміт резолву юзернеймів
     DEAUTH = "deauth"            # сесію відкликано/вбито
     BANNED = "banned"
+    FROZEN = "frozen"            # сесія існує, але Telegram заморозив акаунт
     TELEGRAM = "telegram"        # інша RPC-помилка: не наша, але й не фатальна
     INTERNAL = "internal"        # наш баг / невідоме
 
@@ -59,6 +60,9 @@ def classify(exc: BaseException | None) -> tuple[Outcome, dict]:
     """Виняток → (Outcome, meta). Чиста функція, без БД."""
     if exc is None:
         return Outcome.OK, {}
+    # Перевіряємо ім'я: старі версії Telethon можуть не експортувати цей клас.
+    if type(exc).__name__ == "FrozenParticipantMissingError":
+        return Outcome.FROZEN, {}
     if isinstance(exc, FloodWaitError):
         return Outcome.FLOOD, {"seconds": int(getattr(exc, "seconds", 60) or 60)}
     if isinstance(exc, (UserDeactivatedBanError, PhoneNumberBannedError)):
@@ -143,6 +147,11 @@ def apply(account, outcome: Outcome, *, meta: dict | None = None,
         cap = _setting_int("gateway_resolve_cap_sec", DEFAULT_RESOLVE_CAP_SEC)
         _set("resolve_failures", n)
         _set("resolve_exhausted_until", now + timedelta(seconds=min(base * (2 ** (n - 1)), cap)))
+        _set("last_error", error[:2000])
+    elif outcome is Outcome.FROZEN:
+        _set("state", A.STATE_FROZEN)
+        _set("gateway_connected", False)
+        _set("spam_status", "frozen")
         _set("last_error", error[:2000])
     elif outcome is Outcome.DEAUTH:
         _set("state", A.STATE_DEAUTHORIZED)

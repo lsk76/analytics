@@ -203,7 +203,8 @@ class ManagedAccount:
             return self._call("check_alive")
         except AccountUnavailable as e:
             return {"state": {"deauthorized": "розлогінений", "banned": "ЗАБАНЕНИЙ",
-                              "deauth": "сесію відкликано", "needs_proxy": "немає проксі",
+                              "deauth": "сесію відкликано", "frozen": "заморожений",
+                              "needs_proxy": "немає проксі",
                               "transport": "проксі не зʼєднує"}.get(e.reason, e.reason),
                     "ok": False, "detail": str(e)[:120]}
         except RateLimited as e:

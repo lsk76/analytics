@@ -157,14 +157,41 @@ def test_account_unavailable_rotates_and_rate_limits(accounts, fake):
     assert s.consecutive_failures == 0                              # не збій джерела
 
 
-def test_pinned_account_unavailable_keeps_binding(accounts, fake):
+def test_pinned_account_unavailable_keeps_binding_and_rotates_fallback(accounts, fake):
     fake.exc = AccountUnavailable("resolve")
     s = SourceFactory(kind="telegram", url="https://t.me/x", name="x",
                               tg_account=accounts[0])
     with pytest.raises(RateLimited):
         TelegramAdapter().fetch(s)
     s.refresh_from_db()
-    assert "acc_shift" not in (s.poll_cursor or {}) and s.tg_account_id == accounts[0].id
+    assert s.poll_cursor["acc_shift"] == 1 and s.tg_account_id == accounts[0].id
+
+
+def test_frozen_pinned_account_falls_back_without_losing_watermark(accounts, fake):
+    a1, a2 = accounts
+    s = SourceFactory(kind="telegram", url="https://t.me/x", tg_account=a1,
+                      poll_cursor={"last_msg_id": 123})
+    a1.state = TelegramAccount.STATE_FROZEN
+    a1.save()
+    fake.msgs = [{"id": 124, "text": "new", "date": None}]
+    TelegramAdapter().fetch(s)
+    assert fake.calls[-1]["id"] == a2.id and fake.calls[-1]["min_id"] == 123
+    assert s.poll_cursor["last_msg_id"] == 124
+    s.refresh_from_db()
+    assert s.tg_account_id == a1.id
+
+
+def test_pinned_account_without_resolve_uses_pool_but_cached_peer_still_works(accounts, fake):
+    from datetime import timedelta
+    a1, a2 = accounts
+    a1.resolve_exhausted_until = timezone.now() + timedelta(hours=1)
+    a1.save()
+    s = SourceFactory(kind="telegram", url="https://t.me/x", tg_account=a1)
+    ch = Channel.objects.get(username="x")
+    assert TelegramAdapter()._account(s, ch).id == a2.id
+    ch.tg_id = 1
+    ch.raw_meta = {"access_hash_by_acc": {str(a1.id): 9}}
+    assert TelegramAdapter()._account(s, ch).id == a1.id
 
 
 def test_gateway_rate_limited_passes_seconds(accounts, fake):

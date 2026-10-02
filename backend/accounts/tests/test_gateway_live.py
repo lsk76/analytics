@@ -10,7 +10,8 @@ import pytest
 from asgiref.sync import async_to_sync
 from aiohttp.test_utils import TestClient, TestServer
 from django.utils import timezone
-from telethon.errors import FloodWaitError
+from telethon.errors import (AuthKeyUnregisteredError, ChannelPrivateError,
+                             FloodWaitError, FrozenParticipantMissingError)
 
 from accounts.gateway import _telethon, live as lv
 from accounts.gateway.pool import AccountPool
@@ -18,6 +19,50 @@ from accounts.gateway.server import make_app
 from accounts.models import Proxy, TelegramAccount
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.mark.parametrize("error,reason", [
+    (FrozenParticipantMissingError(request=None), "frozen"),
+    (AuthKeyUnregisteredError(request=None), "deauth"),
+])
+@pytest.mark.parametrize("op", ["scan", "search"])
+def test_read_account_error_reaches_gateway_state(acc, fake, monkeypatch, error, reason, op):
+    async def iter_messages(self, *args, **kwargs):
+        raise error
+        yield
+
+    async def get_messages(self, *args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(FakeClient, "iter_messages", iter_messages, raising=False)
+    monkeypatch.setattr(FakeClient, "get_messages", get_messages, raising=False)
+    live = lv.LiveAccount(acc.id)
+    kwargs = {"chats": [{"key": "h", "entity": {"username": "channel"}}]}
+    if op == "search":
+        kwargs["terms"] = ["word"]
+    with pytest.raises(lv.GatewayError) as ei:
+        async_to_sync(live.call)(op, kwargs)
+    assert ei.value.kind == "unavailable" and ei.value.reason == reason
+    acc.refresh_from_db()
+    assert acc.state == ("frozen" if reason == "frozen" else "deauthorized")
+    assert not acc.gateway_connected and live.client is None and live.ops_ok == 0
+    # Наступний запит відмовляє до спроби підключення.
+    with pytest.raises(lv.GatewayError):
+        async_to_sync(live.call)(op, kwargs)
+    assert len(FakeClient.instances) == 1
+
+
+def test_private_channel_remains_row_error(acc, fake, monkeypatch):
+    async def iter_messages(self, *args, **kwargs):
+        raise ChannelPrivateError(request=None)
+        yield
+
+    monkeypatch.setattr(FakeClient, "iter_messages", iter_messages, raising=False)
+    rows = async_to_sync(lv.LiveAccount(acc.id).call)("scan", {
+        "chats": [{"key": "h", "entity": {"username": "private"}}]})
+    assert "ChannelPrivateError" in rows[0]["error"]
+    acc.refresh_from_db()
+    assert acc.state == "ready" and acc.is_authenticated
 
 
 class FakeClient:

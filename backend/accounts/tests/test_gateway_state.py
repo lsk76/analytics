@@ -7,6 +7,7 @@ import pytest
 from django.utils import timezone
 from telethon.errors import (AuthKeyDuplicatedError, AuthKeyUnregisteredError,
                              ChatAdminRequiredError, FloodWaitError,
+                             FrozenParticipantMissingError,
                              PhoneNumberBannedError, SessionRevokedError,
                              UserDeactivatedBanError, UserDeactivatedError,
                              UsernameInvalidError, UsernameNotOccupiedError)
@@ -46,6 +47,7 @@ def acc(django_user_model):
     (UserDeactivatedError(request=None), st.Outcome.DEAUTH),
     (UserDeactivatedBanError(request=None), st.Outcome.BANNED),
     (PhoneNumberBannedError(request=None), st.Outcome.BANNED),
+    (FrozenParticipantMissingError(request=None), st.Outcome.FROZEN),
     (ChatAdminRequiredError(request=None), st.Outcome.TELEGRAM),
     (ValueError("щось інше"), st.Outcome.INTERNAL),
     (KeyError("x"), st.Outcome.INTERNAL),
@@ -164,6 +166,18 @@ def test_telegram_and_internal_only_record_error(acc):
         st.apply(acc, out, error="boom")
         acc.refresh_from_db()
         assert acc.state == "ready" and acc.last_error == "boom" and acc.is_available
+
+
+def test_frozen_preserves_session_but_removes_account_from_work(acc):
+    acc.gateway_connected = True
+    acc.save()
+    st.apply(acc, st.Outcome.FROZEN, error="account frozen")
+    acc.refresh_from_db()
+    assert acc.state == TelegramAccount.STATE_FROZEN and not acc.is_available
+    assert acc.is_authenticated and acc.spam_status == "frozen"
+    assert not acc.gateway_connected and acc.last_error == "account frozen"
+    acc.proxy.refresh_from_db()
+    assert acc.proxy.is_working and acc.proxy.fail_count == 0
 
 
 def test_repair_failed_then_repaired(acc):

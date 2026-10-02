@@ -104,7 +104,8 @@ async def repair(live) -> dict:
     async with live.lock:
         account = await _load(live.id)
         A = type(account)
-        if account.state in (A.STATE_DEAUTHORIZED, A.STATE_BANNED) or not account.is_authenticated:
+        if (account.state in (A.STATE_DEAUTHORIZED, A.STATE_BANNED, A.STATE_FROZEN)
+                or not account.is_authenticated):
             return {"ok": False, "action": "skipped", "reason": account.state}
         proxy = account.proxy
         if proxy is None or not proxy.is_active:

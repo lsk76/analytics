@@ -137,13 +137,18 @@ registry.pinned_for(obj) -> ManagedAccount | None    # obj: Source / MonitorChat
 - ролі та виключення — у `Setting` (`registry_roles_json`), щоб оператор міг
   зняти акаунт з ролі без деплою.
 
+Привʼязаний акаунт використовується лише коли він активний, авторизований,
+`ready`, має робочу проксі та може резолвити канал (або має кешований хеш).
+Інакше infospace тимчасово бере акаунт із пулу, зберігаючи привʼязку й
+`last_msg_id`. `AccountUnavailable` збільшує `acc_shift` також у цьому випадку.
+
 Реєстр **не кешує** рядки: кожен виклик читає БД.
 
 ### 3.4 Модель `TelegramAccount` — нові поля (міграція адитивна)
 
 | поле | тип | дефолт |
 |---|---|---|
-| `state` | char: `ready` / `cooldown` / `needs_proxy` / `deauthorized` / `banned` | `ready` |
+| `state` | char: `ready` / `cooldown` / `needs_proxy` / `deauthorized` / `banned` / `frozen` | `ready` |
 | `cooldown_until` | datetime null | null |
 | `transport_failures` | int | 0 |
 | `resolve_exhausted_until` | datetime null | null |
@@ -166,10 +171,13 @@ registry.pinned_for(obj) -> ManagedAccount | None    # obj: Source / MonitorChat
 | успішна операція, що резолвила юзернейм (resolve/channel_meta/scan з `username`) | `resolve_failures=0`, `resolve_exhausted_until=None` | `ready` |
 | `AuthKeyUnregistered` / `SessionRevoked` / `AuthKeyDuplicated` / `UserDeactivated` | `is_authenticated=False`, клієнт закрито | `deauthorized` |
 | `UserDeactivatedBan` / `PhoneNumberBanned` | те саме | `banned` |
+| `FrozenParticipantMissingError` | `spam_status=frozen`, клієнт закрито; сесію зберігаємо, запити відхиляються як `AccountUnavailable(frozen)`; ремонт проксі не повертає акаунт у роботу | `frozen` |
 | оператор: `replace_proxy` → `check_alive` ok | `transport_failures=0` | `ready` |
 | оператор: `verify_code` ok | нова `session_string` | `ready` |
 
 Перехід = запис у БД + рядок у лог `acc=#id proxy=#id op=… → state`.
+`scan` і `search` пропускають помилки акаунта до цього обробника;
+лише помилки окремого чату (наприклад, `ChannelPrivateError`) лишаються в `row.error`.
 Cooldown-константи — у `Setting` (`gateway_cooldown_base_sec`, `gateway_cooldown_cap_sec`,
 `gateway_repair_after_failures`).
 

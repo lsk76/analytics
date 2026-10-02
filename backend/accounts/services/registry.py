@@ -96,13 +96,18 @@ def pick(role: str, key: int, shift: int = 0, need_resolve: bool = False) -> Man
 
 
 def pinned_for(obj) -> ManagedAccount | None:
-    """Привʼязаний акаунт обʼєкта (Source.tg_account / MonitorChat.tg_account /
-    PublishConfig.forward_account), якщо він є і не деавторизований."""
+    """Привʼязаний акаунт, якщо він зараз доступний і має робочу проксі.
+
+    Привʼязку зберігаємо: поки акаунт непридатний, збирач бере інший із пулу.
+    """
     acc_id = (getattr(obj, "tg_account_id", None)
               or getattr(obj, "forward_account_id", None))
     if not acc_id:
         return None
     acc = ManagedAccount(acc_id)
-    if acc.row.state in (acc.row.STATE_DEAUTHORIZED, acc.row.STATE_BANNED):
+    row = acc.row
+    if not row.is_active or not row.is_authenticated or not row.is_available:
+        return None
+    if row.proxy is None or not row.proxy.is_active or not row.proxy.is_working:
         return None
     return acc

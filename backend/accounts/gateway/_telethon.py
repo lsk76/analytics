@@ -24,12 +24,23 @@ from telethon.errors import (ChannelPrivateError, FloodWaitError, TypeNotFoundEr
 from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
 from telethon.tl.types import InputPeerChannel, MessageMediaDocument, MessageMediaPhoto
 
+from . import state as st
+
 logger = logging.getLogger("accounts.gateway.ops")
 
 TOKEN_RE = re.compile(r"\d{6,}:[A-Za-z0-9_-]{30,}")
 
 
 # ------------------------------------------------------------------ helpers
+
+def _raise_account_error(exc):
+    """Помилки акаунта мають дійти до LiveAccount, а не стати error чату."""
+    outcome, _ = st.classify(exc)
+    if isinstance(exc, TypeNotFoundError) or outcome in (
+            st.Outcome.TRANSPORT, st.Outcome.FLOOD, st.Outcome.RESOLVE,
+            st.Outcome.DEAUTH, st.Outcome.BANNED, st.Outcome.FROZEN):
+        raise exc
+
 
 def _peer(value):
     """'@name' / 'name' / '-100123' / 123 → те, що приймає Telethon."""
@@ -77,6 +88,7 @@ async def _input_peer_meta(client, entity) -> dict | None:
         if cid and ah:
             return {"id": int(cid), "access_hash": int(ah)}
     except Exception as e:  # noqa: BLE001 — кеш peer не має валити операцію
+        _raise_account_error(e)
         logger.debug("input_peer: %r", e)
     return None
 
@@ -183,6 +195,7 @@ async def scan(ctx, chats: list[dict], patterns: list[str] | None = None,
                     except FloodWaitError:
                         raise
                     except Exception as e:  # noqa: BLE001 — медіа не має валити читання
+                        _raise_account_error(e)
                         logger.warning("scan: медіа %s/%s не переслалось: %r",
                                        row["key"], m.id, e)
                 if not matched:
@@ -205,14 +218,10 @@ async def scan(ctx, chats: list[dict], patterns: list[str] | None = None,
                 ValueError) as e:
             # «No user has X as username» — це ліміт резолву на АКАУНТІ, тож
             # летить нагору (RESOLVE); решта — вина чату
-            if isinstance(e, ValueError) and ("as username" in str(e)
-                                              or "Cannot find any entity" in str(e)):
-                raise
+            _raise_account_error(e)
             row["error"] = f"{type(e).__name__}: {str(e)[:90]}"
         except Exception as e:  # noqa: BLE001
-            if type(e).__name__ in ("ConnectionError", "TimeoutError") or isinstance(
-                    e, (ConnectionError, TimeoutError, OSError)):
-                raise
+            _raise_account_error(e)
             row["error"] = f"{type(e).__name__}: {str(e)[:90]}"
     return out
 
@@ -262,6 +271,7 @@ async def search(ctx, chats: list[dict], terms: list[str], since: str | None = N
         except (FloodWaitError, TypeNotFoundError):
             raise
         except Exception as e:  # noqa: BLE001
+            _raise_account_error(e)
             row["error"] = f"{type(e).__name__}: {str(e)[:90]}"
         row["hits"] = list(found.values())
     return out

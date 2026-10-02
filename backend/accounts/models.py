@@ -178,12 +178,14 @@ class TelegramAccount(models.Model):
     # Рядок — дзеркало для адмінки/MCP/політики вибору; правду знає gateway.
     STATE_READY, STATE_COOLDOWN, STATE_NEEDS_PROXY = "ready", "cooldown", "needs_proxy"
     STATE_DEAUTHORIZED, STATE_BANNED = "deauthorized", "banned"
+    STATE_FROZEN = "frozen"
     STATE_CHOICES = [
         (STATE_READY, "Готовий"),
         (STATE_COOLDOWN, "Пауза (cooldown)"),
         (STATE_NEEDS_PROXY, "Потрібна проксі"),
         (STATE_DEAUTHORIZED, "Розлогінений"),
         (STATE_BANNED, "Забанений"),
+        (STATE_FROZEN, "Заморожений"),
     ]
     state = models.CharField(max_length=16, choices=STATE_CHOICES, default=STATE_READY,
                              verbose_name="Стан")

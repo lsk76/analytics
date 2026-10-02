@@ -60,7 +60,7 @@ class TelegramAdapter(BaseSourceAdapter):
         у нікуди. Тому без хеша беремо лише кандидатів із живим резолвом."""
         from accounts.services import registry
         acc = registry.pinned_for(source)
-        if acc is not None:
+        if acc is not None and (peers.peer_for(channel, acc.id) is not None or acc.can_resolve()):
             return acc
         shift = int((source.poll_cursor or {}).get("acc_shift", 0))
         key = source.id or 0
@@ -105,8 +105,8 @@ class TelegramAdapter(BaseSourceAdapter):
             # проксі/пауза/резолв цього акаунта — джерело ні до чого: інший акаунт
             logger.info("info_collect: %s — акаунт #%s недоступний (%s), ротація",
                         source.name, acc.id, e.reason)
-            if not source.tg_account_id:
-                _bump_shift(source)
+            # Ротуємо й при тимчасовому виборі з пулу для джерела з привʼязкою.
+            _bump_shift(source)
             raise RateLimited(e.retry_after or 60)
         except GwRateLimited as e:
             raise RateLimited(e.retry_after)

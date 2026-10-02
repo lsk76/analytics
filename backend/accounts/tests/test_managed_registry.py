@@ -190,3 +190,18 @@ def test_pinned_for(pool):
     a1.state = "deauthorized"; a1.save()
     assert registry.pinned_for(src) is None
     assert registry.pinned_for(SourceFactory()) is None
+
+
+@pytest.mark.parametrize("field,value", [
+    ("state", "frozen"), ("state", "needs_proxy"), ("state", "cooldown"),
+    ("is_active", False), ("is_authenticated", False),
+])
+def test_unavailable_pinned_account_is_skipped(pool, field, value):
+    from analysis.tests.factories import SourceFactory
+    a1 = pool[0]
+    src = SourceFactory(kind="telegram", url="https://t.me/x", tg_account=a1)
+    setattr(a1, field, value)
+    a1.save()
+    assert registry.pinned_for(src) is None
+    src.refresh_from_db()
+    assert src.tg_account_id == a1.id

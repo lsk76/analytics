@@ -30,6 +30,7 @@ KIND = {
     st.Outcome.RESOLVE: "unavailable",
     st.Outcome.DEAUTH: "unavailable",
     st.Outcome.BANNED: "unavailable",
+    st.Outcome.FROZEN: "unavailable",
     st.Outcome.TELEGRAM: "telegram",
     st.Outcome.INTERNAL: "internal",
 }
@@ -172,7 +173,7 @@ class LiveAccount:
     @staticmethod
     def _gate(account, needs_auth: bool) -> None:
         A = type(account)
-        if account.state in (A.STATE_DEAUTHORIZED, A.STATE_BANNED) and needs_auth:
+        if account.state in (A.STATE_DEAUTHORIZED, A.STATE_BANNED, A.STATE_FROZEN) and needs_auth:
             raise GatewayError("unavailable", f"акаунт #{account.pk}: {account.get_state_display()}",
                                reason=account.state)
         if needs_auth and not account.is_authenticated:
@@ -250,7 +251,8 @@ class LiveAccount:
         fields = await _apply(account, outcome, meta, err_text)
         logger.warning("acc=#%s proxy=#%s op=%s → %s: %s", self.id, account.proxy_id or "-",
                        op, outcome.value, err_text)
-        if outcome in (st.Outcome.TRANSPORT, st.Outcome.DEAUTH, st.Outcome.BANNED):
+        if outcome in (st.Outcome.TRANSPORT, st.Outcome.DEAUTH, st.Outcome.BANNED,
+                       st.Outcome.FROZEN):
             await self.drop()
         if outcome is st.Outcome.TRANSPORT and meta.get("needs_repair") and self.pool is not None:
             self.pool.schedule_repair(self.id)
