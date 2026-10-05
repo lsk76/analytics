@@ -2,7 +2,7 @@
 
 Підключення (з ноутбука чи з сервера) — stdio через `docker compose exec -T`:
     ssh tg-analytics 'cd /opt/tg-event-analytics && docker compose \\
-        -f docker-compose.yml -f docker-compose.monitor.yml exec -T tgstat \\
+        -f docker-compose.prod.yml exec -T tgstat \\
         python -m app.mcp_server'
 (обгортка — tgstat_service/mcp-stdio.sh, реєстрація — .mcp.json «tgstat»).
 

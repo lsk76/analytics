@@ -1,20 +1,14 @@
 # tg-event-analytics — Docker management
 
 DC          = docker compose
-# Два прод-профілі під два різні сервери:
-#   DC_PROD      — сервер моніторингу + ведення ТГ (без аналітики)
-#   DC_ANALYTICS — сервер аналітики (важкий конвеєр collect…dedup + графіки)
-DC_PROD      = docker compose -f docker-compose.monitor.yml
-DC_ANALYTICS = docker compose -f docker-compose.prod.yml
-# Жива розкладка сервера analytics.matter-d.pro (переїзд 02.09.2026): базовий
-# compose + monitor разом. НЕ prod.yml — на ньому прод НЕ запущений. Уточнено
-# кровʼю: команди з одним файлом не бачать половини воркерів.
-DC_LIVE      = docker compose -f docker-compose.yml -f docker-compose.monitor.yml
+# Єдиний prod: усі конвеєри, MCP і Telegram gateway.
+DC_PROD = docker compose -f docker-compose.prod.yml
+# Сумісні live-команди керують тим самим production-стеком.
+DC_LIVE = $(DC_PROD)
 
 .PHONY: help dev prod build start stop restart logs ps shell dbshell \
         migrate makemigrations superuser changepassword collectstatic \
-        seed run backup restore list-backups prod-build prod-logs prod-stop clean \
-        prod-analytics prod-analytics-build prod-analytics-logs prod-analytics-ps prod-analytics-stop \
+        seed run backup restore list-backups prod-build prod-logs prod-ps prod-stop clean \
         workers workers-logs workers-stop scale-workers worker \
         live-restart-web live-restart-mcp live-restart live-ps live-logs live-logs-mcp \
         live-collectstatic
@@ -32,16 +26,11 @@ help:
 	@echo "    make logs         - follow web logs"
 	@echo "    make ps           - container status"
 	@echo ""
-	@echo "  Prod — моніторинг + ведення ТГ (docker-compose.monitor.yml):"
+	@echo "  Prod — усі конвеєри + MCP (docker-compose.prod.yml):"
 	@echo "    make prod         - build + up (detached)"
 	@echo "    make prod-logs    - follow web logs"
-	@echo "    make prod-stop    - down"
-	@echo ""
-	@echo "  Prod — сервер аналітики, важкий конвеєр (docker-compose.prod.yml):"
-	@echo "    make prod-analytics       - build + up (detached)"
-	@echo "    make prod-analytics-logs  - follow web logs"
-	@echo "    make prod-analytics-ps    - container status"
-	@echo "    make prod-analytics-stop  - down"
+	@echo "    make prod-ps      - container status"
+	@echo "    make prod-stop    - down (data kept in volume)"
 	@echo ""
 	@echo "  Django:"
 	@echo "    make migrate      - apply migrations"
@@ -117,22 +106,11 @@ prod-build:
 prod-logs:
 	$(DC_PROD) logs -f web
 
+prod-ps:
+	$(DC_PROD) ps
+
 prod-stop:
 	$(DC_PROD) down
-
-# ---------- Prod: сервер аналітики (важкий конвеєр) ----------
-prod-analytics: prod-analytics-build
-prod-analytics-build:
-	$(DC_ANALYTICS) up -d --build
-
-prod-analytics-logs:
-	$(DC_ANALYTICS) logs -f web
-
-prod-analytics-ps:
-	$(DC_ANALYTICS) ps
-
-prod-analytics-stop:
-	$(DC_ANALYTICS) down
 
 # ---------- Django ----------
 migrate:
@@ -189,7 +167,7 @@ restore:
 	$(DC) exec -T db pg_restore -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-tg_events} --clean --if-exists < $(FILE)
 	@echo "Restored."
 
-# ---------- Живий прод (analytics.matter-d.pro): docker-compose.yml + monitor.yml ----------
+# ---------- Сумісні live-команди для єдиного prod ----------
 live-ps:                   # статус контейнерів живого прода
 	$(DC_LIVE) ps
 
@@ -202,10 +180,10 @@ live-logs-mcp:             # логи мережевого MCP (у старто�
 live-collectstatic:        # перезібрати статику адмінки
 	$(DC_LIVE) exec -T web python manage.py collectstatic --noinput
 
-live-restart-web:          # перезапустити лише web (підхопити зміни .py-коду адмінки)
+live-restart-web:          # перезапустити лише web (оновлення коду: make prod)
 	$(DC_LIVE) restart web
 
-live-restart-mcp:          # перезапустити мережевий MCP (обовʼязково після змін у analysis/services/mcp_api/)
+live-restart-mcp:          # перезапустити мережевий MCP
 	$(DC_LIVE) restart mcp
 
 live-restart:              # перезапустити ВЕСЬ живий стек (не чіпаючи том БД)

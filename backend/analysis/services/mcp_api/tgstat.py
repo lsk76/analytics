@@ -43,7 +43,7 @@ def _explain(status: int, body: dict, path: str = "") -> str:
         # Саме так виглядає «контейнер старіший за код»: маршруту ще немає.
         return ("сервіс tgstat не знає про /selftest — контейнер старіший за цю "
                 "перевірку. Пересоздати його з поточного образу: "
-                "`docker compose -f docker-compose.yml -f docker-compose.monitor.yml "
+                "`docker compose -f docker-compose.prod.yml "
                 "up -d --force-recreate tgstat`.")
     state = (body or {}).get("state")
     msg = (body or {}).get("error") or str(body)[:300]
@@ -75,7 +75,7 @@ def _api(path: str, params: dict | None = None, method: str = "GET"):
             f"сервіс tgstat не відповідає ({_base()}): {type(e).__name__}. "
             "Контейнер живий? `service_ps` / `service_logs tgstat`. У dev-стеку "
             "його взагалі немає — tgstat крутиться лише на проді "
-            "(профіль tgstat у docker-compose.monitor.yml).") from e
+            "(профіль tgstat у docker-compose.prod.yml).") from e
     try:
         body = r.json()
     except ValueError:

@@ -110,8 +110,8 @@ stdio, живе в контейнері `tgstat` і ходить у HTTP-API в�
 `tgstat`; обгортка `tgstat_service/mcp-stdio.sh` робить
 
 ```bash
-ssh tg-analytics 'cd /opt/tg-event-analytics && docker compose -f docker-compose.yml \
-  -f docker-compose.monitor.yml exec -T tgstat python -m app.mcp_server'
+ssh tg-analytics 'cd /opt/tg-event-analytics && docker compose \
+  -f docker-compose.prod.yml exec -T tgstat python -m app.mcp_server'
 ```
 
 (`TGSTAT_SSH=local` — без ssh, для Claude Code на самому сервері; `.mcp.json`
@@ -263,8 +263,8 @@ TGSTAT_VNC_PASSWORD=<довгий випадковий>   # без пароля 
 
 ```bash
 cd /opt/tg-event-analytics
-docker compose -f docker-compose.yml -f docker-compose.monitor.yml up -d --build tgstat
-docker compose -f docker-compose.yml -f docker-compose.monitor.yml ps tgstat   # healthy
+docker compose -f docker-compose.prod.yml up -d --build tgstat
+docker compose -f docker-compose.prod.yml ps tgstat   # healthy
 ```
 
 ### 2. Відкрити екран браузера (з локальної машини)
@@ -284,7 +284,7 @@ Connect → пароль `TGSTAT_VNC_PASSWORD`. Видно вікно Chrome с�
 Якщо у вікні не tgstat, виведіть його на передній план:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
+docker compose -f docker-compose.prod.yml exec tgstat \
   python -c "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:8020/auth/login', method='POST')).read().decode())"
 ```
 
@@ -297,7 +297,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
 не зміниться:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
+docker compose -f docker-compose.prod.yml exec tgstat \
   python -c "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:8020/auth/manual', method='POST')).read().decode())"
 ```
 
@@ -309,7 +309,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
 ### 4. Перевірити
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec tgstat \
+docker compose -f docker-compose.prod.yml exec tgstat \
   python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8020/auth/status?reload=1').read().decode())"
 ```
 

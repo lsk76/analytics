@@ -203,7 +203,7 @@ Cooldown-константи — у `Setting` (`gateway_cooldown_base_sec`, `gate
 
 ## 6. Docker / конфіг
 
-- Новий сервіс у `docker-compose.yml` і `docker-compose.monitor.yml`:
+- Новий сервіс у `docker-compose.yml` і `docker-compose.prod.yml`:
   `tg-gateway: { <<: *worker, command: python manage.py run_tg_gateway, expose: ["8010"] }`,
   без `ports` (тільки внутрішня мережа). `restart: unless-stopped`.
 - `TG_GATEWAY_URL=http://tg-gateway:8010` в `x-worker.environment` і у `web`,

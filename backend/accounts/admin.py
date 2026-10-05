@@ -15,6 +15,7 @@ from analysis.multiselect_filter import MultiSelectFilter
 
 from .models import AccountTag, Proxy, TelegramAccount, TelegramBot, TestBotJob, WarmUpJob
 from .services.tdata_import import import_tdata_accounts_from_uploads
+from .services.proxy_assignment import random_working_proxy
 from .services import registry
 from .services.managed import gw_result
 from .services.translit import normalize_bot_username, slugify_bot_username
@@ -324,6 +325,10 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         # (зробити спільним потім може через зміну власника)
         if not change and not request.user.is_superuser:
             obj.user = request.user
+        if not change and not obj.proxy_id:
+            obj.proxy = random_working_proxy()
+            if obj.proxy is None:
+                messages.warning(request, "Акаунт додано без проксі: немає активних робочих проксі.")
         super().save_model(request, obj, form, change)
         # проксі/сесію змінено поза gateway → його живий клієнт більше не той
         # акаунт: хай перебудує при наступному виклику (без цього два IP)
@@ -552,6 +557,10 @@ class TelegramAccountAdmin(admin.ModelAdmin):
                 summary = f"Імпортовано: {imported}. Не імпортовано: {len(results) - imported}."
                 if imported:
                     messages.success(request, summary)
+                    without_proxy = sum(result["ok"] and not result["account"].proxy_id
+                                        for result in results)
+                    if without_proxy:
+                        messages.warning(request, f"Без проксі: {without_proxy}. Додайте активні робочі проксі.")
                 else:
                     messages.error(request, summary)
 

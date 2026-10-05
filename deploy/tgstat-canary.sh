@@ -20,7 +20,7 @@
 # ============================================================================
 set -uo pipefail
 cd "$(dirname "$0")/.."
-DC="docker compose -f docker-compose.yml -f docker-compose.monitor.yml"
+DC="docker compose -f docker-compose.prod.yml"
 STAMP="$(date -Is)"
 
 out="$($DC exec -T web python manage.py mcp_rpc tgstat_selftest 2>&1)"

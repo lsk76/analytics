@@ -260,7 +260,7 @@ def _import_owner(shared):
       "session_b64": "ВМІСТ файлу <phone>.session (Telethon SQLiteSession) у base64. Альтернатива — session_path.",
       "session_path": "Шлях до .session-файлу ВСЕРЕДИНІ контейнера web (напр. /app/backend/_import/79990000000.session), якщо файл уже лежить на сервері. Альтернатива — session_b64.",
       "tags": "Теги акаунта через кому (створяться, якщо немає).",
-      "proxy": "Проксі: id або частина рядка. Порожньо = призначить воркер/gateway. Без проксі акаунт не працює.",
+      "proxy": "Проксі: id або частина рядка. Порожньо = випадкова активна робоча проксі під час імпорту. Без проксі акаунт не працює.",
       "shared": "true — спільний акаунт (бачать усі); false = власник — ти. Суперюзер за замовчуванням додає спільний, решта — свій."})
 def account_import(meta_json: str, session_b64: str = "", session_path: str = "",
                    tags: str = "", proxy: str = "", shared: bool = None):
@@ -317,7 +317,7 @@ def account_import(meta_json: str, session_b64: str = "", session_path: str = ""
         fmt.section(f"Акаунт #{a.id} {'' if a.name == a.phone_number else a.name} додано", fmt.kv([
             ("телефон", common.mask_secret(a.phone_number, 5)),
             ("власник", "спільний" if a.user_id is None else a.user.username),
-            ("проксі", f"#{p.id} {common.mask_proxy(p.proxy_string)}" if p else "— (призначить gateway)"),
+            ("проксі", f"#{a.proxy_id} {common.mask_proxy(a.proxy.proxy_string)}" if a.proxy_id else "— (немає активних робочих проксі)"),
             ("теги", ", ".join(tag_names) or "—"),
             ("пристрій", f"{a.device_model} / {a.system_version} / {a.app_version}"),
             ("2FA", "є" if a.two_fa_password else "нема"),
@@ -346,7 +346,7 @@ def _find_pairs(root: str) -> tuple[list[tuple[str, str, str]], list[str]]:
       "path": "Тека В КОНТЕЙНЕРІ з парами <phone>.json + <phone>.session (рекурсивно), або шлях до .zip з ними. На сервері: покласти в /opt/tg-event-analytics/backend/_import/ → у контейнері /app/backend/_import/.",
       "zip_b64": "Альтернатива path: .zip із парами файлів у base64 (для невеликих партій).",
       "tags": "Теги для всіх акаунтів через кому.",
-      "proxy": "Одна проксі для всіх (id/рядок). Порожньо = призначить gateway (зазвичай так і треба — по проксі на акаунт).",
+      "proxy": "Одна проксі для всіх (id/рядок). Порожньо = кожному акаунту випадкова активна робоча проксі під час імпорту.",
       "shared": "true — спільні (лише суперюзер); за замовчуванням суперюзер додає спільні, решта — свої.",
       "dry_run": "true — лише показати, що знайдено і що вже є в базі, нічого не імпортувати.",
       "delete_after": "true — після успішного імпорту видалити пару файлів із теки (сесія вже в БД; лишати її на диску — зайва копія секрету)."})
@@ -448,7 +448,7 @@ def account_import_batch(path: str = "", zip_b64: str = "", tags: str = "", prox
         f"без пари (пропущено): {', '.join(orphans[:20])}" if orphans else "",
         "" if dry_run or not ok else
         f"власник: {'спільні' if owner is None else owner.username}; теги: {', '.join(tag_names) or '—'}; "
-        f"проксі: {'#' + str(p.id) if p else 'призначить gateway'}. "
+        f"проксі: {'#' + str(p.id) if p else 'випадкова активна робоча для кожного; за відсутності — без проксі'}. "
         "Далі: account_check ref=problem, account_spam_check ref=<id>.")
 
 

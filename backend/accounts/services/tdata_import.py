@@ -19,6 +19,7 @@ from telethon.sessions.sqlite import EXTENSION as _SQLITE_EXT
 from django.db import IntegrityError, transaction
 
 from ..models import AccountTag, TelegramAccount
+from .proxy_assignment import random_working_proxy
 
 # lang_pack у tdata JSON — не ISO-код мови, а назва пака Telegram Desktop;
 # "tdesktop" = базовий (англійський) пак.
@@ -104,6 +105,7 @@ def import_tdata_account(meta: dict, session_file_path: str, owner,
         api_id=str(meta.get("app_id") or "") or None,
         api_hash=meta.get("app_hash") or None,
         session_string=session_string,
+        proxy=random_working_proxy(),
         is_authenticated=True,
         two_fa_password=meta.get("twoFA") or "",
         device_model=(meta.get("device") or "")[:100],
@@ -192,5 +194,8 @@ def import_tdata_accounts_from_uploads(files, owner, tag_names=None):
         except Exception:
             result["detail"] = "Не вдалося імпортувати: перевірте JSON (поле phone) і сесію з ключем авторизації"
         else:
-            result.update(ok=True, account=account, detail="Імпортовано")
+            detail = (f"Імпортовано; призначено проксі #{account.proxy_id}"
+                      if account.proxy_id else
+                      "Імпортовано без проксі: немає активних робочих проксі")
+            result.update(ok=True, account=account, detail=detail)
     return results

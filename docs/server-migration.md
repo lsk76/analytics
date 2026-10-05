@@ -49,7 +49,7 @@ ssh deploy-analytics@<НОВИЙ_IP> 'sudo tar xzf /tmp/le.tgz -C /etc'
 ```bash
 ssh tg-analytics
 cd /opt/tg-event-analytics
-make prod-analytics-stop                      # або: docker compose -f docker-compose.prod.yml stop
+make prod-stop                      # або: docker compose -f docker-compose.prod.yml stop
 docker compose -f docker-compose.prod.yml up -d db     # база потрібна для дампа
 docker compose exec -T db sh -lc 'pg_dump -U $POSTGRES_USER $POSTGRES_DB' | gzip > /tmp/final.sql.gz
 ls -lh /tmp/final.sql.gz                      # має бути ~600 MB
@@ -65,7 +65,7 @@ cd /opt/tg-event-analytics
 docker compose -f docker-compose.prod.yml up -d db
 sleep 15
 gunzip -c /tmp/final.sql.gz | docker compose exec -T db sh -lc 'psql -U $POSTGRES_USER -d $POSTGRES_DB'
-make prod-analytics                           # підняти весь стек
+make prod                           # підняти весь стек
 ```
 
 ## 5. Перевірити (5 хвилин)

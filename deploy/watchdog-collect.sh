@@ -13,7 +13,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MAX_AGE_MIN="${MAX_AGE_MIN:-30}"
-DC="docker compose -f docker-compose.monitor.yml"
+DC="docker compose -f docker-compose.prod.yml"
 
 set -a; [[ -f .env ]] && . ./.env; set +a
 PGUSER="${POSTGRES_USER:-tg_events}"

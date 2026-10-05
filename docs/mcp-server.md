@@ -86,7 +86,7 @@ host — на docker-діях, контейнер — на інструмент�
   "env": {
     "TGA_SSH": "tg-analytics",
     "TGA_DIR": "/opt/tg-event-analytics",
-    "TGA_COMPOSE_FILES": "docker-compose.yml:docker-compose.monitor.yml",
+    "TGA_COMPOSE_FILES": "docker-compose.prod.yml",
     "TGA_READONLY": "1",
     "TGA_TIMEOUT": "300"
   }

@@ -1,7 +1,8 @@
 name: tg-event-analytics
 
-# Production: gunicorn + DEBUG=false + collectstatic, no source mount.
-# Shares the same db volume (pgdata) as dev via the shared project name.
+# Єдиний production-стек: аналітика, моніторинг, пошук, дослідження,
+# публікація, MCP і Telegram gateway. Запуск: make prod.
+# Код web/воркерів — в образі; після змін потрібен make prod (rebuild).
 
 x-worker: &worker
   image: ${WEB_IMAGE:-tg-event-analytics-web:latest}
@@ -10,6 +11,13 @@ x-worker: &worker
     POSTGRES_HOST: db
     POSTGRES_PORT: 5432
     DJANGO_DEBUG: "false"
+    # нативний краш (segfault у C-розширенні) → стеки всіх потоків у docker logs
+    PYTHONFAULTHANDLER: "1"
+    # httpx2 інакше бере truststore, а той на КОЖНОМУ рукостисканні робить
+    # set_default_verify_paths() на спільному SSLContext → гонка двох потоків
+    # у libcrypto і segfault (падав worker-info-screen: 3 запити паралельно).
+    SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    TG_GATEWAY_URL: http://tg-gateway:8010
   depends_on:
     db:
       condition: service_healthy
@@ -20,8 +28,7 @@ x-worker: &worker
 services:
   db:
     image: postgres:16-alpine
-    # 1GB /dev/shm: важкі хеш-агрегації над мультимільйонною Post (адмін-графіки,
-    # матриця) інакше спилялись з "No space left on device" на дефолтних 64MB.
+    # Важкі аналітичні агрегації потребують більше за стандартні 64 МБ.
     shm_size: "1gb"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tg_events}
@@ -29,10 +36,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    # БД НЕ публікуємо в інтернет. Доступ лише всередині compose-мережі.
-    # Для локального дебагу через SSH-тунель — bind на loopback хоста:
+    # Порт БД назовні не публікуємо (доступ лише всередині compose-мережі).
+    # Для дебагу розкоментуй:
     # ports:
-    #   - "127.0.0.1:5433:5432"
+    #   - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tg_events}"]
       interval: 5s
@@ -47,13 +54,15 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      TG_GATEWAY_URL: http://tg-gateway:8010
       DJANGO_DEBUG: "false"
     command: >
       sh -c "python manage.py collectstatic --noinput &&
              python manage.py migrate &&
              gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
-    # Bind лише на loopback хоста — назовні gunicorn НЕ світиться, його проксіює
-    # nginx (TLS-термінація). У фаєрволі відкриті тільки 80/443, не 8001.
+    # Bind ЛИШЕ на loopback хоста. Інакше Docker публікує порт власними
+    # iptables-правилами В ОБХІД UFW → gunicorn стає доступним з інтернету по
+    # незашифрованому HTTP повз nginx/TLS. Назовні працює тільки nginx (80/443).
     ports:
       - "127.0.0.1:${WEB_PORT:-8001}:8000"
     depends_on:
@@ -61,6 +70,34 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- MCP-сервер (мережевий, для інших користувачів) -----------------------
+  # Ті самі інструменти, що й локально, але через HTTPS і з OAuth: кожен виклик
+  # іде від імені Django-користувача, видимість даних — як в адмінці, роль
+  # вирішує, чи можна змінювати. Docker-інструментів тут НЕМА за побудовою:
+  # сокет усередину не прокидаємо, тож рестарт воркерів лишається локальним.
+  # Bind лише на loopback — назовні пускає nginx з TLS (див. deploy/nginx).
+  mcp:
+    image: ${WEB_IMAGE:-tg-event-analytics-web:latest}
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      TG_GATEWAY_URL: http://tg-gateway:8010
+      DJANGO_DEBUG: "false"
+    command: >
+      python manage.py run_mcp_server --host 0.0.0.0 --port 8765
+    volumes:
+      - ./backend:/app/backend
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8765}:8765"
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- stage workers (reuse the web image) ----------------------------------
   worker-collect:    { <<: *worker, command: python manage.py run_worker --stage collect }
   worker-enrich:     { <<: *worker, command: python manage.py run_worker --stage enrich }
   worker-precluster: { <<: *worker, command: python manage.py run_worker --stage precluster }
@@ -68,5 +105,108 @@ services:
   worker-dedup:      { <<: *worker, command: python manage.py run_worker --stage dedup }
   worker-review:     { <<: *worker, command: python manage.py run_worker --stage review }
 
+  # --- opinion-monitor stage workers (pipeline="monitor" tasks only) --------
+  worker-mon-collect:   { <<: *worker, command: python manage.py run_worker --stage mon_collect }
+  worker-mon-filter:    { <<: *worker, command: python manage.py run_worker --stage mon_filter }
+  worker-mon-prescreen: { <<: *worker, command: python manage.py run_worker --stage mon_prescreen }
+  worker-mon-runs:      { <<: *worker, command: python manage.py run_worker --stage mon_runs }
+  # вибірковий збір коментарів Telethon-акаунтами (черга MonitorSampleJob).
+  # ОДНА репліка: два збори в тому самому вікні зіпсували б знаменник частки,
+  # а акаунти впали б у FloodWait. Інтервал великий — черга рідка, разова.
+  worker-mon-sample:    { <<: *worker, command: python manage.py run_worker --stage mon_sample --interval 60 }
+
+  # Агент-ранер: єдиний крок конвеєра, який раніше робила людина —
+  # розмітка пачок запуску в стані awaiting_agent (services/agent_runner.py).
+  # Бінарника Claude Code в образі немає (він самодостатній, Node не потрібен),
+  # тому монтуємо з хоста; токен приходить із .env через спільний env_file,
+  # особисті ключі НЕ монтуються; код воркера береться з образу.
+  worker-mon-agent-tag:
+    <<: *worker
+    command: python manage.py run_worker --stage mon_agent_tag --interval 120
+    volumes:
+      - ${CLAUDE_BIN_HOST:-/home/deploy-analytics/.local/bin/claude}:/usr/local/bin/claude:ro
+  worker-ev-runs:       { <<: *worker, command: python manage.py run_worker --stage ev_runs }
+  worker-res-collect:   { <<: *worker, command: python manage.py run_worker --stage res_collect }
+  worker-res-filter:    { <<: *worker, command: python manage.py run_worker --stage res_filter }
+  worker-res-runs:      { <<: *worker, command: python manage.py run_worker --stage res_runs }
+
+  # --- infospace stage workers (моніторинг інформпростору) ------------------
+  # info-collect — ОДНА репліка (полінг/Telethon-сесія не терплять паралелі).
+  # НЕ масштабувати (docker compose up --scale заборонено для цього воркера).
+  worker-info-collect:     { <<: *worker, command: python manage.py run_worker --stage info_collect }
+  worker-info-screen:      { <<: *worker, command: python manage.py run_worker --stage info_screen }
+  worker-info-event:       { <<: *worker, command: python manage.py run_worker --stage info_event }
+  worker-info-retention:   { <<: *worker, command: python manage.py run_worker --stage info_retention --interval 3600 }
+  worker-info-healthcheck: { <<: *worker, command: python manage.py run_worker --stage info_healthcheck --interval 3600 }
+
+  # --- tgsearch stage workers (pipeline="tgsearch": чати через Telegram) -----
+  # tgs-stream — ОДНА репліка: стадія сама розкидає чати по акаунтах (1 чат =
+  # 1 акаунт), друга репліка лише подвоїла б запити тими самими сесіями.
+  worker-tgs-stream:  { <<: *worker, command: python manage.py run_worker --stage tgs_stream --interval 60 }
+  worker-tgs-search:  { <<: *worker, command: python manage.py run_worker --stage tgs_search --interval 600 }
+  worker-tgs-screen:  { <<: *worker, command: python manage.py run_worker --stage tgs_screen --interval 60 }
+  worker-tgs-tag:     { <<: *worker, command: python manage.py run_worker --stage tgs_tag --interval 60 }
+
+  # --- publish worker (ведення ТГ) ------------------------------------------
+  # approved-Event → AI-фільтр+рерайт → Telegram Bot API.
+  # ОДНА репліка (пейсинг відправок; кілька реплік дублювали б throttle).
+  # Потребує TELEGRAM_BOT_TOKEN в .env (або bot_token на профілі PublishConfig).
+  worker-publish:          { <<: *worker, command: python manage.py run_worker --stage publish --interval 30 }
+
+  # --- test-bot worker (accounts.TestBotJob: тестовий прогін бота через акаунт) --
+  # TASKLESS: черга з паузою 10-30 хв між акаунтами вже закладена в next-job
+  # scheduled_at, тож --interval тут — лише idle-сон між перевірками черги.
+  worker-test-bot:         { <<: *worker, command: python manage.py run_worker --stage test_bot --interval 60 }
+
+  # --- warm-up worker (accounts.WarmUpJob: підписка акаунта на випадкові канали) --
+  worker-warm-up:          { <<: *worker, command: python manage.py run_worker --stage warm_up --interval 60 }
+
+  # --- tg-gateway: ЄДИНИЙ процес із Telethon (docs/tg-gateway-plan.md) ------
+  # Усі споживачі ходять сюди по HTTP у внутрішній мережі; без ports назовні.
+  tg-gateway:
+    <<: *worker
+    command: python manage.py run_tg_gateway
+    expose: ["8010"]
+    stop_grace_period: 40s
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --- spam-status worker (accounts.TelegramAccount: обмеження через @SpamBot) --
+  worker-spam-status:      { <<: *worker, command: python manage.py run_worker --stage spam_status_check --interval 900 }
+
+  # --- tgstat: окремий stateless-сервіс TGStat (docs/tgstat-service.md) -----
+  # Власний образ (Playwright + Chrome на Xvfb), без Django і БД. Єдиний стан —
+  # профіль браузера в томі tgstat_profile (сесія tgstat). Профіль "tgstat":
+  # сам не піднімається; на проді в .env стоїть COMPOSE_PROFILES=tgstat.
+  tgstat:
+    build: ./tgstat_service
+    image: tg-event-analytics-tgstat:latest
+    profiles: ["tgstat"]
+    environment:
+      TGSTAT_BASE_URL: ${TGSTAT_BASE_URL:-https://tgstat.ru}
+      TGSTAT_CHANNEL: ${TGSTAT_CHANNEL-chrome}
+      TGSTAT_PROXY: ${TGSTAT_PROXY:-}
+      TGSTAT_VNC_PASSWORD: ${TGSTAT_VNC_PASSWORD:-}
+      TGSTAT_KEEPALIVE: ${TGSTAT_KEEPALIVE:-1800}
+    volumes:
+      - tgstat_profile:/data
+    expose: ["8020"]
+    ports:
+      # noVNC для ручного входу — ЛИШЕ loopback, доступ SSH-тунелем.
+      - "127.0.0.1:${TGSTAT_VNC_PORT:-6080}:6080"
+    shm_size: "1gb"
+    mem_limit: 2g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8020/health', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   pgdata:
+  tgstat_profile:

@@ -9,7 +9,7 @@ from django.urls import reverse
 from telethon.crypto import AuthKey
 from telethon.sessions import SQLiteSession, StringSession
 
-from accounts.models import TelegramAccount
+from accounts.models import Proxy, TelegramAccount
 from accounts.services.tdata_import import import_tdata_accounts_from_uploads
 
 pytestmark = pytest.mark.django_db
@@ -195,3 +195,42 @@ def test_archive_limits_reject_whole_archive(monkeypatch, session_bytes, limit_n
     assert len(results) == 1
     assert not results[0]["ok"]
     assert not TelegramAccount.objects.exists()
+
+
+@pytest.mark.parametrize("as_zip", [False, True])
+def test_import_assigns_only_active_working_proxy(session_bytes, as_zip):
+    working = Proxy.objects.create(proxy_string="working.test:1080")
+    Proxy.objects.create(proxy_string="disabled.test:1080", is_active=False)
+    Proxy.objects.create(proxy_string="dead.test:1080", is_working=False)
+    files = pair("proxied", session_bytes)
+    if as_zip:
+        files = [zip_upload([(file.name, file.read()) for file in files])]
+    results = import_tdata_accounts_from_uploads(files, None)
+    assert results[0]["ok"]
+    assert TelegramAccount.objects.get().proxy_id == working.pk
+    assert f"#{working.pk}" in results[0]["detail"]
+    assert working.proxy_string not in results[0]["detail"]
+
+
+def test_no_working_proxy_imports_with_warning(session_bytes):
+    Proxy.objects.create(proxy_string="dead.test:1080", is_working=False)
+    results = import_tdata_accounts_from_uploads(pair("no-proxy", session_bytes), None)
+    assert results[0]["ok"]
+    assert TelegramAccount.objects.get().proxy_id is None
+    assert "немає активних робочих проксі" in results[0]["detail"]
+
+
+@pytest.mark.parametrize("explicit_proxy", [False, True])
+def test_manual_account_add_assigns_proxy_or_keeps_selection(client, django_user_model, explicit_proxy):
+    admin = django_user_model.objects.create_superuser("proxy-admin", password="x")
+    client.force_login(admin)
+    working = Proxy.objects.create(proxy_string="working.test:1080")
+    selected = Proxy.objects.create(proxy_string="selected.test:1080", is_active=False)
+    response = client.post(reverse("admin:accounts_telegramaccount_add"), {
+        "name": "manual", "phone_number": "+72000000000",
+        "api_id": "1", "api_hash": "h", "is_active": "on",
+        "spam_status": "unknown", "user": "",
+        "proxy": str(selected.pk) if explicit_proxy else "",
+    })
+    assert response.status_code == 302
+    assert TelegramAccount.objects.get().proxy_id == (selected.pk if explicit_proxy else working.pk)

@@ -1,8 +1,9 @@
-# Деплой сервера аналітики (Ubuntu + nginx/certbot)
+# Деплой єдиного production-сервера (Ubuntu + nginx/certbot)
 
-Покроковий runbook: захардити сервер і підняти повний аналітичний стек
-(`docker-compose.prod.yml`: Postgres + gunicorn + важкі воркери
-collect→enrich→precluster→classify→dedup→review) з адмінкою за HTTPS.
+Покроковий runbook: захардити сервер і підняти єдиний стек
+`docker-compose.prod.yml`: Postgres, gunicorn, MCP, Telegram gateway, аналітика,
+моніторинг, дослідження, пошук і публікація. Адмінка працює за HTTPS.
+TGStat лишається додатковим сервісом: `COMPOSE_PROFILES=tgstat` у `.env`.
 
 **Модель безпеки:** назовні відкриті лише `22/80/443`. gunicorn (`127.0.0.1:8001`)
 і Postgres — тільки на loopback, у публічний інтернет не світяться. TLS термінує
@@ -45,9 +46,9 @@ nano .env      # заповни SECRET_KEY, POSTGRES_PASSWORD, API-ключі.
 
 ## 3. Підняти стек
 ```bash
-make prod-analytics          # build + up -d (docker-compose.prod.yml)
-make prod-analytics-ps       # усі сервіси healthy?
-make prod-analytics-logs     # web: collectstatic + migrate + gunicorn стартанув?
+make prod          # build + up -d (docker-compose.prod.yml)
+make prod-ps       # усі сервіси healthy?
+make prod-logs     # web: collectstatic + migrate + gunicorn стартанув?
 ```
 `web` на старті сам робить `collectstatic` і `migrate`. Gunicorn слухає
 `127.0.0.1:8001` — ззовні поки недоступний (це нормально, далі nginx).
@@ -117,8 +118,22 @@ crontab -e
 ## Оновлення коду згодом
 ```bash
 cd /opt/tg-event-analytics && git pull
-make prod-analytics-build            # rebuild + up (migrate виконається на старті web)
+make prod-build            # rebuild + up (migrate виконається на старті web)
 ```
+
+## Перехід із попередніх prod-конфігурацій
+
+Замість `docker-compose.monitor.yml` або поєднання `docker-compose.yml` +
+`docker-compose.monitor.yml` тепер використовується тільки `docker-compose.prod.yml`.
+Після оновлення коду виконайте `make prod`, потім `make prod-ps`.
+Попередній `down` не потрібний: назви сервісів, Docker-проєкт і томи збережені,
+тому Compose оновить наявний стек. Збережіть чинні `.env` і `COMPOSE_PROJECT_NAME`.
+Усі конвеєри запускаються разом; сервер має мати ресурси для їхнього навантаження.
+
+Код web і воркерів тепер береться з образу: після змін запускайте `make prod`
+для перебудови. `make live-restart-web` лише перезапускає наявний образ.
+Бінарник Claude для `worker-mon-agent-tag` лишається змонтованим із хоста через
+`CLAUDE_BIN_HOST`, як у попередньому стеку.
 
 ## Dev-стенд на тому ж сервері (з 2026-09-21)
 
@@ -134,7 +149,7 @@ WEB_PORT=8002  DB_PORT=5434  MCP_PORT=8766     # лише loopback, як і на
 ```
 
 Піднімаються ТІЛЬКИ `db` і `web`:
-`docker compose -f docker-compose.yml -f docker-compose.monitor.yml up -d db web`
+`docker compose -f docker-compose.prod.yml up -d db web`
 (`make live-*` працює як на проді). **НЕ піднімати `tg-gateway` і Telegram-воркери:**
 у копії БД ті самі акаунти, що на проді, другий вхід тією ж сесією з іншого процесу =
 `AuthKeyDuplicated`, сесія згорає назавжди. Тому копія знешкоджується

@@ -6,7 +6,7 @@
 #   TGSTAT_DIR   — каталог прод-стеку (дефолт /opt/tg-event-analytics).
 HOST="${TGSTAT_SSH:-tg-analytics}"
 DIR="${TGSTAT_DIR:-/opt/tg-event-analytics}"
-CMD="cd $DIR && exec docker compose -f docker-compose.yml -f docker-compose.monitor.yml exec -T tgstat python -m app.mcp_server"
+CMD="cd $DIR && exec docker compose -f docker-compose.prod.yml exec -T tgstat python -m app.mcp_server"
 if [ "$HOST" = "local" ] || [ "$HOST" = "-" ]; then
   exec sh -c "$CMD"
 fi
