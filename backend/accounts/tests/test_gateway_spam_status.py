@@ -51,3 +51,21 @@ def test_unblock_failure_propagates_without_retry():
     with pytest.raises(FloodWaitError):
         async_to_sync(_telethon.spam_status)(SimpleNamespace(client=client))
     assert client.send_message.await_count == 1
+
+
+@pytest.mark.parametrize("reply,status", [
+    ("Buone notizie, al momento non esiste alcuna limitazione sul tuo account. "
+     "Sei libero come l'aria!", "free"),
+    ("BUONE NOTIZIE, AL MOMENTO NON ESISTE ALCUNA LIMITAZIONE SUL TUO ACCOUNT.", "free"),
+    ("Good news, no limits are currently applied to your account. You’re free as a bird!", "free"),
+    ("Your account is limited until tomorrow.", "limited"),
+    ("Your account is frozen.", "frozen"),
+    ("Unrecognized reply", "unknown"),
+    ("Al momento esiste una limitazione sul tuo account.", "unknown"),
+])
+def test_spam_status_classifies_reply(monkeypatch, reply, status):
+    monkeypatch.setattr(_telethon.asyncio, "sleep", AsyncMock())
+    client, _ = client_with_reply()
+    client.get_messages.return_value = [SimpleNamespace(out=False, text=reply)]
+    result = async_to_sync(_telethon.spam_status)(SimpleNamespace(client=client))
+    assert result == {"status": status, "detail": reply[:300], "ok": True}

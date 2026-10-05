@@ -433,7 +433,9 @@ async def spam_status(ctx) -> dict:
     if not reply:
         return {"status": "unknown", "detail": "немає відповіді за 15с", "ok": False}
     low = reply.lower()
-    if "good news" in low or "no limits" in low or "free of any limitations" in low:
+    if any(marker in low for marker in (
+            "good news", "no limits", "free of any limitations",
+            "non esiste alcuna limitazione sul tuo account")):
         status = "free"
     elif "frozen" in low:
         status = "frozen"
