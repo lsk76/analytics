@@ -9,15 +9,57 @@ TelegramAccount.session_string), переносимо device-відбиток (�
 import json
 import os
 import tempfile
+import zipfile
+from pathlib import PurePosixPath
+
+from django.core.files.base import ContentFile
 
 from telethon.sessions import SQLiteSession, StringSession
 from telethon.sessions.sqlite import EXTENSION as _SQLITE_EXT
+from django.db import IntegrityError, transaction
 
 from ..models import AccountTag, TelegramAccount
 
 # lang_pack у tdata JSON — не ISO-код мови, а назва пака Telegram Desktop;
 # "tdesktop" = базовий (англійський) пак.
 _LANG_PACK_TO_CODE = {"tdesktop": "en"}
+
+_ARCHIVE_MAX_FILES = 1000
+_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
+_ARCHIVE_MAX_FILE_BYTES = 8 * 1024 * 1024
+
+
+def _archive_uploads(upload, remaining_bytes):
+    """Читаємо ZIP без розпакування на диск; імена зіставляються без папок."""
+    files = []
+    total = 0
+    with zipfile.ZipFile(upload) as archive:
+        members = archive.infolist()
+        if len(members) > _ARCHIVE_MAX_FILES:
+            raise ValueError("У ZIP забагато файлів (максимум 1000)")
+        for member in members:
+            path = PurePosixPath(member.filename.replace("\\", "/"))
+            if path.is_absolute() or ".." in path.parts:
+                raise ValueError("ZIP містить небезпечний шлях")
+            if member.is_dir() or "__MACOSX" in path.parts or path.name.startswith("._"):
+                continue
+            if path.suffix.lower() not in (".json", ".session"):
+                continue
+            if member.flag_bits & 1:
+                raise ValueError("ZIP із паролем не підтримується")
+            if member.file_size > _ARCHIVE_MAX_FILE_BYTES:
+                raise ValueError("Файл у ZIP перевищує 8 МБ")
+            total += member.file_size
+            if total > remaining_bytes:
+                raise ValueError("Розмір файлів із ZIP перевищує загальний ліміт 64 МБ")
+            with archive.open(member) as source:
+                data = source.read(_ARCHIVE_MAX_FILE_BYTES + 1)
+            if len(data) != member.file_size or len(data) > _ARCHIVE_MAX_FILE_BYTES:
+                raise ValueError("Некоректний розмір файлу у ZIP")
+            files.append(ContentFile(data, name=path.name))
+    if not files:
+        raise ValueError("У ZIP немає .json або .session файлів")
+    return files, total
 
 
 def convert_sqlite_to_string_session(session_file_path: str) -> str:
@@ -27,10 +69,15 @@ def convert_sqlite_to_string_session(session_file_path: str) -> str:
         path += _SQLITE_EXT
         os.rename(session_file_path, path)
     sqlite_sess = SQLiteSession(path)
-    string_sess = StringSession()
-    string_sess.set_dc(sqlite_sess.dc_id, sqlite_sess.server_address, sqlite_sess.port)
-    string_sess.auth_key = sqlite_sess.auth_key
-    return string_sess.save()
+    try:
+        if not sqlite_sess.auth_key:
+            raise ValueError("У сесії немає ключа авторизації")
+        string_sess = StringSession()
+        string_sess.set_dc(sqlite_sess.dc_id, sqlite_sess.server_address, sqlite_sess.port)
+        string_sess.auth_key = sqlite_sess.auth_key
+        return string_sess.save()
+    finally:
+        sqlite_sess.close()
 
 
 def import_tdata_account(meta: dict, session_file_path: str, owner,
@@ -78,6 +125,8 @@ def import_tdata_account_from_uploads(json_file, session_file, owner,
                                       tag_names: list | None = None) -> TelegramAccount:
     """json_file/session_file — Django UploadedFile (з request.FILES)."""
     meta = json.loads(json_file.read())
+    if not isinstance(meta, dict):
+        raise ValueError("JSON має бути обʼєктом із полем phone")
     with tempfile.NamedTemporaryFile(suffix=".session", delete=False) as tmp:
         for chunk in session_file.chunks():
             tmp.write(chunk)
@@ -89,3 +138,59 @@ def import_tdata_account_from_uploads(json_file, session_file, owner,
             os.remove(tmp_path)
         except OSError:
             pass
+
+
+def import_tdata_accounts_from_uploads(files, owner, tag_names=None):
+    """Зіставити завантаження за точним іменем без розширення; кожна пара незалежна.
+
+    Звіт не містить вмісту файлів або тексту винятків, які можуть містити секрети.
+    Дублікати файлів неоднозначні: таку пару не імпортуємо.
+    """
+    pairs = {}
+    results = []
+    expanded = []
+    archive_bytes = 0
+    for upload in files:
+        if os.path.splitext(upload.name)[1].lower() != ".zip":
+            expanded.append(upload)
+            continue
+        try:
+            archive_files, size = _archive_uploads(upload, _ARCHIVE_MAX_BYTES - archive_bytes)
+        except ValueError as exc:
+            results.append({"name": upload.name, "ok": False, "detail": str(exc)})
+        except Exception:
+            results.append({"name": upload.name, "ok": False,
+                            "detail": "Не вдалося прочитати ZIP: архів пошкоджений або формат не підтримується"})
+        else:
+            expanded.extend(archive_files)
+            archive_bytes += size
+    for upload in expanded:
+        stem, extension = os.path.splitext(upload.name)
+        extension = extension.lower()
+        if extension not in (".json", ".session"):
+            results.append({"name": upload.name, "ok": False,
+                            "detail": "Непідтримуваний формат: потрібні .json, .session або .zip"})
+            continue
+        pairs.setdefault(stem, {}).setdefault(extension, []).append(upload)
+
+    for stem, pair in sorted(pairs.items()):
+        result = {"name": stem, "ok": False}
+        results.append(result)
+        if any(len(uploads) > 1 for uploads in pair.values()):
+            result["detail"] = "Повторюється імʼя файлу; залиште одну JSON + session пару"
+            continue
+        missing = [ext for ext in (".json", ".session") if ext not in pair]
+        if missing:
+            result["detail"] = "Немає парного файлу: " + stem + missing[0]
+            continue
+        try:
+            with transaction.atomic():
+                account = import_tdata_account_from_uploads(
+                    pair[".json"][0], pair[".session"][0], owner, tag_names)
+        except IntegrityError:
+            result["detail"] = "Акаунт із цим номером уже є в базі або дані порушують обмеження бази"
+        except Exception:
+            result["detail"] = "Не вдалося імпортувати: перевірте JSON (поле phone) і сесію з ключем авторизації"
+        else:
+            result.update(ok=True, account=account, detail="Імпортовано")
+    return results

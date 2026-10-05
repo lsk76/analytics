@@ -4,7 +4,6 @@ import uuid
 from django.contrib import admin, messages
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
-from django.db import IntegrityError
 from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -15,7 +14,7 @@ from django.utils.html import format_html
 from analysis.multiselect_filter import MultiSelectFilter
 
 from .models import AccountTag, Proxy, TelegramAccount, TelegramBot, TestBotJob, WarmUpJob
-from .services.tdata_import import import_tdata_account_from_uploads
+from .services.tdata_import import import_tdata_accounts_from_uploads
 from .services import registry
 from .services.managed import gw_result
 from .services.translit import normalize_bot_username, slugify_bot_username
@@ -534,32 +533,35 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         return custom + super().get_urls()
 
     def import_tdata_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        results = []
         if request.method == "POST":
-            json_file = request.FILES.get("json_file")
-            session_file = request.FILES.get("session_file")
+            files = request.FILES.getlist("files")
+            # Сумісність із уже відкритою старою формою.
+            if not files:
+                files = (request.FILES.getlist("json_file")
+                         + request.FILES.getlist("session_file"))
             tag_names = [t.strip() for t in request.POST.get("tags", "").split(",") if t.strip()]
-            if not json_file or not session_file:
-                messages.error(request, "Потрібні обидва файли: JSON і .session.")
+            if not files:
+                messages.error(request, "Оберіть JSON і .session файли або ZIP-архіви для імпорту.")
             else:
-                try:
-                    account = import_tdata_account_from_uploads(
-                        json_file, session_file,
-                        None if request.user.is_superuser else request.user, tag_names,
-                    )
-                    messages.success(request,
-                                     f"✓ Акаунт «{account.name}» ({account.phone_number}) "
-                                     "імпортовано й авторизовано.")
-                    return redirect("admin:accounts_telegramaccount_change", account.pk)
-                except IntegrityError:
-                    messages.error(request, "Акаунт з таким номером телефону вже є в базі.")
-                except Exception as e:  # noqa: BLE001
-                    messages.error(request, f"Не вдалось імпортувати: {type(e).__name__}: {e}")
+                results = import_tdata_accounts_from_uploads(
+                    files, None if request.user.is_superuser else request.user, tag_names)
+                imported = sum(result["ok"] for result in results)
+                summary = f"Імпортовано: {imported}. Не імпортовано: {len(results) - imported}."
+                if imported:
+                    messages.success(request, summary)
+                else:
+                    messages.error(request, summary)
 
         ctx = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
             "existing_tags": AccountTag.objects.order_by("name"),
-            "title": "Додати акаунт через файли (tdata JSON + .session)",
+            "title": "Додати акаунти через файли (tdata JSON + .session)",
+            "results": results,
+            "tags": request.POST.get("tags", "") if request.method == "POST" else "",
         }
         return render(request, "admin/accounts/telegramaccount/import_tdata.html", ctx)
 

@@ -3,35 +3,56 @@
 <div class="breadcrumbs">
   <a href="{% url 'admin:index' %}">Головна</a> ›
   <a href="{% url 'admin:accounts_telegramaccount_changelist' %}">Telegram-акаунти</a> ›
-  Додати через файли
+  Додати акаунти через файли
 </div>
 {% endblock %}
 
 {% block content %}
-<div style="max-width:560px">
+<div style="max-width:900px">
   <p class="help">
-    Пара файлів tdata-експорту: <code>&lt;телефон&gt;.json</code> (метадані —
+    Оберіть одразу всі файли tdata-експорту, наприклад 40 файлів для 20 акаунтів.
+    Або завантажте ZIP-архіви з цими файлами. Можна обрати архіви й окремі файли разом.
+    Файли у вкладених папках архіву також зіставляються за іменем без папки.
+    Сервер збере пари за однаковим іменем: <code>&lt;телефон&gt;.json</code> (метадані —
     ім'я, api_id/api_hash, 2FA, device-відбиток) і <code>&lt;телефон&gt;.session</code>
     (Telethon SQLiteSession з живим auth_key). Сесія одразу конвертується у
     формат проєкту й позначається авторизованою — повторний вхід через код не
     потрібен.
+    Якщо парного файлу немає, імʼя повторюється або файл пошкоджений,
+    решта акаунтів усе одно імпортується.
   </p>
 
   <div style="margin:18px 0; padding:16px; border:1px solid var(--border-color,#ddd); border-radius:8px">
     <form method="post" enctype="multipart/form-data">{% csrf_token %}
-      <p><label>JSON-файл (метадані):<br>
-           <input type="file" name="json_file" accept=".json" required></label></p>
-      <p><label>.session-файл (SQLiteSession):<br>
-           <input type="file" name="session_file" accept=".session" required></label></p>
+      <p><label>Файли акаунтів або ZIP-архіви:<br>
+           <input type="file" name="files" accept=".json,.session,.zip" multiple required></label></p>
+      <p class="help">ZIP без пароля: до 1000 записів в архіві, до 8 МБ на файл і до 64 МБ файлів із усіх архівів після розпакування. Імена пар мають бути унікальними серед усіх вибраних файлів і архівів.</p>
       <p><label>Теги (через кому, необов'язково):<br>
            <input type="text" name="tags" list="existing-tags" style="width:100%"
-                  placeholder="Власник_бота"></label></p>
+                  value="{{ tags }}" placeholder="Власник_бота"></label></p>
+      <p class="help">Теги застосовуються до всіх доданих акаунтів.</p>
       <datalist id="existing-tags">
         {% for tag in existing_tags %}<option value="{{ tag.name }}">{% endfor %}
       </datalist>
-      <button type="submit" class="button default">📥 Імпортувати</button>
+      <button type="submit" class="button default">📥 Імпортувати акаунти</button>
     </form>
   </div>
+
+  {% if results %}
+  <h2>Результат імпорту</h2>
+  <table style="width:100%">
+    <thead><tr><th>Імʼя файлів</th><th>Результат</th><th>Акаунт</th></tr></thead>
+    <tbody>
+      {% for result in results %}
+      <tr>
+        <td>{{ result.name }}</td>
+        <td>{% if result.ok %}✓{% else %}⚠{% endif %} {{ result.detail }}</td>
+        <td>{% if result.account %}<a href="{% url 'admin:accounts_telegramaccount_change' result.account.pk %}">{{ result.account.name }}</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   <p><a href="{% url 'admin:accounts_telegramaccount_changelist' %}">← назад до списку акаунтів</a></p>
 </div>
