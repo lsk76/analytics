@@ -20,8 +20,10 @@ import re
 from datetime import timezone as _tz
 
 from telethon.errors import (ChannelPrivateError, FloodWaitError, TypeNotFoundError,
-                             UsernameInvalidError, UsernameNotOccupiedError)
+                             UsernameInvalidError, UsernameNotOccupiedError,
+                             YouBlockedUserError)
 from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
+from telethon.tl.functions.contacts import UnblockRequest
 from telethon.tl.types import InputPeerChannel, MessageMediaDocument, MessageMediaPhoto
 
 from . import state as st
@@ -412,10 +414,14 @@ async def join(ctx, handles: list[str]) -> dict:
 # ------------------------------------------------------------------ сервіс
 
 async def spam_status(ctx) -> dict:
-    """/start до @SpamBot — офіційний спосіб дізнатись про обмеження."""
+    """/start до @SpamBot; якщо акаунт заблокував бота — розблокувати й повторити."""
     client = ctx.client
     bot = await client.get_entity("SpamBot")
-    await client.send_message(bot, "/start")
+    try:
+        await client.send_message(bot, "/start")
+    except YouBlockedUserError:
+        await client(UnblockRequest(id=bot))
+        await client.send_message(bot, "/start")
     deadline = asyncio.get_event_loop().time() + 15
     reply = None
     while asyncio.get_event_loop().time() < deadline:

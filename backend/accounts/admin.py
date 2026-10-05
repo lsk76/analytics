@@ -415,7 +415,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         self.message_user(request, f"Готово: живих {alive}, проблемних {dead} із {alive+dead}.",
                           level=messages.INFO if not dead else messages.WARNING)
 
-    @admin.action(description="🚫 Перевірити статус (SpamBot) — обмеження на резолв/надсилання")
+    @admin.action(description="🚫 Перевірити статус (SpamBot) — розблокувати бота за потреби")
     def check_spam_status(self, request, queryset):
         """/start до @SpamBot по кожному виділеному акаунту, послідовно з паузою.
 

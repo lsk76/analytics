@@ -164,6 +164,8 @@ def account_check(ref: str, pause: float = 2.0):
 def account_spam_check(ref: str, pause: float = 2.0):
     """Запитати @SpamBot про обмеження акаунта (пише боту /start) і зберегти статус.
 
+    Якщо сам акаунт заблокував @SpamBot, розблоковує цього бота й повторює /start.
+
     Саме обмеження SpamBot-ом, а не мертва проксі, валить резолв юзернеймів.
     ref — id/номер/назва, або `all` / `active` / `problem`.
     """
