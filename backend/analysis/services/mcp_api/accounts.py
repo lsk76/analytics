@@ -175,7 +175,7 @@ def account_spam_check(ref: str, pause: float = 2.0):
     for a in accounts:
         res = gw_result(lambda: registry.get(a.id).spam_status(), status="unknown")
         a.spam_status = res.get("status", "unknown")
-        a.spam_status_detail = (res.get("detail") or "")[:300]
+        a.spam_status_detail = (res.get("detail") or res.get("error") or "Не отримано результат перевірки SpamBot")[:300]
         a.spam_status_checked_at = timezone.now()
         a.save(update_fields=["spam_status", "spam_status_detail", "spam_status_checked_at"])
         rows.append([f"#{a.id}", fmt.trunc(a.name, 20),

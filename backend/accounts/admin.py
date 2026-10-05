@@ -428,7 +428,7 @@ class TelegramAccountAdmin(admin.ModelAdmin):
         for acc in queryset.order_by("id"):
             res = gw_result(lambda: registry.get(acc.id).spam_status(), status="unknown")
             acc.spam_status = res.get("status", "unknown")
-            acc.spam_status_detail = (res.get("detail") or "")[:300]
+            acc.spam_status_detail = (res.get("detail") or res.get("error") or "Не отримано результат перевірки SpamBot")[:300]
             acc.spam_status_checked_at = _tz.now()
             acc.save(update_fields=["spam_status", "spam_status_detail",
                                     "spam_status_checked_at"])
