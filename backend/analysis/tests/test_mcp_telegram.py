@@ -130,6 +130,15 @@ def test_argument_parsing(gw, acc):
     assert "@a, t.me/b" in out
 
 
+def test_join_renders_pending_approval(gw, acc, monkeypatch):
+    monkeypatch.setattr(FakeManaged, "join", lambda self, handles: {
+        "ok": True, "joined": [], "pending": handles, "failed": [], "flood_wait": None,
+    })
+    out = mcp_api.call("tg_join", {"chats": "https://t.me/+abc"})
+    assert "очікує схвалення" in out and "https://t.me/+abc" in out
+    assert out.splitlines()[0].split(":", 1)[1].strip() == "—"
+
+
 def test_messages_render_buttons_and_full_text(gw, acc):
     gw["result"] = [{"id": 1, "date": "2026-09-23T10:00:00+00:00", "sender": "Бот", "sender_id": 3,
                      "text": "довгий " * 50, "buttons": [{"row": 0, "col": 0, "text": "Так", "url": None, "data": "y"}],

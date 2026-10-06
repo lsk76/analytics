@@ -317,6 +317,7 @@ def tg_join(chats: str, account: str = ""):
     except (RateLimited, AccountUnavailable, TelegramOpError) as e:
         raise ToolError(f"акаунт #{a.id}: {e}")
     return fmt.kv([("вступив", ", ".join(d.get("joined") or []) or "—"),
+                   ("очікує схвалення", ", ".join(d.get("pending") or []) or "—"),
                    ("не вдалось", "; ".join(d.get("failed") or []) or "—"),
                    ("flood-wait", d.get("flood_wait") or "—")])
 

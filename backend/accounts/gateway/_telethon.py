@@ -19,11 +19,13 @@ import random
 import re
 from datetime import timezone as _tz
 
-from telethon.errors import (ChannelPrivateError, FloodWaitError, TypeNotFoundError,
+from telethon.errors import (ChannelPrivateError, FloodWaitError, InviteRequestSentError,
+                             TypeNotFoundError, UserAlreadyParticipantError,
                              UsernameInvalidError, UsernameNotOccupiedError,
                              YouBlockedUserError)
 from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
 from telethon.tl.functions.contacts import UnblockRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.types import InputPeerChannel, MessageMediaDocument, MessageMediaPhoto
 
 from . import state as st
@@ -390,15 +392,24 @@ async def join(ctx, handles: list[str]) -> dict:
     """Підписати на канали з паузами (прогрів). FloodWait тут — результат, не
     виняток: частину вже підписали, і це треба повернути."""
     client = ctx.client
-    joined, failed, flood = [], [], None
+    joined, pending, failed, flood = [], [], [], None
     for handle in handles:
-        clean = handle.strip().lstrip("@").replace("https://t.me/", "").strip("/")
+        clean = re.sub(r"^(?:https?://)?(?:t\.me|telegram\.me)/", "",
+                       handle.strip()).lstrip("@").strip("/")
         if not clean:
             continue
         try:
-            entity = await client.get_entity(clean)
-            await client(JoinChannelRequest(entity))
+            if clean.startswith(("+", "joinchat/")):
+                invite_hash = clean[1:] if clean.startswith("+") else clean[len("joinchat/"):]
+                await client(ImportChatInviteRequest(invite_hash))
+            else:
+                entity = await client.get_entity(clean)
+                await client(JoinChannelRequest(entity))
             joined.append(clean)
+        except UserAlreadyParticipantError:
+            joined.append(clean)
+        except InviteRequestSentError:
+            pending.append(clean)
         except FloodWaitError as e:
             failed.append(f"{clean}: flood-wait {e.seconds}с")
             flood = int(e.seconds)
@@ -408,7 +419,8 @@ async def join(ctx, handles: list[str]) -> dict:
         except Exception as e:  # noqa: BLE001
             failed.append(f"{clean}: {type(e).__name__}: {str(e)[:80]}")
         await asyncio.sleep(random.uniform(3, 8))
-    return {"ok": True, "joined": joined, "failed": failed, "flood_wait": flood}
+    return {"ok": True, "joined": joined, "pending": pending,
+            "failed": failed, "flood_wait": flood}
 
 
 # ------------------------------------------------------------------ сервіс
