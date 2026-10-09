@@ -269,7 +269,7 @@ def published_list(config: str = "", task: str = "", status: str = "published", 
     посилання на пост у каналі; для відсіяних/збійних — причина.
 
     Повний текст поста — `published_show`. Перечергувати подію (щоб воркер
-    обробив наново) можна лише в адмінці (дія «Перечергувати»).
+    обробив наново) — `published_requeue` (аналог дії «Перечергувати»).
     """
     qs = PublishedEvent.objects.filter(config__in=_configs()) \
         .select_related("config", "event", "event__task")
@@ -320,3 +320,53 @@ def published_show(ref: str):
         ("текст поста", p.post_text or "—"),
         ("адмінка", f"/admin/analysis/publishedevent/{p.id}/change/"),
     ]))
+
+
+@tool("published_requeue", group="service", mutates=True, params={
+    "ref": 'id записів ПУБЛІКАЦІЙ із published_list (не id подій): '
+           '"#12" або "#12, #13", або рядок із JSON-масивом ["#12","#13"]. До 100.',
+    "confirm": "false — перегляд без змін; true — видалити записи публікації для повторної обробки воркером.",
+})
+def published_requeue(ref: str, confirm: bool = False):
+    """Перечергувати публікації — як дія «Перечергувати» в адмінці.
+
+    Приймає id записів із published_list, один або батч до 100. Спершу
+    confirm=false показує записи й наслідки; confirm=true видаляє їх із
+    журналу PublishedEvent. Події та профілі зберігаються. Активний профіль
+    зможе обробити події наново, якщо вони проходять його поточні фільтри.
+    Уже надіслані Telegram-пости не видаляються; повторна обробка може
+    створити повторний пост. Чужий/відсутній id скасовує весь пакет.
+    Потрібне право видалення публікацій, як для видалення записів в адмінці.
+    """
+    from django.db import transaction
+    from .batches import _batch
+
+    values = _batch(ref, "ref", csv=True)
+    ids = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip().lstrip("#").isdigit():
+            raise ToolError("ref: очікуються id записів публікацій (#123)")
+        pk = int(value.strip().lstrip("#"))
+        if pk not in ids:
+            ids.append(pk)
+    with transaction.atomic():
+        qs = PublishedEvent.objects.filter(config__in=_configs(), pk__in=ids)
+        if confirm:
+            qs = qs.select_for_update()
+        found = {p.pk: p for p in qs.select_related("config")}
+        missing = [pk for pk in ids if pk not in found]
+        if missing:
+            raise ToolError("нічого не змінено: публікації не знайдені або недоступні: "
+                            + ", ".join(f"#{pk}" for pk in missing))
+        rows = [[f"#{pk}", f"#{found[pk].event_id}", found[pk].config.name,
+                 found[pk].status, "активний" if found[pk].config.is_active else "вимкнений"]
+                for pk in ids]
+        body = fmt.table(["публікація", "подія", "профіль", "статус", "профіль увімкнений"], rows)
+        if not confirm:
+            return fmt.section(f"Перечергування: {len(ids)} записів (перегляд, без змін)", body) \
+                + "\nДля виконання повтори з confirm=true. Записи журналу буде видалено; " \
+                  "активні профілі оброблять події наново за поточними фільтрами. " \
+                  "Telegram-пости залишаються; можливі повторні публікації."
+        PublishedEvent.objects.filter(pk__in=ids).delete()
+    return fmt.section(f"Перечерговано {len(ids)} записів публікації", body) \
+        + "\nПодії збережено. Активні профілі можуть обробити їх наново за поточними фільтрами."

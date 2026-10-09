@@ -20,6 +20,7 @@ PERMS = {
     "publish_config_create": "analysis.add_publishconfig",
     "publish_config_update": "analysis.change_publishconfig",
     "published_list": "analysis.view_publishedevent", "published_show": "analysis.view_publishedevent",
+    "published_requeue": "analysis.delete_publishedevent",
     # --- акаунти й проксі (проксі не мають окремої групи — йдуть за акаунтами)
     "accounts_list": V_ACC, "account_show": V_ACC, "account_check": V_ACC, "account_dialogs": V_ACC,
     "account_jobs": "accounts.view_warmupjob",
