@@ -430,6 +430,9 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `source_stats` | **внесок кожного джерела** за період: постів, скільки дали подію (%), подій, скільки подій тримається ЛИШЕ на ньому. Групує по `Post.source`, тож працює для rss/web так само, як для telegram | task, days=30, date_from, date_to, kind, source, min_posts, order=posts&#124;events&#124;sole&#124;name, limit=40 |
 | `source_update` **[пише]** | активність / інтервал / «опитати зараз» / скид курсора. `ref` приймає СПИСОК через кому (стеля 200) — «вимкнути ці 20 джерел» це один виклик | ref, is_active, poll_interval_sec, poll_now, reset_cursor, account, confirm |
 | `source_add` **[пише]** | створити джерело за посиланням (`Source.ensure`: рядок довідника + розклад) і одразу підписати задачу | url, kind='', task='', name, region, language, poll_interval_sec, account |
+| `sources_get_batch` | картки до 100 видимих джерел: канал, тип, полінг, health/якість і лише свої підписки | refs: рядок через кому або рядок із JSON-масивом id/URL/однозначних назв |
+| `sources_add_batch` **[пише, mcp:create]** | до 100 джерел, кожне зі своїми параметрами й infospace-задачею; повтор не дублює | items: рядок із JSON-масивом параметрів `source_add` |
+| `sources_update_batch` **[пише, mcp:write]** | до 100 джерел, кожне зі своїми правками; ref позначає одне джерело | items: рядок із JSON-масивом параметрів `source_update` |
 | `source_subscribe` **[пише]** | підписати задачу на джерело / вимкнути підписку / пріоритет; `ref` приймає СПИСОК через кому (стеля 200) | ref, task, active=True, priority=0 |
 | `events_stats` | зріз подій: day/week/month/region/tag:&lt;кат&gt;/task | task, days=14, group_by='day', region, limit=20, review_status='approved' |
 | `events_list` | список подій із фільтрами адмінки; `full=true` — повні описи, усі теги й ПОСИЛАННЯ на пости замість таблиці з обрізаними полями; колонка id — подія, колонка пост — id найранішого поста (для prompt_try/posts_retag). Дефолт — «Схвалено» за 30 дн | task, days=30, date_from, date_to, review_status='approved', region, settlement, tag, query, channel, source, uniq, min_channels, min_reach, order, limit=30, full, chars, post_links=5 |
@@ -481,6 +484,34 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 `region`, `settlement`, `focus` зі значенням `"-"` очищають поле,
 `subscribers=0` обнуляє аудиторію. Теми передаються рядком через кому,
 а `discusses_problems` — JSON boolean (`true`/`false`).
+
+### Батчі джерел
+
+Джерела мають той самий формат батчів, що й канали: `items` — **рядок** із
+JSON-масивом обʼєктів. Помилка відкочує весь відповідний запис (включно зі
+створеним каналом і підпискою), решта виконується у порядку вводу. Результат
+містить номер запису та id джерела або причину помилки. Пропущені поля й
+`null` при редагуванні не змінюються. Виклики журналює стандартний аудит MCP.
+
+```json
+{"items": "[{\"url\":\"https://example.org/feed\",\"kind\":\"rss\",\"task\":\"news\"},{\"url\":\"@alpha\",\"task\":\"news\"}]"}
+```
+
+```json
+{"items": "[{\"ref\":\"#12\",\"is_active\":false},{\"ref\":\"#13\",\"poll_interval_sec\":900,\"poll_now\":true}]"}
+```
+
+```json
+{"refs": "#12, #13"}
+```
+
+У JSON-масиві `refs` URL може містити кому; у CSV-рядку кома розділяє записи.
+Картки та підписки звужуються через `access.py`; чужі джерела недоступні,
+вимкнена власна підписка не приховує картку. Редагування має чинні обмеження
+`source_update`, а повторне додавання не дозволяє міняти інтервал/акаунт
+чужого джерела. Скидання курсора (`reset_cursor=true`) у батчі з кількома
+записами потребує `confirm=true` у відповідному записі. Без активної підписки
+infospace-задачі воркер джерело не опитує; сам батч дані не збирає.
 
 ### Що з парсингів зламалось — `parsers_health`
 
