@@ -450,8 +450,37 @@ $0.10. Решта операторів і межі — в описі `tz_find` �
 | `tag_update` **[пише]** | перейменувати або перенести в іншу категорію | ref, name, category |
 | `tag_delete` **[пише]** | видалити тег; якщо висить на подіях/постах — лише confirm=true | ref, confirm=False |
 | `channels_find` | знайти канал/чат у довіднику; **кілька через кому за один виклик** (`"sotavision, @theins"`) — із розбивкою «знайдено / немає» | query, limit=20 |
-| `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language |
+| `channel_add` **[пише]** | додати рядок довідника за посиланням/@username (ідемпотентно; дописує порожні поля й теми) | url, title, region, topics, chat_type, language, subscribers, audience_note |
 | `channel_update` **[пише]** | теми (теги) +/−, назва, регіон, нас. пункт, тип, фокус, **аудиторія** | ref, add_topics, remove_topics, title, region, settlement, chat_type, focus, discusses_problems, subscribers, audience_note |
+| `channels_get_batch` | повні картки до 100 каналів у порядку вводу; для відсутнього/неоднозначного — окрема помилка | refs: рядок через кому або рядок із JSON-масивом id/@username/посилань/однозначних назв |
+| `channels_add_batch` **[пише, mcp:create]** | додати до 100 каналів; повтор не дублює, дописує порожні поля й теми | items: рядок із JSON-масивом обʼєктів із параметрами `channel_add` |
+| `channels_update_batch` **[пише, mcp:write]** | редагувати до 100 каналів; кожен має власний набір правок | items: рядок із JSON-масивом обʼєктів із параметрами `channel_update` |
+
+Батчі працюють лише з довідником у БД, без запитів до Telegram/TeleZip.
+Права Django: `view_channel` / `add_channel` / `change_channel` відповідно;
+режим `MCP_READONLY=1` блокує обидва інструменти запису. Кожен запис має
+свій номер і результат; помилка відкочує лише цей запис, решта виконується.
+Повторні посилання обробляються у порядку вводу. Операція та її вхідні
+параметри потрапляють у стандартний аудит MCP; часткові помилки видно у відповіді.
+
+Приклади аргументів MCP (вкладений JSON передається **рядком**):
+
+```json
+{"refs": "#123, @beta, https://t.me/gamma"}
+```
+
+```json
+{"items": "[{\"url\":\"@alpha\",\"title\":\"Альфа\",\"topics\":\"новини, політика\"},{\"url\":\"@beta\",\"region\":\"Дагестан\"}]"}
+```
+
+```json
+{"items": "[{\"ref\":\"#123\",\"add_topics\":\"політика\",\"subscribers\":10000},{\"ref\":\"@beta\",\"region\":\"-\",\"discusses_problems\":false}]"}
+```
+
+Для редагування пропущене поле або `null` означає «не змінювати»;
+`region`, `settlement`, `focus` зі значенням `"-"` очищають поле,
+`subscribers=0` обнуляє аудиторію. Теми передаються рядком через кому,
+а `discusses_problems` — JSON boolean (`true`/`false`).
 
 ### Що з парсингів зламалось — `parsers_health`
 

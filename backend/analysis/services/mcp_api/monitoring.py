@@ -2093,7 +2093,7 @@ def channels_find(query: str, limit: int = 20):
         fmt.section(f"Довідник: знайдено {len(rows)} із {len(terms)} запитів",
                     fmt.table(["запит"] + CHANNEL_COLS, rows) if rows else "нічого"),
         f"НЕМАЄ в довіднику ({len(missing)}): " + ", ".join(missing) if missing else "",
-        "Додати відсутні: channel_add (по одному) або source_add, якщо їх треба ще й опитувати."
+        "Додати відсутні: channels_add_batch або channel_add; source_add, якщо їх треба ще й опитувати."
         if missing else "")
 
 

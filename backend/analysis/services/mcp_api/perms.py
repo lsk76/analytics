@@ -64,6 +64,9 @@ PERMS = {
     "tag_delete": "analysis.delete_tag",
     "channels_find": "analysis.view_channel", "channel_add": "analysis.add_channel",
     "channel_update": "analysis.change_channel",
+    "channels_get_batch": "analysis.view_channel",
+    "channels_add_batch": "analysis.add_channel",
+    "channels_update_batch": "analysis.change_channel",
     # зведення «що з парсингів зламалось» — те саме право, що й список джерел
     "parsers_health": "analysis.view_source",
     # --- TGStat: розвідка каналів/чатів через сервіс tgstat.

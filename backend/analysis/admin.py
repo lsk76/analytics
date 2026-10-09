@@ -1975,6 +1975,7 @@ class ChannelAdmin(admin.ModelAdmin):
 
     list_display = ("title_link", "url_short", "platform", "subscribers", "region_subject",
                     "chat_type", "msgs_per_day", "topics_display")
+    list_display_links = ("title_link",)
     # Порядок навмисний: суб'єкт (розгорнутий) -> тип -> тема -> підписники ->
     # повідомлень за добу, далі другорядне. Мову прибрано — не використовувалась.
     list_filter = ("platform", ChannelSubjectFilter, ChannelTypeFilter, ChannelTopicFilter,
@@ -1999,25 +2000,8 @@ class ChannelAdmin(admin.ModelAdmin):
 
     @admin.display(description="Назва", ordering="title")
     def title_link(self, obj):
-        """Назва веде в САМ чат (нова вкладка), а не в картку — у списку частіше
-        треба заглянути в чат. Картка лишається за юзернеймом у першій колонці.
-
-        `linked:<канал>` — це група обговорення без власного юзернейма, публічного
-        посилання в неї немає, тому t.me/c/<id> (відкриється лише учаснику).
-        `+<hash>` — навпаки, сам по собі інвайт-лінк.
-        """
-        name = obj.title or obj.username or f"#{obj.pk}"
-        u = obj.username or ""
-        if u.startswith("+"):
-            url = f"https://t.me/{u}"
-        elif u and not u.startswith("linked:"):
-            url = f"https://t.me/{u}"
-        elif obj.tg_id:
-            url = f"https://t.me/c/{obj.tg_id}"
-        else:
-            return name
-        return format_html('<a href="{}" target="_blank" rel="noopener noreferrer">{}</a>',
-                           url, name)
+        """Django admin додає до назви посилання на картку каналу."""
+        return obj.title or obj.username or f"#{obj.pk}"
 
     @admin.display(description="Теми")
     def topics_display(self, obj):
